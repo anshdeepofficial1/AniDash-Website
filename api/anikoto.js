@@ -1,5 +1,4 @@
 const DEFAULT_SITE_BASES = [
-  "https://anikoto.pw",
   "https://anikototv.to",
   "https://anikoto.cz",
   "https://anikoto.me",
