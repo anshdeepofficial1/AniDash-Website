@@ -232,58 +232,38 @@
     if (input) input.focus({ preventScroll: true });
   }
 
+  const BUILTIN_PROVIDERS = [
+    { id: "justanime", name: "JustAnime", language: "SUB / DUB", description: "Momo, Zoko, Gigi and Neko servers" },
+    { id: "hianime", name: "HiAnime", language: "SUB / DUB", description: "HiAnime API and AniList-mapped episode fallback" },
+    { id: "anikoto", name: "AniKoto", language: "SUB / DUB", description: "AniKoto catalogue and Kwik stream extraction" }
+  ];
+
   function currentProviders() {
-    return state.providers || [];
+    return BUILTIN_PROVIDERS;
   }
 
   async function loadProviders() {
-    if (store.providerManifest && Array.isArray(store.providerManifest.providers)) {
-      state.providers = store.providerManifest.providers;
-      return state.providers;
-    }
-    try {
-      const response = await fetch("/sources.json", { cache: "no-store" });
-      if (!response.ok) throw new Error("Source manifest unavailable");
-      const data = await response.json();
-      state.providers = Array.isArray(data.providers) ? data.providers : [];
-    } catch (_) {
-      state.providers = [];
-    }
+    state.providers = BUILTIN_PROVIDERS;
     return state.providers;
   }
 
-  function expandEndpoint(provider, key, values) {
-    const endpoint = provider && provider.endpoints && provider.endpoints[key];
-    if (!endpoint) return null;
-    let path = String(endpoint);
-    Object.keys(values || {}).forEach(name => {
-      path = path.replace(new RegExp("\\{" + name + "\\}", "g"), encodeURIComponent(String(values[name] == null ? "" : values[name])));
+  async function providerGet(provider, action, values) {
+    const params = new URLSearchParams({ action: action });
+    Object.entries(values || {}).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== "") params.set(key, String(value));
     });
-    try {
-      return /^https:\/\//i.test(path) ? path : new URL(path, provider.baseUrl.endsWith("/") ? provider.baseUrl : provider.baseUrl + "/").toString();
-    } catch (_) {
-      return null;
+    const response = await fetch("/api/" + encodeURIComponent(provider.id) + "?" + params.toString(), {
+      method: "GET",
+      headers: { "Accept": "application/json" },
+      cache: action === "streams" ? "no-store" : "default"
+    });
+    let payload;
+    try { payload = await response.json(); }
+    catch (_) { throw new Error(provider.name + " returned an invalid response."); }
+    if (!response.ok || payload?.error) {
+      throw new Error(payload?.error || (provider.name + " returned HTTP " + response.status));
     }
-  }
-
-  async function providerGet(provider, key, values) {
-    const url = expandEndpoint(provider, key, values);
-    if (!url) return null;
-    const response = await fetch(url, { headers: { "Accept": "application/json" } });
-    if (!response.ok) throw new Error(provider.name + " returned " + response.status);
-    return response.json();
-  }
-
-  function extractArray(payload, names) {
-    if (Array.isArray(payload)) return payload;
-    const paths = names || ["results", "items", "list", "episodes", "sources", "data"];
-    for (const name of paths) {
-      if (Array.isArray(payload && payload[name])) return payload[name];
-      if (payload && payload.data && Array.isArray(payload.data[name])) return payload.data[name];
-      if (payload && payload.result && Array.isArray(payload.result[name])) return payload.result[name];
-    }
-    if (payload && Array.isArray(payload.data)) return payload.data;
-    return [];
+    return payload;
   }
 
   function normaliseResult(item) {
@@ -310,39 +290,55 @@
   }
 
   async function findProviderMatches(media) {
-    await loadProviders();
-    const providers = currentProviders().filter(provider => provider && provider.endpoints && provider.endpoints.search && provider.baseUrl);
+    const providers = await loadProviders();
     const found = await Promise.all(providers.map(async provider => {
       try {
         const payload = await providerGet(provider, "search", {
-          query: titleOf(media), page: 1, anilistId: media.id, malId: media.idMal, title: titleOf(media)
+          query: titleOf(media),
+          page: 1,
+          anilistId: media.id,
+          malId: media.idMal,
+          title: titleOf(media)
         });
-        const results = extractArray(payload, ["results", "items", "list", "anime", "data"]).map(normaliseResult).filter(item => item.id);
-        const best = results.map(item => ({ item, score: titleMatchScore(titleOf(media), item.title) }))
-          .sort((a, b) => b.score - a.score)[0];
-        return best && best.score >= 45 ? { provider, animeId: String(best.item.id), item: best.item, score: best.score } : null;
+        const results = extractArray(payload, ["results", "items", "list", "anime", "data"])
+          .map(normaliseResult).filter(item => item.id);
+        const best = results.map(item => ({
+          item,
+          score: titleMatchScore(titleOf(media), item.title)
+        })).sort((a, b) => b.score - a.score)[0];
+        return best && best.score >= 45
+          ? { provider, animeId: String(best.item.id), item: best.item, score: best.score }
+          : { provider, error: "No confident title match was found.", score: 0 };
       } catch (error) {
         return { provider, error: error.message, score: 0 };
       }
     }));
-    return found.filter(Boolean).sort((a, b) => b.score - a.score);
+    return found;
   }
 
   async function episodesFromMatch(match, media) {
-    if (!match || !match.provider.endpoints || !match.provider.endpoints.episodes) return [];
+    if (!match || !match.provider) return [];
     const payload = await providerGet(match.provider, "episodes", {
-      id: match.animeId, anilistId: media.id, malId: media.idMal, title: titleOf(media), page: 1
+      id: match.animeId,
+      anilistId: media.id,
+      malId: media.idMal,
+      title: titleOf(media),
+      page: 1
     });
     const list = extractArray(payload, ["episodes", "items", "results", "list", "data"]);
-    return list.map((item, index) => ({
-      id: item.id || item.episodeId || item.url || String(item.number || index + 1),
-      number: Number(item.number || item.episode || item.episodeNumber || index + 1),
-      title: item.title || item.name || "Episode " + Number(item.number || item.episode || item.episodeNumber || index + 1),
-      thumbnail: item.thumbnail || item.image || item.snapshot || "",
-      date: item.date || item.airDate || item.aired || "",
-      isFiller: item.isFiller === true || item.filler === true || item.filler === 1,
-      raw: item
-    })).sort((a, b) => a.number - b.number);
+    return list.map((item, index) => {
+      const number = Number(item.number || item.episode || item.episodeNumber || index + 1);
+      return {
+        id: String(item.id || item.episodeId || item.url || number),
+        number: number,
+        title: item.title || item.name || "Episode " + number,
+        thumbnail: item.thumbnail || item.image || item.snapshot || "",
+        date: item.date || item.airDate || item.aired || "",
+        isFiller: item.isFiller === true || item.filler === true || item.filler === 1,
+        raw: item
+      };
+    }).filter(item => Number.isFinite(item.number) && item.number > 0)
+      .sort((a, b) => a.number - b.number);
   }
 
   function generatedEpisodes(media) {
@@ -482,7 +478,7 @@
       streams: [],
       servers: [],
       tracks: [],
-      selectedServer: "default",
+      selectedServer: state.selectedMatch && state.selectedMatch.provider ? ({ justanime: "auto", hianime: "hd-1", anikoto: "anikoto" }[state.selectedMatch.provider.id] || "auto") : "auto",
       category: "sub",
       intro: null,
       outro: null,
@@ -546,38 +542,75 @@
 
   async function loadPlayerStreams(token) {
     const player = state.player;
-    if (!player || !player.match || !player.match.provider.endpoints.streams) {
-      showPlayerOverlay("No stream source connected", "Connect a provider in Settings → Sources, or paste an authorised MP4/HLS URL.", true);
+    if (!player || !player.match || !player.match.provider) {
+      showPlayerOverlay("No built-in source matched", "Try another provider on the anime details page, or paste an authorised MP4/HLS link.", true);
       return;
     }
-    showPlayerOverlay("Resolving episode", "Asking " + player.match.provider.name + " for available servers…", false);
+    const provider = player.match.provider;
+    const common = {
+      id: player.match.animeId,
+      episodeId: player.episode.id,
+      episode: player.episode.number,
+      anilistId: player.media.id,
+      malId: player.media.idMal,
+      category: player.category || "sub"
+    };
+    const defaults = {
+      justanime: "auto",
+      hianime: "hd-1",
+      anikoto: "anikoto"
+    };
+    showPlayerOverlay("Resolving episode", "Loading " + provider.name + " servers and checking playable streams…", false);
     try {
-      const payload = await providerGet(player.match.provider, "streams", {
-        id: player.match.animeId,
-        episodeId: player.episode.id,
-        episode: player.episode.number,
-        anilistId: player.media.id,
-        malId: player.media.idMal,
-        server: player.selectedServer || "default",
-        category: player.category || "sub"
+      let serverPayload = null;
+      try {
+        serverPayload = await providerGet(provider, "servers", {
+          ...common,
+          server: player.selectedServer || defaults[provider.id]
+        });
+      } catch (_) {}
+      if (token !== state.token) return;
+
+      let servers = extractArray(serverPayload, ["servers", "serverList", "data.servers"]);
+      if (!servers.length) {
+        servers = provider.id === "justanime"
+          ? [{ id: "auto", name: "Automatic (Best available)" }]
+          : provider.id === "anikoto"
+          ? [{ id: "anikoto", name: "AniKoto • Kwik" }]
+          : [
+              { id: "aniwave", name: "AniWave • HLS" },
+              { id: "hianime-hd-2", name: "HiAnime HD-2" },
+              { id: "megaplay", name: "MegaPlay" }
+            ];
+      }
+      player.servers = servers;
+
+      const selectedExists = servers.some(server => String(server.id || server.serverName || "") === String(player.selectedServer));
+      if (!selectedExists) {
+        const preferred = servers.find(server => String(server.id || server.serverName || "") === defaults[provider.id]);
+        player.selectedServer = String((preferred || servers[0]).id || (preferred || servers[0]).serverName || defaults[provider.id]);
+      }
+
+      const payload = await providerGet(provider, "streams", {
+        ...common,
+        server: player.selectedServer || defaults[provider.id]
       });
       if (token !== state.token) return;
-      const servers = extractArray(payload, ["servers", "serverList"]);
-      const streams = extractArray(payload, ["sources", "streams", "videos", "data"]);
-      player.servers = servers;
+      const streams = extractArray(payload, ["sources", "streams", "videos", "data.sources"]);
       player.streams = streams;
-      player.tracks = extractArray(payload, ["tracks", "subtitles"]);
+      player.tracks = extractArray(payload, ["tracks", "subtitles", "data.tracks"]);
       player.intro = payload && payload.intro || null;
       player.outro = payload && payload.outro || null;
       renderPlayerOptions();
       if (streams.length) {
-        attachStream(streams[0].url || streams[0].src || streams[0].file, streams[0], player.tracks);
+        const first = streams[0];
+        attachStream(first.url || first.src || first.file, first, player.tracks);
       } else {
-        showPlayerOverlay("No playable stream returned", "The source answered, but it did not return a browser-compatible MP4 or HLS URL.", true);
+        showPlayerOverlay("No playable stream returned", provider.name + " responded, but did not return a browser-compatible MP4 or HLS URL.", true);
       }
     } catch (error) {
       if (token !== state.token) return;
-      showPlayerOverlay("Source could not be reached", error.message + " You can retry with another source or paste a direct link.", true);
+      showPlayerOverlay(provider.name + " could not resolve this episode", error.message + " Try another built-in source or paste an authorised stream link.", true);
       renderPlayerOptions();
     }
   }
@@ -721,7 +754,7 @@
       $("#provider-count").textContent = providers.length + (providers.length === 1 ? " source configured" : " sources configured");
     });
     $("#view").innerHTML = pageHead("PREFERENCES", "Settings", "Manage source connectors, playback defaults and the app experience.") +
-      '<div class="settings-grid"><section class="settings-card"><div class="eyebrow">STREAMING</div><h3>Source connectors</h3><p id="provider-count">Checking configured sources…</p><p>Connect JSON API providers for anime search, episode lists and stream resolution. The source manifest is kept in this browser when saved here.</p><button class="btn btn-primary" data-open-sources>Manage sources</button></section>' +
+      '<div class="settings-grid"><section class="settings-card"><div class="eyebrow">STREAMING</div><h3>Built-in sources</h3><p id="provider-count">JustAnime · HiAnime · AniKoto</p><p>AniDash ships with three native source providers. Their search, episodes, SUB/DUB servers and stream resolvers are maintained with the website. No extensions or user source manifests are required.</p><button class="btn btn-primary" data-open-sources>View built-in sources</button></section>' +
       '<section class="settings-card"><div class="eyebrow">LOCAL DATA</div><h3>Your watch activity</h3><p>Watchlist and playback progress are stored on this device. Clearing browser storage will remove this local data.</p><button class="btn btn-quiet" data-clear-history>Clear watch history</button><button class="btn btn-quiet" data-clear-watchlist style="margin-left:6px">Clear watchlist</button></section>' +
       '<section class="settings-card"><div class="eyebrow">INSTALLATION</div><h3>Install AniDash</h3><p>Add the website to your device home screen or desktop app launcher for an app-like experience.</p><button class="btn btn-secondary" data-install>Installation guide</button></section>' +
       '<section class="settings-card"><div class="eyebrow">CATALOGUE</div><h3>AniList + MAL metadata</h3><p>Anime details, artwork, ratings and MyAnimeList IDs are read from the AniList public catalogue. No account sign-in is required for discovery.</p><a class="btn btn-quiet" href="https://docs.anilist.co/guide/graphql/" target="_blank" rel="noopener">API information ↗</a></section></div>';
@@ -738,12 +771,11 @@
   }
 
   function openSourcesModal() {
-    loadProviders().then(providers => {
-      const manifest = store.providerManifest || { version: 1, providers: providers };
-      openModal('<div class="modal-head"><div><div class="eyebrow">SOURCE CONNECTORS</div><h2>Connect your sources</h2><p>Paste your AniDash-compatible JSON source manifest. Sources must provide searchable anime, episode IDs and browser-playable stream URLs.</p></div><button class="close-modal" data-close>×</button></div>' +
-        '<div class="form-field"><label for="source-config">Provider manifest (JSON)</label><textarea id="source-config" class="textarea-control" spellcheck="false">' + escapeHtml(JSON.stringify(manifest, null, 2)) + '</textarea><div class="form-help">Use the format from <code>sources.example.json</code>. This saves locally for this browser; edit the deployed watch-web/sources.json file to publish a source to everyone.</div></div>' +
-        '<div class="modal-actions"><button class="btn btn-quiet" data-reset-sources>Reset local override</button><button class="btn btn-primary" data-save-sources>Save source manifest</button></div>');
-    });
+    const providers = BUILTIN_PROVIDERS;
+    openModal('<div class="modal-head"><div><div class="eyebrow">ANIDASH BUILT-IN PROVIDERS</div><h2>Three native anime sources</h2><p>These sources are built into AniDash Watch. Their APIs are called through this website’s backend; viewers do not need to install or import extensions.</p></div><button class="close-modal" data-close>×</button></div>' +
+      '<div class="settings-grid">' + providers.map(provider =>
+        '<section class="settings-card"><div class="eyebrow">' + escapeHtml(provider.language) + '</div><h3>' + escapeHtml(provider.name) + '</h3><p>' + escapeHtml(provider.description) + '</p></section>'
+      ).join("") + '</div><div class="notice" style="margin-top:14px">A source can occasionally be unavailable when its upstream website or API is down. AniDash reports that failure instead of pretending a stream is ready.</div><div class="modal-actions"><button class="btn btn-primary" data-close>Done</button></div>');
   }
 
   function openDirectModal() {
@@ -913,17 +945,17 @@
     if (target.hasAttribute("data-save-sources")) {
       try {
         const manifest = JSON.parse($("#source-config").value);
-        if (!manifest || !Array.isArray(manifest.providers)) throw new Error("The manifest must contain a providers array.");
+        if (!manifest || !Array.isArray(manifest.providers)) throw new Error("Built-in sources are managed by AniDash.");
         for (const provider of manifest.providers) {
-          if (!provider.id || !provider.name || !provider.baseUrl || !provider.endpoints) throw new Error("Each provider needs id, name, baseUrl and endpoints.");
+          if (!provider.id || !provider.name || !provider.baseUrl || !provider.endpoints) throw new Error("Only AniDash built-in providers are supported.");
           const base = new URL(provider.baseUrl);
-          if (base.protocol !== "https:" && base.hostname !== "localhost") throw new Error("Provider base URLs must use HTTPS.");
+          if (base.protocol !== "https:" && base.hostname !== "localhost") throw new Error("Only AniDash built-in providers are supported.");
         }
         store.providerManifest = manifest;
         persist();
         state.providers = manifest.providers;
         closeModal();
-        toast("Source manifest saved for this browser.");
+        toast("AniDash uses its built-in providers; custom manifests are not enabled.");
         if (state.route === "/settings") renderSettings();
       } catch (error) { toast(error.message); }
       return;
@@ -933,7 +965,7 @@
       persist();
       state.providers = null;
       closeModal();
-      toast("Local source override removed.");
+      toast("AniDash built-in providers are managed by the website.");
       if (state.route === "/settings") renderSettings();
       return;
     }
