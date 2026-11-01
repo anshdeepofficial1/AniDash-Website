@@ -557,25 +557,48 @@
       }
     }));
 
-    // If no native provider can supply an episode list, preserve Android's
-    // AniList mapping fallback for display. This mapped HiAnime entry is kept
-    // as a last-resort stream candidate only; it never blocks other providers.
+    // Always try the independent AniList episode-map endpoint before synthesising
+    // an episode list from the catalogue's episode count. This does not depend on
+    // the legacy HiAnime catalogue API being online.
     const hasEpisodes = checked.some(match => match && match.episodesReady);
-    if (!hasEpisodes) {
+    if (!hasEpisodes && media.id != null) {
       const hianime = BUILTIN_PROVIDERS.find(provider => provider.id === "hianime");
-      if (hianime) {
-        const mappedMatch = {
-          provider: hianime,
-          animeId: String(media.id),
-          item: { id: String(media.id), title: titleOf(media) },
-          score: 0,
-          mapped: true,
-          idSource: "AniList"
-        };
-        try {
-          const episodes = await episodesFromMatch(mappedMatch, media);
-          if (episodes.length) checked.push({ ...mappedMatch, episodes, episodesReady: true, mappingOnly: true });
-        } catch (_) {}
+      try {
+        const response = await fetch("/api/episode-map?anilistId=" + encodeURIComponent(String(media.id)), {
+          headers: { Accept: "application/json" },
+          cache: "default"
+        });
+        const payload = await response.json();
+        const mappedEpisodes = response.ok && Array.isArray(payload?.episodes)
+          ? payload.episodes.map(item => ({
+              id: String(item.id || item.number),
+              number: Number(item.number),
+              title: item.title || "Episode " + item.number,
+              thumbnail: item.thumbnail || "",
+              date: item.date || "",
+              isFiller: item.isFiller === true,
+              mapped: true,
+              raw: item
+            })).filter(item => Number.isFinite(item.number) && item.number > 0)
+          : [];
+        if (mappedEpisodes.length && hianime) {
+          const mappedMatch = {
+            provider: hianime,
+            animeId: String(media.id),
+            item: { id: String(media.id), title: titleOf(media) },
+            score: 0,
+            mapped: true,
+            mappingOnly: true,
+            idSource: "AniList",
+            episodes: mappedEpisodes,
+            episodesReady: true
+          };
+          const existingIndex = checked.findIndex(match => match?.provider?.id === "hianime");
+          if (existingIndex >= 0) checked[existingIndex] = mappedMatch;
+          else checked.push(mappedMatch);
+        }
+      } catch (_) {
+        // Continue to the AniList episode-count fallback below.
       }
     }
 
