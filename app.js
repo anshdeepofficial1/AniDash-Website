@@ -291,18 +291,31 @@
 
   async function findProviderMatches(media) {
     const providers = await loadProviders();
+    const rawTitles = media && media.title ? [
+      media.title.english,
+      media.title.romaji,
+      media.title.native,
+      titleOf(media)
+    ] : [titleOf(media)];
+    const terms = [...new Set(rawTitles.map(value => String(value || "").trim()).filter(Boolean))].slice(0, 3);
     const found = await Promise.all(providers.map(async provider => {
       try {
-        const payload = await providerGet(provider, "search", {
-          query: titleOf(media),
+        const payloads = await Promise.all(terms.map(query => providerGet(provider, "search", {
+          query: query,
           page: 1,
           anilistId: media.id,
           malId: media.idMal,
           title: titleOf(media)
+        }).catch(() => null)));
+        const results = payloads.flatMap(payload =>
+          extractArray(payload, ["results", "items", "list", "anime", "data"])
+        ).map(normaliseResult).filter(item => item.id);
+        const unique = new Map();
+        results.forEach(item => {
+          const key = String(item.id);
+          if (!unique.has(key)) unique.set(key, item);
         });
-        const results = extractArray(payload, ["results", "items", "list", "anime", "data"])
-          .map(normaliseResult).filter(item => item.id);
-        const best = results.map(item => ({
+        const best = [...unique.values()].map(item => ({
           item,
           score: titleMatchScore(titleOf(media), item.title)
         })).sort((a, b) => b.score - a.score)[0];
@@ -541,9 +554,9 @@
       '<div class="player-layout"><section><div class="video-frame"><video id="anime-video" controls playsinline webkit-playsinline preload="metadata"></video><div class="player-overlay" id="player-overlay"><div class="loader"></div><strong>Preparing your player</strong><p>Checking the connected source and browser playback support…</p></div></div>' +
       '<div class="player-under"><div><h2>' + escapeHtml(episode.title) + '</h2><p>' + escapeHtml(titleOf(media)) + ' · Episode ' + escapeHtml(episode.number) + '</p></div><div class="player-controls"><button class="btn btn-quiet" data-prev ' + (hasPrev ? "" : "disabled") + '>← Previous</button><button class="btn btn-quiet" data-next ' + (hasNext ? "" : "disabled") + '>Next →</button><button class="btn btn-secondary" data-open-direct>Paste stream link</button></div></div>' +
       '<div class="button-row" style="margin-top:14px" id="skip-buttons"></div></section>' +
-      '<aside class="player-sidebar"><div class="player-panel"><h3>Audio & server</h3><div class="source-row" id="category-pills"><button class="source-pill active" data-category="sub">SUB</button><button class="source-pill" data-category="dub">DUB</button></div><div style="height:9px"></div><div class="source-row" id="server-pills"><span class="form-help">Load a source to see servers.</span></div><div style="height:12px"></div><div class="source-row" id="quality-pills"></div></div>' +
+      '<aside class="player-sidebar"><div class="player-panel"><h3>Audio & server</h3><div class="source-row" id="category-pills"><button class="source-pill active" data-category="sub">SUB</button><button class="source-pill" data-category="dub">DUB</button></div><div style="height:9px"></div><div class="source-row" id="server-pills"><span class="form-help">Loading built-in source servers…</span></div><div style="height:12px"></div><div class="source-row" id="quality-pills"></div></div>' +
       '<div class="player-panel"><h3>Episode list</h3><div class="player-episode-list">' + playerEpisodeItems() + '</div></div>' +
-      '<div class="notice">Playback sources come from the provider you connect or a direct link you enter. Video URLs must be browser-compatible (MP4 or HLS) and permit playback from this site.</div></aside></div></div>';
+      '<div class="notice">Playback source: ' + escapeHtml(player.match && player.match.provider ? player.match.provider.name : "Direct link") + '. If this server fails, try another server or source.</div></aside></div></div>';
     updateActiveNav("/watch");
   }
 
