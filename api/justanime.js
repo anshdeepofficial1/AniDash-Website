@@ -179,6 +179,15 @@ function normalizeTracks(raw, fallback = []) {
   })).filter(item => item.url);
 }
 
+function headerValue(sources, names, fallback) {
+  for (const source of sources) {
+    if (!source || typeof source !== "object") continue;
+    const key = Object.keys(source).find(candidate => names.some(name => candidate.toLowerCase() === name.toLowerCase()));
+    if (key && typeof source[key] === "string" && source[key]) return source[key];
+  }
+  return fallback;
+}
+
 function normalizeBlock(payload, endpoint, category, req) {
   if (!payload) return null;
   let raw;
@@ -208,10 +217,10 @@ function normalizeBlock(payload, endpoint, category, req) {
     const isM3U8 = item?.isM3U8 === true || /\.m3u8(?:$|\?)/i.test(url);
     return {
       url: mediaUrl(req, url, isM3U8, {
-        Referer: referer,
-        Origin: new URL(referer).origin,
-        "User-Agent": UA,
-        Accept: "*/*"
+        Referer: headerValue([item?.headers, raw?.headers, payload?.headers], ["referer"], referer),
+        Origin: headerValue([item?.headers, raw?.headers, payload?.headers], ["origin"], new URL(referer).origin),
+        "User-Agent": headerValue([item?.headers, raw?.headers, payload?.headers], ["user-agent"], UA),
+        Accept: headerValue([item?.headers, raw?.headers, payload?.headers], ["accept"], "*/*")
       }),
       originalUrl: url,
       quality: String(item?.quality || "Auto"),
