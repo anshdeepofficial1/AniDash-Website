@@ -26,7 +26,7 @@ function isAnikotoHost(url) {
   });
 }
 
-async function requestText(url, headers = {}, timeout = 15000) {
+async function requestText(url, headers = {}, timeout = 7000) {
   const response = await fetch(url, {
     headers: {
       "User-Agent": API_USER_AGENT,
@@ -183,7 +183,7 @@ async function extractKwik(link, base) {
   const response = await fetch(parsed.toString(), {
     headers: { "User-Agent": API_USER_AGENT, Accept: "text/html,*/*", Referer: "https://animepahe.pw/" },
     redirect: "follow",
-    signal: AbortSignal.timeout(20000)
+    signal: AbortSignal.timeout(4000)
   });
   if (!response.ok) throw new Error("Kwik returned HTTP " + response.status);
   const pageUrl = response.url || parsed.toString();
@@ -232,7 +232,7 @@ async function streams(req, animeSession, episodeId, category) {
   }
   const base = SITE_BASES[0];
   const playUrl = new URL(base + "/play/" + encodeURIComponent(parts[0]) + "/" + encodeURIComponent(parts[1]));
-  const page = await requestText(playUrl.toString(), { Referer: base + "/" }, 20000);
+  const page = await requestText(playUrl.toString(), { Referer: base + "/" }, 3500);
   const menu = page.text.match(/<div[^>]+id=["']resolutionMenu["'][^>]*>([\s\S]*?)<\/div>/i)?.[1] || page.text;
   const buttons = [...menu.matchAll(/<button\b[^>]*>([\s\S]*?)<\/button>/gi)].map(match => ({
     tag: match[0].match(/^<button\b[^>]*>/i)?.[0] || match[0],
