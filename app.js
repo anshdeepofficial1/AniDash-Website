@@ -801,7 +801,10 @@
       state.player.failedProviders = [];
       state.player.streams = [];
       state.player.embeds = [];
+      state.player.candidates = [];
+      state.player.candidateIndex = 0;
       state.player.tracks = [];
+      state.player.servers = [];
       state.player.selectedServer = "default";
     }
     if (!currentMatchStillValid || !state.player.match) state.player.match = state.selectedMatch;
