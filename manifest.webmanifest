@@ -2,14 +2,65 @@
   "id": "/",
   "name": "AniDash — Anime Streaming",
   "short_name": "AniDash",
-  "description": "Discover anime and stream from your connected sources.",
+  "description": "Discover anime, save your watchlist and stream with AniDash's built-in sources.",
   "start_url": "/#/home",
   "scope": "/",
   "display": "standalone",
-  "display_override": ["standalone", "minimal-ui"],
+  "display_override": [
+    "standalone",
+    "minimal-ui"
+  ],
   "orientation": "any",
   "background_color": "#090a10",
   "theme_color": "#090a10",
-  "icons": [{"src": "/icons/anidash-icon.png", "sizes": "1024x1024", "type": "image/png", "purpose": "any maskable"}],
-  "categories": ["entertainment", "video"]
+  "icons": [
+    {
+      "src": "/icons/anidash-icon.png",
+      "sizes": "1024x1024",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": [
+    "entertainment",
+    "video"
+  ],
+  "shortcuts": [
+    {
+      "name": "Search anime",
+      "short_name": "Search",
+      "description": "Find an anime in the AniList catalogue.",
+      "url": "/#/search",
+      "icons": [
+        {
+          "src": "/icons/anidash-icon.png",
+          "sizes": "1024x1024"
+        }
+      ]
+    },
+    {
+      "name": "My watchlist",
+      "short_name": "Watchlist",
+      "description": "Open your saved anime.",
+      "url": "/#/library",
+      "icons": [
+        {
+          "src": "/icons/anidash-icon.png",
+          "sizes": "1024x1024"
+        }
+      ]
+    },
+    {
+      "name": "Continue watching",
+      "short_name": "Continue",
+      "description": "Resume your recent episode.",
+      "url": "/#/history",
+      "icons": [
+        {
+          "src": "/icons/anidash-icon.png",
+          "sizes": "1024x1024"
+        }
+      ]
+    }
+  ]
 }
