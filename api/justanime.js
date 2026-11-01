@@ -35,7 +35,7 @@ function positiveInt(value, fallback = 1, max = 100) {
   return Number.isFinite(parsed) ? Math.min(max, Math.max(1, parsed)) : fallback;
 }
 
-function mediaUrl(req, raw, isHls) {
+function mediaUrl(req, raw, isHls, playbackHeaders = {}) {
   try {
     const target = new URL(String(raw));
     if (target.protocol !== "https:") return String(raw);
@@ -48,7 +48,14 @@ function mediaUrl(req, raw, isHls) {
     const proto = String(req.headers["x-forwarded-proto"] || "https").split(",")[0].trim();
     const host = String(req.headers["x-forwarded-host"] || req.headers.host || "");
     if (!host) return target.toString();
-    return proto + "://" + host + "/api/media?url=" + encodeURIComponent(target.toString()) + "&hls=" + (isHls ? "1" : "0");
+    const safeHeaders = {};
+    for (const [key, value] of Object.entries(playbackHeaders || {})) {
+      if (/^(referer|origin|user-agent|accept)$/i.test(key) && typeof value === "string" && value.length <= 600) {
+        safeHeaders[key.toLowerCase()] = value;
+      }
+    }
+    const headerParam = Object.keys(safeHeaders).length ? "&headers=" + encodeURIComponent(JSON.stringify(safeHeaders)) : "";
+    return proto + "://" + host + "/api/media?url=" + encodeURIComponent(target.toString()) + "&hls=" + (isHls ? "1" : "0") + headerParam;
   } catch {
     return String(raw || "");
   }
@@ -200,7 +207,12 @@ function normalizeBlock(payload, endpoint, category, req) {
     const url = String(item?.url || "");
     const isM3U8 = item?.isM3U8 === true || /\.m3u8(?:$|\?)/i.test(url);
     return {
-      url: mediaUrl(req, url, isM3U8),
+      url: mediaUrl(req, url, isM3U8, {
+        Referer: referer,
+        Origin: new URL(referer).origin,
+        "User-Agent": UA,
+        Accept: "*/*"
+      }),
       originalUrl: url,
       quality: String(item?.quality || "Auto"),
       type: serverName,
