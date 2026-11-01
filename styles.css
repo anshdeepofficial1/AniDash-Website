@@ -667,3 +667,26 @@ button, .anime-card, .episode-item, .player-episode { touch-action: manipulation
     height: calc(64px + max(env(safe-area-inset-top), 8px));
   }
 }
+
+
+.player-error-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 5px;
+}
+.player-error-actions .btn {
+  min-height: 42px;
+}
+@media (max-width: 760px) {
+  .player-error-actions {
+    width: 100%;
+    flex-direction: column;
+  }
+  .player-error-actions .btn {
+    width: 100%;
+    max-width: 300px;
+  }
+}
