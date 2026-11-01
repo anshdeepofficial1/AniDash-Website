@@ -178,11 +178,16 @@ async function episodes(animeId, anilistId) {
 }
 
 function safeEpisodeId(animeId, episodeId) {
+  const anime = String(animeId || "");
   const value = String(episodeId || "");
-  if (value.startsWith(String(animeId) + "?")) return value;
-  if (value.startsWith("?")) return String(animeId) + value;
-  if (value.includes("?ep=")) return String(animeId) + (value.startsWith(String(animeId)) ? "" : "?") + value;
-  return String(animeId) + "?ep=" + encodeURIComponent(value);
+  if (!value) return anime;
+  if (value.startsWith(anime + "?")) return value;
+  if (value.startsWith("?")) return anime + value;
+  if (value.includes("?ep=")) {
+    const suffix = value.slice(value.indexOf("?"));
+    return anime + suffix;
+  }
+  return anime + "?ep=" + encodeURIComponent(value);
 }
 
 async function servers(animeId, episodeId, category) {
