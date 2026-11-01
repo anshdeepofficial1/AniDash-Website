@@ -13,7 +13,11 @@ const ALLOWED_HOSTS = new Set([
   "megacloud.tv",
   "rapid-cloud.co",
   "rapid-cloud.ru",
-  "vidnest.fun"
+  "vidnest.fun",
+  "norami.top",
+  "kryntal.top",
+  "akirax.buzz",
+  "vid-tube.site"
 ]);
 const STREAM_PROXY_HOST = "neko.justanime.to";
 
