@@ -360,3 +360,106 @@ img { display: block; max-width: 100%; }
   }
   .builtin-source-status { text-align: left; }
 }
+
+
+/* Episode pagination and quick navigation */
+.episode-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 2px 2px;
+  flex-wrap: wrap;
+}
+.episode-range {
+  color: var(--muted, #9699a9);
+  font-size: 10px;
+  font-weight: 600;
+}
+.episode-page-actions {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.episode-page-actions .btn {
+  min-width: 32px;
+  min-height: 31px;
+  padding: 0 9px;
+}
+.episode-page-label {
+  min-width: 75px;
+  text-align: center;
+  color: var(--text, #f3f3f7);
+  font-size: 10px;
+  font-weight: 700;
+}
+.episode-jump-input {
+  width: 74px !important;
+  min-width: 74px;
+  text-align: center;
+}
+.compact-empty {
+  padding: 18px 12px;
+  border: 1px dashed var(--line, rgba(255,255,255,.1));
+  border-radius: 10px;
+  color: var(--muted, #9699a9);
+  text-align: center;
+  font-size: 11px;
+}
+.player-episode-tools {
+  display: grid;
+  grid-template-columns: minmax(0,1fr) 62px auto;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.player-episode-tools .input-control {
+  min-width: 0;
+  height: 34px;
+  padding: 0 9px;
+  font-size: 10px;
+}
+.player-episode-tools .btn {
+  min-height: 34px;
+  padding: 0 10px;
+}
+#player-episode-items {
+  display: grid;
+  gap: 5px;
+}
+#player-episode-pagination .episode-pagination {
+  display: grid;
+  justify-content: stretch;
+  gap: 9px;
+}
+#player-episode-pagination .episode-range {
+  text-align: center;
+}
+#player-episode-pagination .episode-page-actions {
+  justify-content: center;
+}
+#anime-embed {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  border: 0;
+  background: #000;
+}
+#anime-embed[hidden] {
+  display: none;
+}
+@media (max-width: 700px) {
+  .episode-toolbar {
+    flex-wrap: wrap;
+  }
+  .episode-toolbar .input-control {
+    flex: 1 1 130px;
+    max-width: none !important;
+  }
+  .episode-pagination {
+    align-items: flex-start;
+  }
+  .player-episode-tools {
+    grid-template-columns: minmax(0,1fr) 58px auto;
+  }
+}
