@@ -96,11 +96,38 @@ function getPublicBase(req) {
   return protocol + "://" + host;
 }
 
-function proxyUrl(base, target, hls) {
-  return base + "/api/media?url=" + encodeURIComponent(target.toString()) + "&hls=" + (hls ? "1" : "0");
+function sanitisePlaybackHeaders(raw) {
+  if (!raw) return {};
+  let input = raw;
+  if (typeof raw === "string") {
+    try { input = JSON.parse(raw); } catch (_) { return {}; }
+  }
+  if (!input || typeof input !== "object" || Array.isArray(input)) return {};
+  const output = {};
+  for (const [rawKey, rawValue] of Object.entries(input)) {
+    const key = String(rawKey).toLowerCase();
+    if (typeof rawValue !== "string" || rawValue.length > 600) continue;
+    if (key === "referer" || key === "origin") {
+      try {
+        const value = new URL(rawValue);
+        if (value.protocol !== "https:" || value.username || value.password) continue;
+        output[key] = key === "origin" ? value.origin : value.toString();
+      } catch (_) {}
+    } else if (key === "user-agent" || key === "accept") {
+      output[key] = rawValue;
+    }
+  }
+  return output;
 }
 
-function rewritePlaylist(playlist, baseUrl, publicBase) {
+function proxyUrl(base, target, hls, headers = {}) {
+  let url = base + "/api/media?url=" + encodeURIComponent(target.toString()) + "&hls=" + (hls ? "1" : "0");
+  const safe = sanitisePlaybackHeaders(headers);
+  if (Object.keys(safe).length) url += "&headers=" + encodeURIComponent(JSON.stringify(safe));
+  return url;
+}
+
+function rewritePlaylist(playlist, baseUrl, publicBase, headers = {}) {
   let nextIsPlaylist = false;
   return playlist.split(/\r?\n/).map(line => {
     const value = line.trim();
@@ -110,7 +137,7 @@ function rewritePlaylist(playlist, baseUrl, publicBase) {
       const rewritten = line.replace(/URI="([^"]+)"/g, (_, raw) => {
         let target;
         try { target = safeTarget(new URL(raw, baseUrl).toString()); } catch { return 'URI="' + raw.replace(/"/g, "") + '"'; }
-        return 'URI="' + proxyUrl(publicBase, target, playlistTag) + '"';
+        return 'URI="' + proxyUrl(publicBase, target, playlistTag, headers) + '"';
       });
       nextIsPlaylist = /^#EXT-X-STREAM-INF:/i.test(value);
       return rewritten;
@@ -120,7 +147,7 @@ function rewritePlaylist(playlist, baseUrl, publicBase) {
     catch { return line; }
     const isPlaylist = nextIsPlaylist || /\.m3u8(?:$|\?)/i.test(target.pathname + target.search);
     nextIsPlaylist = false;
-    return proxyUrl(publicBase, target, isPlaylist);
+    return proxyUrl(publicBase, target, isPlaylist, headers);
   }).join("\n");
 }
 
@@ -142,7 +169,8 @@ export default async function handler(req, res) {
     const requested = safeTarget(req.query.url);
     const unwrapped = unwrapExternalProxy(requested);
     const target = unwrapped.target;
-    const upstream = await fetchAllowed(target, req, unwrapped.safeHeaders || {});
+    const playbackHeaders = { ...sanitisePlaybackHeaders(req.query.headers), ...(unwrapped.safeHeaders || {}) };
+    const upstream = await fetchAllowed(target, req, playbackHeaders);
     if (!upstream.ok && upstream.status !== 206) {
       return res.status(upstream.status).end();
     }
@@ -158,9 +186,10 @@ export default async function handler(req, res) {
         return res.status(502).json({ error: "The upstream did not return a valid HLS playlist" });
       }
       res.setHeader("Content-Type", "application/vnd.apple.mpegurl; charset=utf-8");
-      res.setHeader("Cache-Control", "public, max-age=5, s-maxage=5");
+      res.setHeader("Cache-Control", "private, no-store");
       res.setHeader("Access-Control-Allow-Origin", "*");
-      return res.status(200).send(rewritePlaylist(body, target, getPublicBase(req)));
+      res.setHeader("Access-Control-Allow-Headers", "Range, Content-Type");
+      return res.status(200).send(rewritePlaylist(body, new URL(upstream.url || target.toString()), getPublicBase(req), playbackHeaders));
     }
 
     for (const name of ["content-type", "content-length", "content-range", "accept-ranges", "etag", "last-modified"]) {
@@ -168,7 +197,9 @@ export default async function handler(req, res) {
       if (value) res.setHeader(name, value);
     }
     res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Cache-Control", "public, max-age=120");
+    res.setHeader("Access-Control-Allow-Headers", "Range, Content-Type");
+    res.setHeader("Access-Control-Expose-Headers", "Content-Range, Accept-Ranges, Content-Length");
+    res.setHeader("Cache-Control", "private, no-store");
     res.status(upstream.status);
     if (req.method === "HEAD") return res.end();
     return pipeBody(upstream, res);
