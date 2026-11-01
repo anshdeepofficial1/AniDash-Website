@@ -801,7 +801,7 @@
       player.match,
       ...allMatches.filter(match => match !== player.match)
     ].filter((match, index, rows) =>
-      match && match.episodesReady && Array.isArray(match.episodes) &&
+      match && match.provider && match.episodesReady && Array.isArray(match.episodes) &&
       !player.failedProviders.includes(match.provider.id) &&
       rows.indexOf(match) === index
     );
@@ -897,8 +897,10 @@
         });
         if (token !== state.token) return;
 
-        const streams = extractArray(payload, ["sources", "streams", "videos", "data.sources"]);
-        const embeds = extractArray(payload, ["embeds", "embedSources", "providers"]);
+        const streams = extractArray(payload, ["sources", "streams", "videos", "data.sources"])
+          .filter(item => item && (item.url || item.src || item.file));
+        const embeds = extractArray(payload, ["embeds", "embedSources", "providers"])
+          .filter(item => item && (item.url || item.src));
         if (!streams.length && !embeds.length) {
           throw new Error(payload && payload.error ? payload.error : "No playable stream was returned.");
         }
@@ -1041,6 +1043,11 @@
       video.style.display = "none";
       if (embed) {
         embed.hidden = false;
+        embed.onerror = () => {
+          if (state.currentVideo === parsed.toString()) {
+            fallbackToNextProvider("The embedded player could not be loaded.");
+          }
+        };
         embed.src = parsed.toString();
       }
       state.currentVideo = parsed.toString();
