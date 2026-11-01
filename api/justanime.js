@@ -24,8 +24,9 @@ const jsonHeaders = {
   "Cache-Control": "public, s-maxage=25, stale-while-revalidate=90"
 };
 
-function send(res, status, body) {
+function send(res, status, body, cacheControl) {
   Object.entries(jsonHeaders).forEach(([key, value]) => res.setHeader(key, value));
+  if (cacheControl) res.setHeader("Cache-Control", cacheControl);
   return res.status(status).json(body);
 }
 
@@ -274,7 +275,7 @@ export default async function handler(req, res) {
       const animeId = String(req.query.id || "");
       const episode = String(req.query.episode || "");
       if (!animeId || !episode) return send(res, 400, { error: "Anime ID and episode number are required" });
-      return send(res, 200, await streams(req, animeId, episode, req.query.server, req.query.category));
+      return send(res, 200, await streams(req, animeId, episode, req.query.server, req.query.category), "no-store");
     }
     return send(res, 400, { error: "Unknown JustAnime action" });
   } catch (error) {
