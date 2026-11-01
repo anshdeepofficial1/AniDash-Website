@@ -368,6 +368,16 @@
     ] : [titleOf(media)];
     const terms = [...new Set(rawTitles.map(value => String(value || "").trim()).filter(Boolean))].slice(0, 3);
     const found = await Promise.all(providers.map(async provider => {
+      if (provider.id === "justanime" && media && media.id != null) {
+        return {
+          provider,
+          animeId: String(media.id),
+          item: { id: String(media.id), title: titleOf(media) },
+          score: 100,
+          mapped: true,
+          idSource: "AniList"
+        };
+      }
       try {
         const payloads = await Promise.all(terms.map(query => providerGet(provider, "search", {
           query: query,
