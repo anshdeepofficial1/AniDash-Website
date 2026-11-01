@@ -63,14 +63,17 @@ function headersFor(target, req, custom = {}) {
   return headers;
 }
 
-async function fetchAllowed(target, req, custom = {}) {
+async function fetchAllowed(target, req, custom = {}, externalProxyHop = false) {
   let current = target;
   for (let redirects = 0; redirects <= 4; redirects++) {
     if (!allowedHost(current.hostname)) throw new Error("Media redirect left AniDash's allow-list");
+    const isProxyFrontDoor = externalProxyHop &&
+      current.hostname === STREAM_PROXY_HOST &&
+      current.pathname.includes("m3u8-proxy");
     const response = await fetch(current, {
       method: "GET",
       redirect: "manual",
-      headers: headersFor(current, req, custom),
+      headers: isProxyFrontDoor ? headersFor(current, req) : headersFor(current, req, custom),
       signal: AbortSignal.timeout(8500)
     });
     if (![301, 302, 303, 307, 308].includes(response.status)) return response;
@@ -181,9 +184,9 @@ export default async function handler(req, res) {
     const usesExternalProxy = context.original !== null;
     const target = requested;
     const playbackHeaders = usesExternalProxy
-      ? {}
+      ? context.headers
       : sanitisePlaybackHeaders(req.query.headers);
-    const upstream = await fetchAllowed(target, req, playbackHeaders);
+    const upstream = await fetchAllowed(target, req, playbackHeaders, usesExternalProxy);
     if (!upstream.ok && upstream.status !== 206) {
       return res.status(upstream.status).end();
     }
