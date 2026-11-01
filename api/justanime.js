@@ -54,8 +54,12 @@ function mediaUrl(req, raw, isHls, playbackHeaders = {}) {
         safeHeaders[key.toLowerCase()] = value;
       }
     }
-    const headerParam = Object.keys(safeHeaders).length ? "&headers=" + encodeURIComponent(JSON.stringify(safeHeaders)) : "";
-    return proto + "://" + host + "/api/media?url=" + encodeURIComponent(target.toString()) + "&hls=" + (isHls ? "1" : "0") + headerParam;
+    const headersJson = JSON.stringify(safeHeaders);
+    const externalProxy = "https://neko.justanime.to/m3u8-proxy?url=" +
+      encodeURIComponent(target.toString()) +
+      "&headers=" + encodeURIComponent(headersJson);
+    return proto + "://" + host + "/api/media?url=" + encodeURIComponent(externalProxy) +
+      "&hls=" + (isHls ? "1" : "0");
   } catch {
     return String(raw || "");
   }
