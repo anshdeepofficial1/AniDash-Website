@@ -636,7 +636,7 @@
       '<div class="player-layout"><section><div class="video-frame"><video id="anime-video" controls playsinline webkit-playsinline preload="metadata"></video><div class="player-overlay" id="player-overlay"><div class="loader"></div><strong>Preparing your player</strong><p>Checking the connected source and browser playback support…</p></div></div>' +
       '<div class="player-under"><div><h2>' + escapeHtml(episode.title) + '</h2><p>' + escapeHtml(titleOf(media)) + ' · Episode ' + escapeHtml(episode.number) + '</p></div><div class="player-controls"><button class="btn btn-quiet" data-prev ' + (hasPrev ? "" : "disabled") + '>← Previous</button><button class="btn btn-quiet" data-next ' + (hasNext ? "" : "disabled") + '>Next →</button><button class="btn btn-secondary" data-open-direct>Paste stream link</button></div></div>' +
       '<div class="button-row" style="margin-top:14px" id="skip-buttons"></div></section>' +
-      '<aside class="player-sidebar"><div class="player-panel"><h3>Audio & server</h3><div class="source-row" id="category-pills"><button class="source-pill active" data-category="sub">SUB</button><button class="source-pill" data-category="dub">DUB</button></div><div style="height:9px"></div><div class="source-row" id="server-pills"><span class="form-help">Loading built-in source servers…</span></div><div style="height:12px"></div><div class="source-row" id="quality-pills"></div></div>' +
+      '<aside class="player-sidebar"><div class="player-panel"><h3>Streaming source</h3><div class="source-row" id="provider-pills"></div><div style="height:12px"></div><h3>Audio & server</h3><div class="source-row" id="category-pills"><button class="source-pill active" data-category="sub">SUB</button><button class="source-pill" data-category="dub">DUB</button></div><div style="height:9px"></div><div class="source-row" id="server-pills"><span class="form-help">Loading built-in source servers…</span></div><div style="height:12px"></div><div class="source-row" id="quality-pills"></div></div>' +
       '<div class="player-panel"><h3>Episode list</h3><div class="player-episode-list">' + playerEpisodeItems() + '</div></div>' +
       '<div class="notice">Playback source: ' + escapeHtml(player.match && player.match.provider ? player.match.provider.name : "Direct link") + '. If this server fails, try another server or source.</div></aside></div></div>';
     updateActiveNav("/watch");
@@ -644,77 +644,156 @@
 
   async function loadPlayerStreams(token) {
     const player = state.player;
-    if (!player || !player.match || !player.match.provider) {
-      showPlayerOverlay("No built-in source matched", "Try another provider on the anime details page, or paste an authorised MP4/HLS link.", true);
+    if (!player) return;
+
+    const defaults = { justanime: "auto", hianime: "hd-1", anikoto: "anikoto" };
+    const allMatches = (state.detailMatches || []).filter(match =>
+      match && match.provider && match.episodesReady && Array.isArray(match.episodes)
+    );
+    const orderedMatches = [
+      player.match,
+      ...allMatches.filter(match => match !== player.match)
+    ].filter((match, index, rows) => match && rows.indexOf(match) === index);
+
+    if (!orderedMatches.length) {
+      showPlayerOverlay("No episode source is ready", "AniDash could not load an episode list from JustAnime, HiAnime or AniKoto. Return to the anime page and retry the built-in sources.", true);
       return;
     }
-    const provider = player.match.provider;
-    const common = {
-      id: player.match.animeId,
-      episodeId: player.episode.id,
-      episode: player.episode.number,
-      anilistId: player.media.id,
-      malId: player.media.idMal,
-      category: player.category || "sub"
-    };
-    const defaults = {
-      justanime: "auto",
-      hianime: "hd-1",
-      anikoto: "anikoto"
-    };
-    showPlayerOverlay("Resolving episode", "Loading " + provider.name + " servers and checking playable streams…", false);
-    try {
-      let serverPayload = null;
+
+    player.availableProviders = orderedMatches;
+    player.streams = [];
+    player.tracks = [];
+    player.embeds = [];
+    renderPlayerOptions();
+    const failures = [];
+
+    showPlayerOverlay(
+      "Finding a playable stream",
+      "Trying " + orderedMatches.map(match => match.provider.name).join(" → ") + " automatically…",
+      false
+    );
+
+    for (const match of orderedMatches) {
+      if (token !== state.token) return;
+      const provider = match.provider;
+      const episode = match.episodes.find(item => Number(item.number) === Number(player.episode.number));
+      if (!episode) {
+        failures.push(provider.name + ": this episode is not listed.");
+        continue;
+      }
+
+      const isCurrentProvider = player.match && player.match.provider.id === provider.id;
+      const preferredServer = isCurrentProvider && player.selectedServer
+        ? player.selectedServer
+        : defaults[provider.id] || "auto";
+      const common = {
+        id: match.animeId,
+        episodeId: episode.id,
+        episode: episode.number,
+        anilistId: player.media.id,
+        malId: player.media.idMal,
+        category: player.category || "sub"
+      };
+
       try {
-        serverPayload = await providerGet(provider, "servers", {
+        showPlayerOverlay(
+          "Trying " + provider.name,
+          "Resolving episode " + episode.number + " using " + provider.name + "…",
+          false
+        );
+
+        let serverPayload = null;
+        try {
+          serverPayload = await providerGet(provider, "servers", {
+            ...common,
+            server: preferredServer
+          });
+        } catch (_) {}
+
+        if (token !== state.token) return;
+        let servers = extractArray(serverPayload, ["servers", "serverList", "data.servers"]);
+        if (!servers.length) {
+          servers = provider.id === "justanime"
+            ? [
+                { id: "auto", name: "Automatic (Best available)" },
+                { id: "megaplay", name: "Momo (HLS)" },
+                { id: "zokoanime", name: "Zoko (HLS)" },
+                { id: "animegg", name: "Gigi (MP4)" },
+                { id: "anineko", name: "Neko (HLS)" }
+              ]
+            : provider.id === "anikoto"
+            ? [{ id: "anikoto", name: "AniKoto • Kwik" }]
+            : [
+                { id: "aniwave", name: "AniWave • HLS" },
+                { id: "hianime-hd-2", name: "HiAnime HD-2" },
+                { id: "megaplay", name: "MegaPlay" }
+              ];
+        }
+
+        const selectedExists = servers.some(server =>
+          String(server.id || server.serverName || "") === String(preferredServer)
+        );
+        const preferred = servers.find(server =>
+          String(server.id || server.serverName || "") === defaults[provider.id]
+        );
+        const selectedServer = selectedExists
+          ? preferredServer
+          : String((preferred || servers[0]).id || (preferred || servers[0]).serverName || defaults[provider.id]);
+
+        const payload = await providerGet(provider, "streams", {
           ...common,
-          server: player.selectedServer || defaults[provider.id]
+          server: selectedServer
         });
-      } catch (_) {}
-      if (token !== state.token) return;
+        if (token !== state.token) return;
 
-      let servers = extractArray(serverPayload, ["servers", "serverList", "data.servers"]);
-      if (!servers.length) {
-        servers = provider.id === "justanime"
-          ? [{ id: "auto", name: "Automatic (Best available)" }]
-          : provider.id === "anikoto"
-          ? [{ id: "anikoto", name: "AniKoto • Kwik" }]
-          : [
-              { id: "aniwave", name: "AniWave • HLS" },
-              { id: "hianime-hd-2", name: "HiAnime HD-2" },
-              { id: "megaplay", name: "MegaPlay" }
-            ];
-      }
-      player.servers = servers;
+        const streams = extractArray(payload, ["sources", "streams", "videos", "data.sources"]);
+        const embeds = extractArray(payload, ["embeds", "embedSources", "providers"]);
+        if (!streams.length && !embeds.length) {
+          throw new Error(payload && payload.error ? payload.error : "No playable stream was returned.");
+        }
 
-      const selectedExists = servers.some(server => String(server.id || server.serverName || "") === String(player.selectedServer));
-      if (!selectedExists) {
-        const preferred = servers.find(server => String(server.id || server.serverName || "") === defaults[provider.id]);
-        player.selectedServer = String((preferred || servers[0]).id || (preferred || servers[0]).serverName || defaults[provider.id]);
-      }
+        // Switch to this provider only after it actually returned a player source.
+        player.match = match;
+        player.episode = episode;
+        player.servers = servers;
+        player.selectedServer = selectedServer;
+        player.streams = streams;
+        player.embeds = embeds;
+        player.tracks = extractArray(payload, ["tracks", "subtitles", "data.tracks"]);
+        player.intro = payload && payload.intro || null;
+        player.outro = payload && payload.outro || null;
+        renderPlayerOptions();
 
-      const payload = await providerGet(provider, "streams", {
-        ...common,
-        server: player.selectedServer || defaults[provider.id]
-      });
-      if (token !== state.token) return;
-      const streams = extractArray(payload, ["sources", "streams", "videos", "data.sources"]);
-      player.streams = streams;
-      player.tracks = extractArray(payload, ["tracks", "subtitles", "data.tracks"]);
-      player.intro = payload && payload.intro || null;
-      player.outro = payload && payload.outro || null;
-      renderPlayerOptions();
-      if (streams.length) {
-        const first = streams[0];
-        attachStream(first.url || first.src || first.file, first, player.tracks);
-      } else {
-        showPlayerOverlay("No playable stream returned", provider.name + " responded, but did not return a browser-compatible MP4 or HLS URL.", true);
+        if (streams.length) {
+          const first = streams[0];
+          attachStream(first.url || first.src || first.file, first, player.tracks);
+        } else {
+          const firstEmbed = embeds[0];
+          attachStream(firstEmbed.url || firstEmbed.src, {
+            ...firstEmbed,
+            type: "embed",
+            isEmbed: true,
+            quality: firstEmbed.name || firstEmbed.id || "Embedded player"
+          }, []);
+        }
+        toast("Playing from " + provider.name + ".");
+        return;
+      } catch (error) {
+        failures.push(provider.name + ": " + error.message);
       }
-    } catch (error) {
-      if (token !== state.token) return;
-      showPlayerOverlay(provider.name + " could not resolve this episode", error.message + " Try another built-in source or paste an authorised stream link.", true);
-      renderPlayerOptions();
     }
+
+    if (token !== state.token) return;
+    player.streams = [];
+    player.tracks = [];
+    player.embeds = [];
+    renderPlayerOptions();
+    const detail = failures.slice(0, 3).join(" · ");
+    showPlayerOverlay(
+      "No built-in source could play this episode",
+      detail || "All available providers failed to return a playable stream. Try another episode or retry the sources.",
+      true
+    );
   }
 
   function showPlayerOverlay(title, description, showAction) {
@@ -727,13 +806,25 @@
   function renderPlayerOptions() {
     const player = state.player;
     if (!player) return;
+    const providers = $("#provider-pills");
+    if (providers) {
+      const candidates = player.availableProviders || (state.detailMatches || []).filter(match => match && match.episodesReady);
+      providers.innerHTML = candidates.length ? candidates.map(match =>
+        '<button class="source-pill' + (player.match && player.match.provider.id === match.provider.id ? " active" : "") + '" data-provider="' + escapeHtml(match.provider.id) + '">' + escapeHtml(match.provider.name) + '</button>'
+      ).join("") : '<span class="form-help">No provider has an episode list.</span>';
+    }
     const servers = $("#server-pills");
     if (servers) {
-      servers.innerHTML = player.servers.length ? player.servers.map(server => '<button class="source-pill' + (String(server.id) === String(player.selectedServer) ? " active" : "") + '" data-server="' + escapeHtml(server.id || "default") + '">' + escapeHtml(server.name || server.id || "Server") + '</button>').join("") : '<span class="form-help">Default source</span>';
+      servers.innerHTML = player.servers.length ? player.servers.map(server =>
+        '<button class="source-pill' + (String(server.id) === String(player.selectedServer) ? " active" : "") + '" data-server="' + escapeHtml(server.id || "default") + '">' + escapeHtml(server.name || server.id || "Server") + '</button>'
+      ).join("") : '<span class="form-help">Trying built-in servers…</span>';
     }
     const qualities = $("#quality-pills");
     if (qualities) {
-      qualities.innerHTML = player.streams.map((stream, index) => '<button class="source-pill' + (index === 0 ? " active" : "") + '" data-stream="' + index + '">' + escapeHtml(stream.quality || stream.label || stream.type || ("Source " + (index + 1))) + '</button>').join("");
+      const qualityItems = player.streams.length ? player.streams : (player.embeds || []);
+      qualities.innerHTML = qualityItems.map((stream, index) =>
+        '<button class="source-pill' + (index === 0 ? " active" : "") + '" data-stream="' + index + '">' + escapeHtml(stream.quality || stream.name || stream.label || stream.type || ("Source " + (index + 1))) + '</button>'
+      ).join("");
     }
     const skip = $("#skip-buttons");
     if (skip) {
@@ -1011,6 +1102,16 @@
         state.selectedMatch = null;
         state.player = { media: media, episode: { id: String(item.episode), number: item.episode, title: item.episodeTitle || "Episode " + item.episode }, match: null, streams: [], servers: [], tracks: [], selectedServer: "default", category: "sub", direct: store.manualStreams[String(media.id) + ":" + String(item.episode)] || "" };
         navigate("/watch/" + media.id + "/" + item.episode);
+      }
+      return;
+    }
+    if (target.hasAttribute("data-provider")) {
+      const providerId = target.getAttribute("data-provider");
+      const match = (state.detailMatches || []).find(item => item && item.episodesReady && item.provider.id === providerId);
+      if (match) {
+        state.player.match = match;
+        state.player.selectedServer = ({ justanime: "auto", hianime: "hd-1", anikoto: "anikoto" }[providerId] || "auto");
+        loadPlayerStreams(state.token);
       }
       return;
     }
