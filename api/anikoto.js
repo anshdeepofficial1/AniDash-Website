@@ -172,31 +172,41 @@ function unpackPacker(script) {
 async function extractKwik(link, base) {
   let parsed;
   try { parsed = new URL(link, base); } catch { throw new Error("The AniKoto player returned an invalid Kwik URL"); }
-  if (parsed.protocol !== "https:" || !["kwik.cx", "kwik.si", "kwik.to", "kwik.li"].some(domain => parsed.hostname === domain || parsed.hostname.endsWith("." + domain))) {
-    if (/\.(?:m3u8|mp4)(?:$|\?)/i.test(parsed.pathname + parsed.search)) {
-      return { url: parsed.toString(), isM3U8: /\.m3u8/i.test(parsed.pathname), quality: "Auto" };
+  const kwikHosts = ["kwik.cx", "kwik.si", "kwik.to", "kwik.li"];
+  const isKwikHost = host => kwikHosts.some(domain => host === domain || host.endsWith("." + domain));
+  if (parsed.protocol !== "https:" || !isKwikHost(parsed.hostname)) {
+    if (/\\.(?:m3u8|mp4)(?:$|\\?)/i.test(parsed.pathname + parsed.search)) {
+      return { url: parsed.toString(), isM3U8: /\\.m3u8/i.test(parsed.pathname), quality: "Auto" };
     }
     throw new Error("AniKoto returned a video host that is not in the Kwik allow-list");
   }
-  const page = await requestText(parsed.toString(), { Referer: "https://animepahe.pw/" }, 20000);
-  const scripts = [...page.text.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)].map(match => match[1]);
+  const response = await fetch(parsed.toString(), {
+    headers: { "User-Agent": API_USER_AGENT, Accept: "text/html,*/*", Referer: "https://animepahe.pw/" },
+    redirect: "follow",
+    signal: AbortSignal.timeout(20000)
+  });
+  if (!response.ok) throw new Error("Kwik returned HTTP " + response.status);
+  const pageUrl = response.url || parsed.toString();
+  const finalUrl = new URL(pageUrl);
+  if (finalUrl.protocol !== "https:" || !isKwikHost(finalUrl.hostname)) {
+    throw new Error("Kwik redirected to an unsupported host");
+  }
+  const pageHtml = await response.text();
+  const scripts = [...pageHtml.matchAll(/<script\\b[^>]*>([\\s\\S]*?)<\\/script>/gi)].map(match => match[1]);
   let streamUrl = "";
   for (const script of scripts) {
-    if (!/eval\s*\(\s*function\s*\(p,a,c,k,e,d\)/.test(script)) continue;
+    if (!/eval\\s*\\(\\s*function\\s*\\(p,a,c,k,e,d\\)/.test(script)) continue;
     try {
       const unpacked = unpackPacker(script);
-      const found = unpacked.match(/(?:const|let|var)\s+source\s*=\s*['"]([^'"]+\.m3u8(?:\?[^'"]*)?)['"]/i)
-        || unpacked.match(/(?:file|src)\s*:\s*['"]([^'"]+\.m3u8(?:\?[^'"]*)?)['"]/i);
-      if (found) {
-        streamUrl = decodeHtml(found[1]).replace(/[{}]/g, "");
-        break;
-      }
+      const found = unpacked.match(/(?:const|let|var)\\s+source\\s*=\\s*['\"]([^'\"]+\\.m3u8(?:\\?[^'\"]*)?)['\"]/i)
+        || unpacked.match(/(?:file|src)\\s*:\\s*['\"]([^'\"]+\\.m3u8(?:\\?[^'\"]*)?)['\"]/i);
+      if (found) { streamUrl = decodeHtml(found[1]).replace(/[{}]/g, ""); break; }
     } catch (_) {}
   }
   if (!streamUrl) throw new Error("Could not extract a browser-playable stream from Kwik");
-  const source = new URL(streamUrl, page.url);
+  const source = new URL(streamUrl, pageUrl);
   if (source.protocol !== "https:") throw new Error("Kwik returned an insecure media URL");
-  return { url: source.toString(), isM3U8: /\.m3u8(?:$|\?)/i.test(source.toString()), quality: "Auto" };
+  return { url: source.toString(), isM3U8: /\\.m3u8(?:$|\\?)/i.test(source.toString()), quality: "Auto" };
 }
 
 function mediaUrl(req, raw, isHls) {
