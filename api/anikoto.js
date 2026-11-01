@@ -9,8 +9,9 @@ const jsonHeaders = {
   "Cache-Control": "public, s-maxage=25, stale-while-revalidate=90"
 };
 
-function send(res, status, body) {
+function send(res, status, body, cacheControl) {
   Object.entries(jsonHeaders).forEach(([key, value]) => res.setHeader(key, value));
+  if (cacheControl) res.setHeader("Cache-Control", cacheControl);
   return res.status(status).json(body);
 }
 
@@ -289,7 +290,7 @@ export default async function handler(req, res) {
       return send(res, 200, { servers: [{ id: "anikoto", name: "AniKoto • Kwik" }] });
     }
     if (action === "streams") {
-      return send(res, 200, await streams(req, req.query.id, req.query.episodeId, req.query.category === "dub" ? "dub" : "sub"));
+      return send(res, 200, await streams(req, req.query.id, req.query.episodeId, req.query.category === "dub" ? "dub" : "sub"), "no-store");
     }
     return send(res, 400, { error: "Unknown AniKoto action" });
   } catch (error) {
