@@ -148,7 +148,7 @@ async function episodes(animeId, anilistId) {
   } catch (_) {}
   const mappedId = await resolveAniListId(animeId, anilistId);
   if (!mappedId) throw new Error("HiAnime episode API is unavailable and no AniList mapping could be resolved.");
-  const mapping = await requestJson("https://api.ani.zip/mappings?anilist_id=" + encodeURIComponent(mappedId), 12000);
+  const mapping = await requestJson("https://api.ani.zip/mappings?anilist_id=" + encodeURIComponent(mappedId), 5500);
   const raw = mapping?.episodes && typeof mapping.episodes === "object" ? mapping.episodes : {};
   const list = Object.entries(raw).map(([numberText, value]) => {
     const number = Number(numberText);
