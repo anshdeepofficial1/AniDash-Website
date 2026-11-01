@@ -1312,9 +1312,14 @@
       if (item) {
         const media = item.media;
         state.detail = media;
-        state.detailEpisodes = generatedEpisodes(media);
+        state.detailMatches = [];
+        state.detailEpisodes = [];
         state.selectedMatch = null;
-        state.player = { media: media, episode: { id: String(item.episode), number: item.episode, title: item.episodeTitle || "Episode " + item.episode }, match: null, streams: [], servers: [], tracks: [], selectedServer: "default", category: "sub", direct: store.manualStreams[String(media.id) + ":" + String(item.episode)] || "" };
+        state.episodePage = 1;
+        state.episodeFilter = "";
+        state.playerEpisodePage = 1;
+        state.playerEpisodeFilter = "";
+        state.player = { media: media, episode: { id: String(item.episode), number: item.episode, title: item.episodeTitle || "Episode " + item.episode }, match: null, streams: [], embeds: [], availableProviders: [], servers: [], tracks: [], selectedServer: "default", category: "sub", direct: store.manualStreams[String(media.id) + ":" + String(item.episode)] || "" };
         navigate("/watch/" + media.id + "/" + item.episode);
       }
       return;
