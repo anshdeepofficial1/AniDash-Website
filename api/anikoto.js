@@ -223,7 +223,7 @@ async function extractKwik(link, base) {
 }
 
 
-function mediaUrl(req, raw, isHls) {
+function mediaUrl(req, raw, isHls, playbackHeaders = {}) {
   try {
     const target = new URL(String(raw));
     if (target.protocol !== "https:") return target.toString();
@@ -232,7 +232,14 @@ function mediaUrl(req, raw, isHls) {
     const proto = String(req.headers["x-forwarded-proto"] || "https").split(",")[0].trim();
     const host = String(req.headers["x-forwarded-host"] || req.headers.host || "");
     if (!host) return target.toString();
-    return proto + "://" + host + "/api/media?url=" + encodeURIComponent(target.toString()) + "&hls=" + (isHls ? "1" : "0");
+    const safeHeaders = {};
+    for (const [key, value] of Object.entries(playbackHeaders || {})) {
+      if (/^(referer|origin|user-agent|accept)$/i.test(key) && typeof value === "string" && value.length <= 600) {
+        safeHeaders[key.toLowerCase()] = value;
+      }
+    }
+    const headerParam = Object.keys(safeHeaders).length ? "&headers=" + encodeURIComponent(JSON.stringify(safeHeaders)) : "";
+    return proto + "://" + host + "/api/media?url=" + encodeURIComponent(target.toString()) + "&hls=" + (isHls ? "1" : "0") + headerParam;
   } catch {
     return String(raw || "");
   }
@@ -275,7 +282,12 @@ async function streams(req, animeSession, episodeId, category) {
     const extracted = await extractKwik(candidate.link, base);
     const isM3U8 = extracted.isM3U8;
     return {
-      url: mediaUrl(req, extracted.url, isM3U8),
+      url: mediaUrl(req, extracted.url, isM3U8, {
+        Referer: "https://kwik.cx/",
+        Origin: "https://kwik.cx",
+        "User-Agent": API_USER_AGENT,
+        Accept: "*/*"
+      }),
       originalUrl: extracted.url,
       quality: candidate.quality || extracted.quality || "Auto",
       type: "Kwik",
