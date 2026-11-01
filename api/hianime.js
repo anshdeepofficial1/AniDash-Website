@@ -222,7 +222,7 @@ function decodeBase64Url(value) {
 async function fetchVidNest(path) {
   const nonceParam = crypto.randomBytes(16).toString("base64url");
   const url = VIDNEST_BASE + "/" + path + "?_n=" + encodeURIComponent(nonceParam);
-  const envelope = await requestJson(url, 10000);
+  const envelope = await requestJson(url, 4000);
   if (envelope?.v !== 2 || !envelope?.d) return envelope;
   const nonce = String(envelope.n || "");
   const encrypted = decodeBase64Url(envelope.d);
@@ -269,7 +269,7 @@ async function streams(req, animeId, episodeId, anilistId, serverName, category)
     url.searchParams.set("animeEpisodeId", actualEpisodeId);
     url.searchParams.set("server", server);
     url.searchParams.set("category", lang);
-    const payload = await requestJson(url.toString(), 12000);
+    const payload = await requestJson(url.toString(), 3500);
     const data = payload?.data;
     const sources = normaliseSources(req, data?.sources, lang, server);
     if (sources.length) {
