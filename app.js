@@ -43,6 +43,10 @@
     detailMatches: [],
     detailEpisodes: [],
     selectedMatch: null,
+    episodePage: 1,
+    episodeFilter: "",
+    playerEpisodePage: 1,
+    playerEpisodeFilter: "",
     player: null,
     providers: [],
     currentVideo: null,
@@ -376,6 +380,86 @@
       id: String(index + 1), number: index + 1, title: "Episode " + (index + 1),
       thumbnail: "", date: "", isFiller: false, generated: true
     }));
+  }
+
+  const DETAIL_EPISODES_PER_PAGE = 50;
+  const PLAYER_EPISODES_PER_PAGE = 30;
+
+  function matchingEpisodes(items, query) {
+    const term = slug(query || "");
+    if (!term) return items || [];
+    return (items || []).filter(item =>
+      slug(String(item.number) + " " + String(item.title || "")).includes(term)
+    );
+  }
+
+  function episodePagerMarkup(total, page, pageSize, scope) {
+    const pages = Math.max(1, Math.ceil(total / pageSize));
+    const first = total ? ((page - 1) * pageSize) + 1 : 0;
+    const last = Math.min(total, page * pageSize);
+    const previousDisabled = page <= 1 ? " disabled" : "";
+    const nextDisabled = page >= pages ? " disabled" : "";
+    return '<div class="episode-pagination">' +
+      '<span class="episode-range">' + (total ? (first + "–" + last + " of " + total + " episodes") : "No episodes found") + '</span>' +
+      '<div class="episode-page-actions">' +
+        '<button class="btn btn-quiet" data-episode-page="first" data-episode-scope="' + scope + '"' + previousDisabled + '>«</button>' +
+        '<button class="btn btn-quiet" data-episode-page="prev" data-episode-scope="' + scope + '"' + previousDisabled + '>Prev</button>' +
+        '<span class="episode-page-label">Page ' + page + ' / ' + pages + '</span>' +
+        '<button class="btn btn-quiet" data-episode-page="next" data-episode-scope="' + scope + '"' + nextDisabled + '>Next</button>' +
+        '<button class="btn btn-quiet" data-episode-page="last" data-episode-scope="' + scope + '"' + nextDisabled + '>»</button>' +
+      '</div></div>';
+  }
+
+  function renderEpisodeBrowser() {
+    const container = $("#episode-list");
+    const pagination = $("#episode-pagination");
+    if (!container || !pagination) return;
+    const filtered = matchingEpisodes(state.detailEpisodes, state.episodeFilter);
+    const pageCount = Math.max(1, Math.ceil(filtered.length / DETAIL_EPISODES_PER_PAGE));
+    state.episodePage = Math.max(1, Math.min(pageCount, Number(state.episodePage) || 1));
+    const start = (state.episodePage - 1) * DETAIL_EPISODES_PER_PAGE;
+    container.innerHTML = filtered.slice(start, start + DETAIL_EPISODES_PER_PAGE).map(episodeCard).join("") ||
+      '<div class="empty-state compact-empty">No matching episodes. Try another episode number or title.</div>';
+    pagination.innerHTML = episodePagerMarkup(filtered.length, state.episodePage, DETAIL_EPISODES_PER_PAGE, "detail");
+  }
+
+  function renderPlayerEpisodeBrowser() {
+    const container = $("#player-episode-items");
+    const pagination = $("#player-episode-pagination");
+    if (!container || !pagination || !state.player) return;
+    const filtered = matchingEpisodes(state.detailEpisodes, state.playerEpisodeFilter);
+    const pageCount = Math.max(1, Math.ceil(filtered.length / PLAYER_EPISODES_PER_PAGE));
+    state.playerEpisodePage = Math.max(1, Math.min(pageCount, Number(state.playerEpisodePage) || 1));
+    const start = (state.playerEpisodePage - 1) * PLAYER_EPISODES_PER_PAGE;
+    container.innerHTML = filtered.slice(start, start + PLAYER_EPISODES_PER_PAGE).map(episode =>
+      '<button class="player-episode' + (Number(episode.number) === Number(state.player.episode.number) ? " active" : "") + '" data-player-episode="' + episode.number + '"><span>' + episode.number + '</span>' + escapeHtml(episode.title) + '</button>'
+    ).join("") || '<div class="compact-empty">No matching episodes.</div>';
+    pagination.innerHTML = episodePagerMarkup(filtered.length, state.playerEpisodePage, PLAYER_EPISODES_PER_PAGE, "player");
+  }
+
+  function jumpToEpisode(scope) {
+    const input = scope === "player" ? $("#player-episode-jump") : $("#episode-jump");
+    const query = input ? Number.parseInt(input.value, 10) : Number.NaN;
+    if (!Number.isFinite(query) || query < 1) {
+      toast("Enter a valid episode number.");
+      return;
+    }
+    const filtered = matchingEpisodes(
+      state.detailEpisodes,
+      scope === "player" ? state.playerEpisodeFilter : state.episodeFilter
+    );
+    const index = filtered.findIndex(item => Number(item.number) === query);
+    if (index < 0) {
+      toast("Episode " + query + " was not found in the current source list.");
+      return;
+    }
+    if (scope === "player") {
+      state.playerEpisodePage = Math.floor(index / PLAYER_EPISODES_PER_PAGE) + 1;
+      renderPlayerEpisodeBrowser();
+    } else {
+      state.episodePage = Math.floor(index / DETAIL_EPISODES_PER_PAGE) + 1;
+      renderEpisodeBrowser();
+    }
   }
 
   async function prepareMediaSources(media) {
