@@ -740,8 +740,16 @@
           outro: null,
           direct: store.manualStreams[String(id) + ":" + String(number)] || ""
         };
+    const changedEpisode = Number(state.player.episode && state.player.episode.number) !== Number(episode.number);
     state.player.media = media;
     state.player.episode = episode;
+    if (changedEpisode) {
+      state.player.failedProviders = [];
+      state.player.streams = [];
+      state.player.embeds = [];
+      state.player.tracks = [];
+      state.player.selectedServer = "default";
+    }
     if (!currentMatchStillValid || !state.player.match) state.player.match = state.selectedMatch;
     const activeEpisodeIndex = state.detailEpisodes.findIndex(item => Number(item.number) === Number(number));
     state.playerEpisodePage = activeEpisodeIndex >= 0 ? Math.floor(activeEpisodeIndex / PLAYER_EPISODES_PER_PAGE) + 1 : 1;
@@ -776,7 +784,6 @@
       '<div class="player-panel"><h3>Episode list</h3><div class="player-episode-list">' + playerEpisodeItems() + '</div></div>' +
       '<div class="notice">Playback source: ' + escapeHtml(player.match && player.match.provider ? player.match.provider.name : "Direct link") + '. If this server fails, try another server or source.</div></aside></div></div>';
     renderPlayerEpisodeBrowser();
-    renderPlayerEpisodeBrowser();
     updateActiveNav("/watch");
   }
 
@@ -785,13 +792,18 @@
     if (!player) return;
 
     const defaults = { justanime: "auto", hianime: "hd-1", anikoto: "anikoto" };
+    player.failedProviders = Array.isArray(player.failedProviders) ? player.failedProviders : [];
     const allMatches = (state.detailMatches || []).filter(match =>
       match && match.provider && match.episodesReady && Array.isArray(match.episodes)
     );
     const orderedMatches = [
       player.match,
       ...allMatches.filter(match => match !== player.match)
-    ].filter((match, index, rows) => match && rows.indexOf(match) === index);
+    ].filter((match, index, rows) =>
+      match && match.episodesReady && Array.isArray(match.episodes) &&
+      !player.failedProviders.includes(match.provider.id) &&
+      rows.indexOf(match) === index
+    );
 
     if (!orderedMatches.length) {
       showPlayerOverlay("No episode source is ready", "AniDash could not load an episode list from JustAnime, HiAnime or AniKoto. Return to the anime page and retry the built-in sources.", true);
@@ -917,6 +929,7 @@
         toast("Playing from " + provider.name + ".");
         return;
       } catch (error) {
+        if (!player.failedProviders.includes(provider.id)) player.failedProviders.push(provider.id);
         failures.push(provider.name + ": " + error.message);
       }
     }
@@ -969,6 +982,30 @@
       skip.innerHTML = (player.intro && Number(player.intro.end) > Number(player.intro.start) ? '<button class="btn btn-quiet" data-skip="intro">Skip intro ↗</button>' : '') +
         (player.outro && Number(player.outro.end) > Number(player.outro.start) ? '<button class="btn btn-quiet" data-skip="outro">Skip outro ↗</button>' : '');
     }
+  }
+
+  function fallbackToNextProvider(reason) {
+    const player = state.player;
+    if (!player || !player.match || !player.match.provider) return;
+    player.failedProviders = Array.isArray(player.failedProviders) ? player.failedProviders : [];
+    const failedId = player.match.provider.id;
+    if (!player.failedProviders.includes(failedId)) player.failedProviders.push(failedId);
+    player.streams = [];
+    player.embeds = [];
+    player.tracks = [];
+    const next = (state.detailMatches || []).find(match =>
+      match && match.provider && match.episodesReady &&
+      !player.failedProviders.includes(match.provider.id) &&
+      match.episodes.some(item => Number(item.number) === Number(player.episode.number))
+    );
+    if (next) {
+      player.match = next;
+      player.selectedServer = ({ justanime: "auto", hianime: "hd-1", anikoto: "anikoto" }[next.provider.id] || "auto");
+      showPlayerOverlay("Switching streaming source", reason + " Trying " + next.provider.name + "…", false);
+      loadPlayerStreams(state.token);
+      return;
+    }
+    showPlayerOverlay("Playback failed on all built-in sources", reason + " No other provider returned a playable source for this episode. Try another episode or check back later.", true);
   }
 
   function attachStream(url, stream, tracks) {
@@ -1038,7 +1075,7 @@
       state.hls.attachMedia(video);
       state.hls.on(window.Hls.Events.ERROR, function (_event, data) {
         if (data && data.fatal) {
-          showPlayerOverlay("Stream playback failed", "The browser could not load this HLS stream. AniDash can try another built-in source.", true);
+          fallbackToNextProvider("The browser could not load the HLS stream from " + (state.player.match.provider.name || "this source") + ".");
           try { state.hls.destroy(); } catch (_) {}
           state.hls = null;
         }
@@ -1055,6 +1092,11 @@
         video.currentTime = saved.position;
       }
       video.play().catch(() => {});
+    };
+    video.onerror = () => {
+      if (state.player && state.player.match && state.currentVideo === url) {
+        fallbackToNextProvider("The browser could not play the returned video URL.");
+      }
     };
     video.ontimeupdate = () => savePlaybackProgress(video);
     video.onended = () => {
@@ -1301,6 +1343,7 @@
       const match = (state.detailMatches || []).find(item => item && item.episodesReady && item.provider.id === providerId);
       if (match) {
         state.player.match = match;
+        state.player.failedProviders = [];
         state.player.selectedServer = ({ justanime: "auto", hianime: "hd-1", anikoto: "anikoto" }[providerId] || "auto");
         loadPlayerStreams(state.token);
       }
@@ -1315,6 +1358,7 @@
     }
     if (target.hasAttribute("data-server")) {
       state.player.selectedServer = target.getAttribute("data-server");
+      state.player.failedProviders = [];
       loadPlayerStreams(state.token);
       return;
     }
