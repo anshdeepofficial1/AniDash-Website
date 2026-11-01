@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 
 const API_BASE = String(process.env.HIANIME_API_URL || "https://shonenx-aniwatch-instance.vercel.app/api/v2/hianime").replace(/\/$/, "");
-const SITE_BASE = String(process.env.HIANIME_SITE_URL || "https://hianime.ms").replace(/\/$/, "");
+const SITE_BASE = String(process.env.HIANIME_SITE_URL || "https://hianime.to").replace(/\/$/, "");
 const VIDNEST_BASE = "https://new.vidnest.fun";
 const VIDNEST_SECRET = process.env.VIDNEST_SECRET || "wSnEvGgWkkxb7nO1yyFgMxhDvogX_Q7Dr0Fi1E4qvn0";
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36";
@@ -104,19 +104,16 @@ async function search(query, page) {
   const url = new URL(API_BASE + "/search");
   url.searchParams.set("keyword", query);
   url.searchParams.set("page", String(page));
+  let payload;
   try {
-    const payload = await requestJson(url.toString());
-    const rows = extractArray(payload, ["data.animes", "data.results", "animes", "results", "data"]);
-    const results = rows.map(normaliseAnime).filter(item => item.id && item.title !== "Unknown");
-    if (results.length) return { results, page, hasMore: payload?.data?.hasNextPage === true || payload?.data?.pageInfo?.hasNextPage === true };
-  } catch (_) {}
-  const htmlUrl = new URL(SITE_BASE + "/search");
-  htmlUrl.searchParams.set("keyword", query);
-  htmlUrl.searchParams.set("page", String(page));
-  const pageData = await requestText(htmlUrl.toString());
-  const results = parseHtmlSearch(pageData.html);
-  if (!results.length) throw new Error("The original HiAnime catalogue endpoint is unavailable or returned no matches.");
-  return { results, page, hasMore: false };
+    payload = await requestJson(url.toString());
+  } catch (error) {
+    throw new Error("HiAnime's legacy API is unavailable: " + error.message);
+  }
+  const rows = extractArray(payload, ["data.animes", "data.results", "animes", "results", "data"]);
+  const results = rows.map(normaliseAnime).filter(item => item.id && item.title !== "Unknown");
+  if (!results.length) throw new Error("HiAnime's legacy API returned no catalogue results. Try another built-in source.");
+  return { results, page, hasMore: payload?.data?.hasNextPage === true || payload?.data?.pageInfo?.hasNextPage === true };
 }
 
 function normaliseEpisode(item, index) {
@@ -133,26 +130,10 @@ function normaliseEpisode(item, index) {
 }
 
 async function resolveAniListId(animeId, givenId) {
-  if (givenId && /^\d+$/.test(String(givenId))) return String(givenId);
-  if (/^\d+$/.test(String(animeId))) return String(animeId);
-  try {
-    const detail = await requestText(SITE_BASE + "/details/" + encodeURIComponent(animeId), 6000);
-    const patterns = [
-      /<[^>]+id=["']syncData["'][^>]*>([\s\S]*?)<\//i,
-      /["']anilist_id["']\s*:\s*["']?(\d+)/i,
-      /(?:vidnest\.fun|tryembed[^/]*)(?:\/embed)?\/anime\/(\d+)\//i
-    ];
-    for (const pattern of patterns) {
-      const match = detail.html.match(pattern);
-      if (!match) continue;
-      if (pattern === patterns[0]) {
-        try {
-          const sync = JSON.parse(match[1]);
-          if (sync.anilist_id) return String(sync.anilist_id);
-        } catch (_) {}
-      } else if (match[1]) return String(match[1]);
-    }
-  } catch (_) {}
+  if (givenId && /^\\d+$/.test(String(givenId))) return String(givenId);
+  if (/^\\d+$/.test(String(animeId))) return String(animeId);
+  // Never scrape a similarly named, unverified HiAnime copy to infer IDs.
+  // AniDash's AniList catalogue supplies the mapping for its built-in flow.
   return null;
 }
 
