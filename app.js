@@ -378,65 +378,87 @@
     }));
   }
 
+  async function prepareMediaSources(media) {
+    const matches = await findProviderMatches(media);
+
+    // JustAnime's native Android provider uses AniList IDs as its anime IDs.
+    // Searching can miss a title even when the direct numeric ID is valid.
+    const justAnime = BUILTIN_PROVIDERS.find(provider => provider.id === "justanime");
+    const hasJustAnimeMatch = matches.some(match => match.provider.id === "justanime" && !match.error);
+    if (justAnime && !hasJustAnimeMatch && media.id != null) {
+      matches.unshift({
+        provider: justAnime,
+        animeId: String(media.id),
+        item: { id: String(media.id), title: titleOf(media) },
+        score: 0,
+        mapped: true,
+        idSource: "AniList"
+      });
+    }
+
+    // Fetch each built-in provider's own episode IDs. Keeping the episode
+    // object on the match is essential: AniKoto uses session IDs, HiAnime uses
+    // episode IDs/query IDs, and JustAnime uses episode numbers.
+    const checked = await Promise.all(matches.map(async match => {
+      if (!match || !match.provider || match.error) return match;
+      try {
+        const episodes = await episodesFromMatch(match, media);
+        if (!episodes.length) {
+          return { ...match, error: "The provider returned no episodes.", episodes: [] };
+        }
+        return { ...match, episodes, episodesReady: true };
+      } catch (error) {
+        return { ...match, error: "Episode lookup failed: " + error.message, episodes: [] };
+      }
+    }));
+
+    // If no native provider can supply an episode list, preserve Android's
+    // AniList mapping fallback for display. This mapped HiAnime entry is kept
+    // as a last-resort stream candidate only; it never blocks other providers.
+    const hasEpisodes = checked.some(match => match && match.episodesReady);
+    if (!hasEpisodes) {
+      const hianime = BUILTIN_PROVIDERS.find(provider => provider.id === "hianime");
+      if (hianime) {
+        const mappedMatch = {
+          provider: hianime,
+          animeId: String(media.id),
+          item: { id: String(media.id), title: titleOf(media) },
+          score: 0,
+          mapped: true,
+          idSource: "AniList"
+        };
+        try {
+          const episodes = await episodesFromMatch(mappedMatch, media);
+          if (episodes.length) checked.push({ ...mappedMatch, episodes, episodesReady: true, mappingOnly: true });
+        } catch (_) {}
+      }
+    }
+
+    const order = { justanime: 0, hianime: 1, anikoto: 2 };
+    checked.sort((a, b) => (order[a.provider?.id] ?? 9) - (order[b.provider?.id] ?? 9));
+    const selected = checked.find(match => match && match.episodesReady) || null;
+    return { matches: checked, selected, episodes: selected ? selected.episodes : [] };
+  }
+
   async function renderAnime(id) {
     const token = ++state.token;
     state.detail = null;
     state.detailMatches = [];
     state.detailEpisodes = [];
     state.selectedMatch = null;
+    state.episodePage = 1;
+    state.episodeFilter = "";
     showLoading("Loading anime details…");
     try {
       const media = await getAnime(id);
       if (token !== state.token) return;
       state.detail = media;
       $("#view").innerHTML = '<div class="loading-state"><div class="loader"></div><p>Checking JustAnime, HiAnime and AniKoto…</p></div>';
-
-      const matches = await findProviderMatches(media);
+      const prepared = await prepareMediaSources(media);
       if (token !== state.token) return;
-      state.detailMatches = matches;
-      const good = matches.filter(match => !match.error);
-      state.selectedMatch = good[0] || null;
-
-      let episodes = [];
-      if (state.selectedMatch) {
-        try {
-          episodes = await episodesFromMatch(state.selectedMatch, media);
-        } catch (error) {
-          state.selectedMatch.error = "Episode request failed: " + error.message;
-          state.selectedMatch = null;
-        }
-      }
-
-      // Android's HiAnime provider falls back to api.ani.zip using the AniList ID.
-      // Use the same mapping on web when title-search matching cannot identify a source slug.
-      if (!episodes.length) {
-        const hianime = BUILTIN_PROVIDERS.find(provider => provider.id === "hianime");
-        if (hianime) {
-          const mappedMatch = {
-            provider: hianime,
-            animeId: String(media.id),
-            item: { id: String(media.id), title: titleOf(media) },
-            score: 0,
-            mapped: true
-          };
-          try {
-            const mappedEpisodes = await episodesFromMatch(mappedMatch, media);
-            if (mappedEpisodes.length) {
-              const existingIndex = state.detailMatches.findIndex(match => match.provider.id === "hianime");
-              if (existingIndex >= 0) state.detailMatches[existingIndex] = mappedMatch;
-              else state.detailMatches.push(mappedMatch);
-              state.selectedMatch = mappedMatch;
-              episodes = mappedEpisodes;
-            }
-          } catch (error) {
-            const existing = state.detailMatches.find(match => match.provider.id === "hianime");
-            if (existing) existing.error = existing.error || "AniList episode mapping unavailable: " + error.message;
-          }
-        }
-      }
-
-      if (token !== state.token) return;
-      state.detailEpisodes = episodes.length ? episodes : generatedEpisodes(media);
+      state.detailMatches = prepared.matches;
+      state.selectedMatch = prepared.selected;
+      state.detailEpisodes = prepared.episodes.length ? prepared.episodes : generatedEpisodes(media);
       paintAnimeDetails(media);
     } catch (error) {
       if (token !== state.token) return;
