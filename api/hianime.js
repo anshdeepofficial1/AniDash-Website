@@ -186,19 +186,22 @@ function safeEpisodeId(animeId, episodeId) {
 }
 
 async function servers(animeId, episodeId, category) {
-  const actual = safeEpisodeId(animeId, episodeId);
-  const url = new URL(API_BASE + "/episode/servers");
-  url.searchParams.set("animeEpisodeId", actual);
-  const payload = await requestJson(url.toString());
   const key = category === "dub" ? "dub" : "sub";
-  const rows = Array.isArray(payload?.data?.[key]) ? payload.data[key] : [];
-  const result = rows.map(item => {
-    const id = String(item?.serverName || item?.serverId || "");
-    return { id, name: id ? id.toUpperCase() : "Server" };
-  }).filter(item => item.id);
-  return { servers: result.length ? result : fallbackServers(), category: key };
+  try {
+    const actual = safeEpisodeId(animeId, episodeId);
+    const url = new URL(API_BASE + "/episode/servers");
+    url.searchParams.set("animeEpisodeId", actual);
+    const payload = await requestJson(url.toString());
+    const rows = Array.isArray(payload?.data?.[key]) ? payload.data[key] : [];
+    const result = rows.map(item => {
+      const id = String(item?.serverName || item?.serverId || "");
+      return { id, name: id ? id.toUpperCase() : "Server" };
+    }).filter(item => item.id);
+    return { servers: result.length ? result : fallbackServers(), category: key };
+  } catch (_) {
+    return { servers: fallbackServers(), category: key };
+  }
 }
-
 function fallbackServers() {
   return [
     { id: "aniwave", name: "AniWave • HLS" },
