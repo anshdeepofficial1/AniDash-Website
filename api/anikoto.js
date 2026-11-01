@@ -274,6 +274,39 @@ async function streams(req, animeSession, episodeId, category) {
   };
 }
 
+async function getAniKotoEmbedFallback(anilistId, malId, episode, category) {
+  if (!/^\d+$/.test(anilistId) && !/^\d+$/.test(malId)) return [];
+  const safeEpisode = Math.max(1, Math.min(9999, Number.parseInt(episode, 10) || 1));
+  const endpoint = new URL("https://anikototvapi.vercel.app/api/stream/embeds");
+  if (/^\d+$/.test(anilistId)) endpoint.searchParams.set("anilist", anilistId);
+  if (/^\d+$/.test(malId)) endpoint.searchParams.set("mal", malId);
+  endpoint.searchParams.set("ep", String(safeEpisode));
+  endpoint.searchParams.set("lang", category === "dub" ? "dub" : "sub");
+
+  const response = await fetch(endpoint.toString(), {
+    headers: { Accept: "application/json", "User-Agent": API_USER_AGENT },
+    signal: AbortSignal.timeout(5000)
+  });
+  if (!response.ok) throw new Error("AniKoto embed fallback returned HTTP " + response.status);
+  const payload = await response.json();
+  const rows = Array.isArray(payload?.results?.providers) ? payload.results.providers : [];
+  const allowed = new Set(["megaplay.buzz", "anixo.buzz", "megavid.buzz"]);
+  return rows.map(item => {
+    let url;
+    try { url = new URL(String(item?.url || "")); } catch { return null; }
+    if (url.protocol !== "https:" || !allowed.has(url.hostname.toLowerCase())) return null;
+    return {
+      id: String(item.id || url.hostname),
+      name: String(item.name || item.id || "AniKoto partner"),
+      url: url.toString(),
+      type: "embed",
+      isEmbed: true,
+      iframeReady: true,
+      isDub: category === "dub"
+    };
+  }).filter(Boolean);
+}
+
 export default async function handler(req, res) {
   if (req.method !== "GET") return send(res, 405, { error: "Use GET" });
   try {
@@ -290,7 +323,25 @@ export default async function handler(req, res) {
       return send(res, 200, { servers: [{ id: "anikoto", name: "AniKoto • Kwik" }] });
     }
     if (action === "streams") {
-      return send(res, 200, await streams(req, req.query.id, req.query.episodeId, req.query.category === "dub" ? "dub" : "sub"), "no-store");
+      try {
+        return send(res, 200, await streams(req, req.query.id, req.query.episodeId, req.query.category === "dub" ? "dub" : "sub"), "no-store");
+      } catch (streamError) {
+        const embeds = await getAniKotoEmbedFallback(
+          String(req.query.anilistId || ""),
+          String(req.query.malId || ""),
+          String(req.query.episode || "1"),
+          req.query.category === "dub" ? "dub" : "sub"
+        ).catch(() => []);
+        if (embeds.length) {
+          return send(res, 200, {
+            sources: [],
+            embeds,
+            fallback: true,
+            fallbackReason: streamError?.message || "AniKoto direct stream extraction was blocked"
+          }, "no-store");
+        }
+        throw streamError;
+      }
     }
     return send(res, 400, { error: "Unknown AniKoto action" });
   } catch (error) {
