@@ -585,8 +585,11 @@
     // provider route without requiring the blocked site session endpoint.
     const hasAniKoto = checked.some(match => match && match.provider.id === "anikoto" && match.episodesReady);
     const episodeSource = checked.find(match => match && match.episodesReady && match.episodes && match.episodes.length);
+    const mappedEpisodes = episodeSource && episodeSource.episodes.length
+      ? episodeSource.episodes.map(item => ({ ...item, id: String(item.number) }))
+      : generatedEpisodes(media);
     const anikoto = BUILTIN_PROVIDERS.find(provider => provider.id === "anikoto");
-    if (!hasAniKoto && anikoto && episodeSource && (media.id != null || media.idMal != null)) {
+    if (!hasAniKoto && anikoto && mappedEpisodes.length && (media.id != null || media.idMal != null)) {
       checked.push({
         provider: anikoto,
         animeId: String(media.id || media.idMal),
@@ -595,7 +598,7 @@
         mapped: true,
         embedOnly: true,
         idSource: "AniList/MAL",
-        episodes: episodeSource.episodes.map(item => ({ ...item, id: String(item.number) })),
+        episodes: mappedEpisodes,
         episodesReady: true
       });
     }
