@@ -1,7 +1,6 @@
 const SITE_BASES = [
-  String(process.env.ANIKOTO_BASE_URL || "https://anikoto.pw").replace(/\/$/, ""),
-  "https://anikototv.to"
-].filter((value, index, rows) => rows.indexOf(value) === index);
+  String(process.env.ANIKOTO_BASE_URL || "https://anikoto.pw").replace(/\/$/, "")
+];
 const API_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Safari/537.36";
 const KWIK_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
 
