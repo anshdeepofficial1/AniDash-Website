@@ -43,7 +43,7 @@ async function requestText(url, headers = {}, timeout = 7000) {
   return { text: await response.text(), url: finalUrl };
 }
 
-async function requestJson(url, headers = {}, timeout = 15000) {
+async function requestJson(url, headers = {}, timeout = 7000) {
   const result = await requestText(url, { Accept: "application/json, text/plain, */*", ...headers }, timeout);
   const payload = JSON.parse(result.text);
   if (!payload || payload.error) throw new Error(payload?.error || "Invalid AniKoto response");
