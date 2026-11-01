@@ -233,7 +233,7 @@
           '</div></section>' : '') +
         quickLinks +
         resumeShelf(continueItems) +
-        shelf("Airing this week", "Fresh episodes from currently releasing series.", airing.slice(0, 14), "/discover") +
+        shelf("Currently airing", "Fresh episodes from currently releasing series.", airing.slice(0, 14), "/discover") +
         shelf("Trending right now", "The series viewers are talking about.", trending.slice(0, 14), "/discover") +
         shelf("Popular with fans", "Big adventures, favourites and crowd-pleasers.", popular.slice(0, 14), "/discover") +
         (watchlistItems.length ? shelf("From your watchlist", "Saved anime, ready when you are.", watchlistItems, "/library") : '') +
@@ -1022,7 +1022,7 @@
     const overlay = $("#player-overlay");
     if (!overlay) return;
     overlay.innerHTML = '<div style="font-size:28px;color:#b99aff">◈</div><strong>' + escapeHtml(title) + '</strong><p>' + escapeHtml(description) + '</p>' +
-      (showAction ? '<button class="btn btn-primary" data-open-direct>Paste stream link</button>' : '');
+      (showAction ? '<div class="player-error-actions"><button class="btn btn-primary" data-retry-sources>Retry all built-in sources</button><button class="btn btn-secondary" data-open-direct>Paste stream link</button></div>' : '');
   }
 
   function renderPlayerOptions() {
@@ -1362,6 +1362,19 @@
     }
     if (target.hasAttribute("data-open-sources")) { openSourcesModal(); return; }
     if (target.hasAttribute("data-refresh-sources")) { if (state.detail) renderAnime(String(state.detail.id)); return; }
+    if (target.hasAttribute("data-retry-sources")) {
+      if (state.player) {
+        state.player.failedProviders = [];
+        state.player.candidates = [];
+        state.player.candidateIndex = 0;
+        state.player.streams = [];
+        state.player.embeds = [];
+        state.player.servers = [];
+        state.player.selectedServer = ({ justanime: "auto", hianime: "hd-1", anikoto: "anikoto" }[state.player.match?.provider?.id] || "auto");
+        loadPlayerStreams(state.token);
+      }
+      return;
+    }
     if (target.hasAttribute("data-open-direct")) { openDirectModal(); return; }
     if (target.hasAttribute("data-install")) { openInstallGuide(); return; }
     if (target.hasAttribute("data-close")) { closeModal(); return; }
@@ -1447,6 +1460,11 @@
       if (match) {
         state.player.match = match;
         state.player.failedProviders = [];
+        state.player.candidates = [];
+        state.player.candidateIndex = 0;
+        state.player.streams = [];
+        state.player.embeds = [];
+        state.player.servers = [];
         state.player.selectedServer = ({ justanime: "auto", hianime: "hd-1", anikoto: "anikoto" }[providerId] || "auto");
         loadPlayerStreams(state.token);
       }
@@ -1455,13 +1473,24 @@
     if (target.hasAttribute("data-category")) {
       const category = target.getAttribute("data-category");
       state.player.category = category;
-      $$("[data-category]").forEach(el => el.classList.toggle("active", el.getAttribute("data-category") === category));
+      state.player.failedProviders = [];
+      state.player.candidates = [];
+      state.player.candidateIndex = 0;
+      state.player.streams = [];
+      state.player.embeds = [];
+      state.player.servers = [];
+      state.player.selectedServer = ({ justanime: "auto", hianime: "hd-1", anikoto: "anikoto" }[state.player.match?.provider?.id] || "auto");
+      $("[data-category]").forEach(el => el.classList.toggle("active", el.getAttribute("data-category") === category));
       loadPlayerStreams(state.token);
       return;
     }
     if (target.hasAttribute("data-server")) {
       state.player.selectedServer = target.getAttribute("data-server");
       state.player.failedProviders = [];
+      state.player.candidates = [];
+      state.player.candidateIndex = 0;
+      state.player.streams = [];
+      state.player.embeds = [];
       loadPlayerStreams(state.token);
       return;
     }
