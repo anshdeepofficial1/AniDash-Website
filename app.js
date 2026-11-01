@@ -706,7 +706,8 @@
       $("#view").innerHTML = '<div class="empty-state"><h3>Anime not found</h3><p>Return to the catalogue and open the title again.</p><button class="btn btn-primary" data-route="/home">Home</button></div>';
       return;
     }
-    if (!state.detail || String(state.detail.id) !== String(id)) {
+    const hasPreparedSources = (state.detailMatches || []).some(match => match && match.episodesReady && Array.isArray(match.episodes));
+    if (!state.detail || String(state.detail.id) !== String(id) || !hasPreparedSources) {
       state.detail = media;
       const prepared = await prepareMediaSources(media);
       if (token !== state.token) return;
@@ -1073,11 +1074,12 @@
       state.hls = new window.Hls({ enableWorker: true, lowLatencyMode: false, backBufferLength: 45, maxBufferLength: 45 });
       state.hls.loadSource(url);
       state.hls.attachMedia(video);
+      const activeHls = state.hls;
       state.hls.on(window.Hls.Events.ERROR, function (_event, data) {
-        if (data && data.fatal) {
+        if (data && data.fatal && state.currentVideo === url) {
+          try { activeHls.destroy(); } catch (_) {}
+          if (state.hls === activeHls) state.hls = null;
           fallbackToNextProvider("The browser could not load the HLS stream from " + (state.player.match.provider.name || "this source") + ".");
-          try { state.hls.destroy(); } catch (_) {}
-          state.hls = null;
         }
       });
     } else {
