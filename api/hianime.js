@@ -16,7 +16,7 @@ function send(res, status, body) {
   return res.status(status).json(body);
 }
 
-async function requestJson(url, timeout = 12000) {
+async function requestJson(url, timeout = 6000) {
   const response = await fetch(url, {
     headers: { Accept: "application/json, text/plain, */*", "User-Agent": UA },
     signal: AbortSignal.timeout(timeout)
@@ -25,7 +25,7 @@ async function requestJson(url, timeout = 12000) {
   return response.json();
 }
 
-async function requestText(url, timeout = 12000) {
+async function requestText(url, timeout = 6000) {
   const response = await fetch(url, {
     headers: { Accept: "text/html,application/xhtml+xml,*/*", "User-Agent": UA, Referer: SITE_BASE + "/" },
     signal: AbortSignal.timeout(timeout)
@@ -128,7 +128,7 @@ async function resolveAniListId(animeId, givenId) {
   if (givenId && /^\d+$/.test(String(givenId))) return String(givenId);
   if (/^\d+$/.test(String(animeId))) return String(animeId);
   try {
-    const detail = await requestText(SITE_BASE + "/details/" + encodeURIComponent(animeId), 10000);
+    const detail = await requestText(SITE_BASE + "/details/" + encodeURIComponent(animeId), 6000);
     const patterns = [
       /<[^>]+id=["']syncData["'][^>]*>([\s\S]*?)<\//i,
       /["']anilist_id["']\s*:\s*["']?(\d+)/i,
@@ -299,9 +299,8 @@ async function streams(req, animeId, episodeId, anilistId, serverName, category)
   paths.push("hianime/anime/" + mappedId + "/" + episodeNo + "/" + lang + "/hd-2");
   paths.push("animehub/" + mappedId + "/" + episodeNo + "/" + lang);
 
-  let lastError = null;
-  for (const path of [...new Set(paths)]) {
-    try {
+  try {
+    return await Promise.any([...new Set(paths)].map(async path => {
       const data = await fetchVidNest(path);
       const raw = data?.sources || data?.multiSrc || [];
       const parsed = normaliseSources(req, raw, lang, path.startsWith("aniwave") ? "AniWave" : path.startsWith("hianime") ? "HiAnime HD-2" : "MegaPlay");
@@ -313,11 +312,12 @@ async function streams(req, animeId, episodeId, anilistId, serverName, category)
         intro: data.intro || null,
         outro: data.outro || null
       };
-    } catch (error) {
-      lastError = error;
-    }
+    }));
+  } catch (error) {
+    const reasons = Array.isArray(error?.errors) ? error.errors : [];
+    const detail = reasons.map(item => item?.message).filter(Boolean).slice(0, 2).join("; ");
+    throw new Error("HiAnime stream resolution failed" + (detail ? ": " + detail : ""));
   }
-  throw new Error("HiAnime stream resolution failed" + (lastError ? ": " + lastError.message : ""));
 }
 
 export default async function handler(req, res) {
