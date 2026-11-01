@@ -243,11 +243,8 @@ function normaliseSources(req, rawSources, category, label, inheritedHeaders = {
     const isM3U8 = item?.isM3U8 === true || /\.m3u8(?:$|\?)/i.test(url);
     return {
       url: mediaUrl(req, url, isM3U8, {
-        Referer: upstreamHeader([item?.headers, inheritedHeaders], ["referer"], item?.referer || SITE_BASE + "/"),
-        Origin: upstreamHeader([item?.headers, inheritedHeaders], ["origin"], (() => {
-          try { return new URL(item?.referer || upstreamHeader([inheritedHeaders], ["referer"], SITE_BASE + "/")).origin; }
-          catch (_) { return SITE_BASE; }
-        })()),
+        Referer: upstreamHeader([item?.headers, inheritedHeaders], ["referer"], item?.referer || ""),
+        Origin: upstreamHeader([item?.headers, inheritedHeaders], ["origin"], ""),
         "User-Agent": upstreamHeader([item?.headers, inheritedHeaders], ["user-agent"], UA),
         Accept: upstreamHeader([item?.headers, inheritedHeaders], ["accept"], "*/*")
       }),
