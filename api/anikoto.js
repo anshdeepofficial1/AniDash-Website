@@ -69,16 +69,16 @@ function makeApiUrl(base, params) {
 }
 
 async function requestAcrossSites(params) {
-  let lastError = null;
-  for (const base of SITE_BASES) {
-    try {
-      const payload = await requestJson(makeApiUrl(base, params), { Referer: base + "/" });
+  try {
+    return await Promise.any(SITE_BASES.map(async base => {
+      const payload = await requestJson(makeApiUrl(base, params), { Referer: base + "/" }, 4500);
       return { payload, base };
-    } catch (error) {
-      lastError = error;
-    }
+    }));
+  } catch (error) {
+    const reasons = Array.isArray(error?.errors) ? error.errors : [];
+    const detail = reasons.map(item => item?.message).filter(Boolean).slice(0, 2).join("; ");
+    throw new Error("All verified AniKoto mirrors failed" + (detail ? ": " + detail : ""));
   }
-  throw lastError || new Error("AniKoto is unavailable");
 }
 
 function normalizeTitle(item) {
@@ -104,26 +104,33 @@ async function search(query) {
 async function episodes(animeId) {
   const session = String(animeId || "").trim();
   if (!/^[\w-]{1,160}$/.test(session)) throw new Error("Invalid AniKoto anime ID");
-  let baseUsed = SITE_BASES[0];
-  let payload = null;
-  let lastError = null;
-  for (const base of SITE_BASES) {
-    try {
-      payload = await requestJson(makeApiUrl(base, { m: "release", id: session, sort: "episode_asc" }), { Referer: base + "/" });
-      baseUsed = base;
-      if (Array.isArray(payload.data)) break;
-    } catch (error) {
-      lastError = error;
-      payload = null;
-    }
-  }
-  if (!payload || !Array.isArray(payload.data)) throw lastError || new Error("AniKoto did not return an episode list");
 
-  const allRows = [...payload.data];
-  const lastPage = Math.min(30, Math.max(1, Number(payload.last_page || 1)));
+  let firstResult;
+  try {
+    firstResult = await Promise.any(SITE_BASES.map(async base => {
+      const payload = await requestJson(
+        makeApiUrl(base, { m: "release", id: session, sort: "episode_asc" }),
+        { Referer: base + "/" },
+        4500
+      );
+      if (!Array.isArray(payload.data)) throw new Error("AniKoto mirror did not return an episode array");
+      return { payload, base };
+    }));
+  } catch (error) {
+    const reasons = Array.isArray(error?.errors) ? error.errors : [];
+    const detail = reasons.map(item => item?.message).filter(Boolean).slice(0, 2).join("; ");
+    throw new Error("AniKoto episode list is unavailable on verified mirrors" + (detail ? ": " + detail : ""));
+  }
+
+  const allRows = [...firstResult.payload.data];
+  const lastPage = Math.min(30, Math.max(1, Number(firstResult.payload.last_page || 1)));
   if (lastPage > 1) {
     const pages = await Promise.all(Array.from({ length: lastPage - 1 }, (_, index) =>
-      requestJson(makeApiUrl(baseUsed, { m: "release", id: session, sort: "episode_asc", page: index + 2 }), { Referer: baseUsed + "/" }).catch(() => null)
+      requestJson(
+        makeApiUrl(firstResult.base, { m: "release", id: session, sort: "episode_asc", page: index + 2 }),
+        { Referer: firstResult.base + "/" },
+        4500
+      ).catch(() => null)
     ));
     pages.filter(Boolean).forEach(page => { if (Array.isArray(page.data)) allRows.push(...page.data); });
   }
@@ -143,11 +150,10 @@ async function episodes(animeId) {
     };
   }).filter(item => item.id.endsWith("+") === false);
   rows.sort((a, b) => a.number - b.number);
-  rows.forEach((item, index) => {
-    if (!Number.isFinite(item.number) || item.number <= 0) item.number = index + 1;
-    if (/^Episode\s+\d+$/i.test(item.title)) item.title = "Episode " + item.number;
-  });
-  return { episodes: rows, totalEpisodes: rows.length };
+  const unique = new Map();
+  rows.forEach(item => { if (!unique.has(item.number)) unique.set(item.number, item); });
+  const episodes = [...unique.values()];
+  return { episodes, totalEpisodes: episodes.length };
 }
 
 function readAttribute(tag, name) {
@@ -249,20 +255,17 @@ async function streams(req, animeSession, episodeId, category) {
   if (parts.length !== 2 || parts[0] !== String(animeSession) || !parts[1]) {
     throw new Error("AniKoto episode session is missing. Reload the episode list and try again.");
   }
-  let base = SITE_BASES[0];
-  let page = null;
-  let lastPageError = null;
-  for (const candidateBase of SITE_BASES) {
+  const pageResult = await Promise.any(SITE_BASES.map(async candidateBase => {
     const playUrl = new URL(candidateBase + "/play/" + encodeURIComponent(parts[0]) + "/" + encodeURIComponent(parts[1]));
-    try {
-      page = await requestText(playUrl.toString(), { Referer: candidateBase + "/" }, 3500);
-      base = candidateBase;
-      break;
-    } catch (error) {
-      lastPageError = error;
-    }
-  }
-  if (!page) throw lastPageError || new Error("AniKoto player page is unavailable on all known mirrors");
+    const page = await requestText(playUrl.toString(), { Referer: candidateBase + "/" }, 3500);
+    return { base: candidateBase, page };
+  })).catch(error => {
+    const reasons = Array.isArray(error?.errors) ? error.errors : [];
+    const detail = reasons.map(item => item?.message).filter(Boolean).slice(0, 2).join("; ");
+    throw new Error("AniKoto player page unavailable on verified mirrors" + (detail ? ": " + detail : ""));
+  });
+  const base = pageResult.base;
+  const page = pageResult.page;
   const menu = page.text;
   const buttons = [...menu.matchAll(/<button\b[^>]*>([\s\S]*?)<\/button>/gi)].map(match => ({
     tag: match[0].match(/^<button\b[^>]*>/i)?.[0] || match[0],
