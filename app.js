@@ -868,6 +868,8 @@
     player.streams = [];
     player.tracks = [];
     player.embeds = [];
+    player.candidates = [];
+    player.candidateIndex = 0;
     renderPlayerOptions();
     const failures = [];
 
@@ -964,25 +966,25 @@
         player.servers = servers;
         player.selectedServer = selectedServer;
         player.streams = streams;
-        player.embeds = embeds;
+        player.embeds = embeds.map(item => ({
+          ...item,
+          type: "embed",
+          isEmbed: true,
+          quality: item.quality || item.name || item.id || "Embedded player"
+        }));
+        player.candidates = [
+          ...streams,
+          ...player.embeds
+        ];
+        player.candidateIndex = 0;
         player.tracks = extractArray(payload, ["tracks", "subtitles", "data.tracks"]);
         player.intro = payload && payload.intro || null;
         player.outro = payload && payload.outro || null;
         renderPlayerOptions();
 
-        if (streams.length) {
-          const first = streams[0];
-          attachStream(first.url || first.src || first.file, first, player.tracks);
-        } else {
-          const firstEmbed = embeds[0];
-          attachStream(firstEmbed.url || firstEmbed.src, {
-            ...firstEmbed,
-            type: "embed",
-            isEmbed: true,
-            quality: firstEmbed.name || firstEmbed.id || "Embedded player"
-          }, []);
-        }
-        toast("Playing from " + provider.name + ".");
+        const first = player.candidates[0];
+        attachStream(first.url || first.src || first.file, first, first.isEmbed ? [] : player.tracks);
+        toast("Source ready: " + provider.name + ".");
         return;
       } catch (error) {
         if (!player.failedProviders.includes(provider.id)) player.failedProviders.push(provider.id);
@@ -1028,9 +1030,9 @@
     }
     const qualities = $("#quality-pills");
     if (qualities) {
-      const qualityItems = player.streams.length ? player.streams : (player.embeds || []);
+      const qualityItems = Array.isArray(player.candidates) && player.candidates.length ? player.candidates : (player.streams.length ? player.streams : (player.embeds || []));
       qualities.innerHTML = qualityItems.map((stream, index) =>
-        '<button class="source-pill' + (index === 0 ? " active" : "") + '" data-stream="' + index + '">' + escapeHtml(stream.quality || stream.name || stream.label || stream.type || ("Source " + (index + 1))) + '</button>'
+        '<button class="source-pill' + (index === Number(player.candidateIndex || 0) ? " active" : "") + '" data-stream="' + index + '">' + escapeHtml(stream.quality || stream.name || stream.label || stream.type || ("Source " + (index + 1))) + '</button>'
       ).join("");
     }
     const skip = $("#skip-buttons");
@@ -1043,15 +1045,32 @@
   function fallbackToNextProvider(reason) {
     const player = state.player;
     if (!player || !player.match || !player.match.provider) return;
+
+    const candidates = Array.isArray(player.candidates) ? player.candidates : [];
+    const nextCandidateIndex = Number(player.candidateIndex || 0) + 1;
+    if (nextCandidateIndex < candidates.length) {
+      player.candidateIndex = nextCandidateIndex;
+      const candidate = candidates[nextCandidateIndex];
+      showPlayerOverlay(
+        "Trying another server",
+        reason + " Trying " + (candidate.quality || candidate.name || "the next stream") + "…",
+        false
+      );
+      attachStream(candidate.url || candidate.src || candidate.file, candidate, candidate.isEmbed ? [] : player.tracks);
+      return;
+    }
+
     player.failedProviders = Array.isArray(player.failedProviders) ? player.failedProviders : [];
     const failedId = player.match.provider.id;
     if (!player.failedProviders.includes(failedId)) player.failedProviders.push(failedId);
     player.streams = [];
     player.embeds = [];
+    player.candidates = [];
     player.tracks = [];
     const next = (state.detailMatches || []).find(match =>
       match && match.provider && match.episodesReady &&
       !player.failedProviders.includes(match.provider.id) &&
+      Array.isArray(match.episodes) &&
       match.episodes.some(item => Number(item.number) === Number(player.episode.number))
     );
     if (next) {
@@ -1061,21 +1080,25 @@
       loadPlayerStreams(state.token);
       return;
     }
-    showPlayerOverlay("Playback failed on all built-in sources", reason + " No other provider returned a playable source for this episode. Try another episode or check back later.", true);
+    showPlayerOverlay(
+      "Playback failed on all built-in sources",
+      reason + " AniDash tried the available servers and the other built-in providers, but none returned a playable stream. Try another episode or retry later.",
+      true
+    );
   }
 
   function attachStream(url, stream, tracks) {
     if (!url) {
-      showPlayerOverlay("Invalid stream URL", "The provider did not return a media URL.", true);
+      fallbackToNextProvider("The provider did not return a media URL.");
       return;
     }
     let parsed;
     try { parsed = new URL(url); } catch (_) {
-      showPlayerOverlay("Invalid stream URL", "The source URL is not valid.", true);
+      fallbackToNextProvider("The source returned an invalid media URL.");
       return;
     }
     if (parsed.protocol !== "https:" && parsed.hostname !== "localhost") {
-      showPlayerOverlay("Insecure stream blocked", "Only HTTPS video sources are allowed on the deployed website.", true);
+      fallbackToNextProvider("The source returned a non-HTTPS URL, which AniDash blocks for safety.");
       return;
     }
 
@@ -1431,11 +1454,14 @@
     }
     if (target.hasAttribute("data-stream")) {
       const index = Number(target.getAttribute("data-stream"));
-      const list = state.player.streams.length ? state.player.streams : (state.player.embeds || []);
+      const list = Array.isArray(state.player.candidates) && state.player.candidates.length
+        ? state.player.candidates
+        : (state.player.streams.length ? state.player.streams : (state.player.embeds || []));
       const stream = list[index];
       if (stream) {
-        $$("[data-stream]").forEach(el => el.classList.toggle("active", Number(el.getAttribute("data-stream")) === index));
-        attachStream(stream.url || stream.src || stream.file, stream, state.player.tracks);
+        state.player.candidateIndex = index;
+        $("[data-stream]").forEach(el => el.classList.toggle("active", Number(el.getAttribute("data-stream")) === index));
+        attachStream(stream.url || stream.src || stream.file, stream, stream.isEmbed ? [] : state.player.tracks);
       }
       return;
     }
