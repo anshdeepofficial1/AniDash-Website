@@ -11,8 +11,9 @@ const jsonHeaders = {
   "Cache-Control": "public, s-maxage=20, stale-while-revalidate=60"
 };
 
-function send(res, status, body) {
+function send(res, status, body, cacheControl) {
   Object.entries(jsonHeaders).forEach(([key, value]) => res.setHeader(key, value));
+  if (cacheControl) res.setHeader("Cache-Control", cacheControl);
   return res.status(status).json(body);
 }
 
@@ -335,7 +336,7 @@ export default async function handler(req, res) {
     }
     if (action === "servers") {
       const result = await servers(String(req.query.id || ""), String(req.query.episodeId || ""), String(req.query.category || "sub"));
-      return send(res, 200, result);
+      return send(res, 200, result, "no-store");
     }
     if (action === "streams") {
       const result = await streams(
