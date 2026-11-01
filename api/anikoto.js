@@ -227,7 +227,7 @@ function mediaUrl(req, raw, isHls) {
   try {
     const target = new URL(String(raw));
     if (target.protocol !== "https:") return target.toString();
-    const hosts = ["neko.justanime.to", "nexabloom.top", "give6beforegtav.site", "kwik.cx", "kwik.si", "kwik.to", "kwik.li"];
+    const hosts = ["neko.justanime.to", "nexabloom.top", "give6beforegtav.site", "kwik.cx", "kwik.si", "kwik.to", "kwik.li", "norami.top", "kryntal.top", "akirax.buzz", "vid-tube.site"];
     if (!hosts.some(host => target.hostname === host || target.hostname.endsWith("." + host))) return target.toString();
     const proto = String(req.headers["x-forwarded-proto"] || "https").split(",")[0].trim();
     const host = String(req.headers["x-forwarded-host"] || req.headers.host || "");
