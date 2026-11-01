@@ -34,25 +34,17 @@ function safeTarget(raw) {
   return target;
 }
 
-function unwrapExternalProxy(target) {
+function proxyContext(target) {
   if (target.hostname !== STREAM_PROXY_HOST || !target.pathname.includes("m3u8-proxy")) {
-    return { target, original: null };
+    return { original: null, headers: {} };
   }
   const raw = target.searchParams.get("url");
-  if (!raw) throw new Error("The stream proxy URL is missing its media URL");
+  if (!raw) throw new Error("The JustAnime relay URL is missing its source URL");
   const original = safeTarget(raw);
-  let custom = {};
-  try {
-    custom = JSON.parse(target.searchParams.get("headers") || "{}");
-  } catch (_) {}
-  const safeHeaders = {};
-  for (const [key, value] of Object.entries(custom)) {
-    if (/^(referer|origin|user-agent|accept)$/i.test(key) && typeof value === "string" && value.length <= 500) {
-      safeHeaders[key] = value;
-    }
-  }
-  return { target: original, original, safeHeaders };
+  const headers = sanitisePlaybackHeaders(target.searchParams.get("headers") || "{}");
+  return { original, headers };
 }
+
 
 function headersFor(target, req, custom = {}) {
   const isJustAnime = target.hostname === "neko.justanime.to" || target.hostname.endsWith(".justanime.to");
@@ -120,14 +112,31 @@ function sanitisePlaybackHeaders(raw) {
   return output;
 }
 
-function proxyUrl(base, target, hls, headers = {}) {
-  let url = base + "/api/media?url=" + encodeURIComponent(target.toString()) + "&hls=" + (hls ? "1" : "0");
+function directProxyUrl(publicBase, target, hls, headers = {}) {
+  let url = publicBase + "/api/media?url=" + encodeURIComponent(target.toString()) + "&hls=" + (hls ? "1" : "0");
   const safe = sanitisePlaybackHeaders(headers);
   if (Object.keys(safe).length) url += "&headers=" + encodeURIComponent(JSON.stringify(safe));
   return url;
 }
 
-function rewritePlaylist(playlist, baseUrl, publicBase, headers = {}) {
+function externalProxyUrl(target, headers = {}) {
+  const safe = sanitisePlaybackHeaders(headers);
+  return "https://neko.justanime.to/m3u8-proxy?url=" +
+    encodeURIComponent(target.toString()) +
+    "&headers=" + encodeURIComponent(JSON.stringify(safe));
+}
+
+function proxyUrl(publicBase, target, hls, headers = {}, useExternalProxy = false) {
+  const mediaTarget = useExternalProxy ? externalProxyUrl(target, headers) : target.toString();
+  let url = publicBase + "/api/media?url=" + encodeURIComponent(mediaTarget) + "&hls=" + (hls ? "1" : "0");
+  if (!useExternalProxy) {
+    const safe = sanitisePlaybackHeaders(headers);
+    if (Object.keys(safe).length) url += "&headers=" + encodeURIComponent(JSON.stringify(safe));
+  }
+  return url;
+}
+
+function rewritePlaylist(playlist, baseUrl, publicBase, headers = {}, useExternalProxy = false) {
   let nextIsPlaylist = false;
   return playlist.split(/\r?\n/).map(line => {
     const value = line.trim();
@@ -136,8 +145,9 @@ function rewritePlaylist(playlist, baseUrl, publicBase, headers = {}) {
       const playlistTag = /^#EXT-X-(?:MEDIA|I-FRAME-STREAM-INF):/i.test(value);
       const rewritten = line.replace(/URI="([^"]+)"/g, (_, raw) => {
         let target;
-        try { target = safeTarget(new URL(raw, baseUrl).toString()); } catch { return 'URI="' + raw.replace(/"/g, "") + '"'; }
-        return 'URI="' + proxyUrl(publicBase, target, playlistTag, headers) + '"';
+        try { target = safeTarget(new URL(raw, baseUrl).toString()); }
+        catch { return 'URI="' + raw.replace(/"/g, "") + '"'; }
+        return 'URI="' + proxyUrl(publicBase, target, playlistTag, headers, useExternalProxy) + '"';
       });
       nextIsPlaylist = /^#EXT-X-STREAM-INF:/i.test(value);
       return rewritten;
@@ -147,7 +157,7 @@ function rewritePlaylist(playlist, baseUrl, publicBase, headers = {}) {
     catch { return line; }
     const isPlaylist = nextIsPlaylist || /\.m3u8(?:$|\?)/i.test(target.pathname + target.search);
     nextIsPlaylist = false;
-    return proxyUrl(publicBase, target, isPlaylist, headers);
+    return proxyUrl(publicBase, target, isPlaylist, headers, useExternalProxy);
   }).join("\n");
 }
 
@@ -167,18 +177,22 @@ export default async function handler(req, res) {
   }
   try {
     const requested = safeTarget(req.query.url);
-    const unwrapped = unwrapExternalProxy(requested);
-    const target = unwrapped.target;
-    const playbackHeaders = { ...sanitisePlaybackHeaders(req.query.headers), ...(unwrapped.safeHeaders || {}) };
+    const context = proxyContext(requested);
+    const usesExternalProxy = context.original !== null;
+    const target = requested;
+    const playbackHeaders = usesExternalProxy
+      ? {}
+      : sanitisePlaybackHeaders(req.query.headers);
     const upstream = await fetchAllowed(target, req, playbackHeaders);
     if (!upstream.ok && upstream.status !== 206) {
       return res.status(upstream.status).end();
     }
 
     const contentType = String(upstream.headers.get("content-type") || "").toLowerCase();
+    const originalTarget = context.original || target;
     const isPlaylist = req.query.hls === "1" ||
       contentType.includes("mpegurl") ||
-      /\.m3u8(?:$|\?)/i.test(target.pathname + target.search);
+      /\.m3u8(?:$|\?)/i.test(originalTarget.pathname + originalTarget.search);
 
     if (isPlaylist) {
       const body = await upstream.text();
@@ -189,7 +203,11 @@ export default async function handler(req, res) {
       res.setHeader("Cache-Control", "private, no-store");
       res.setHeader("Access-Control-Allow-Origin", "*");
       res.setHeader("Access-Control-Allow-Headers", "Range, Content-Type");
-      return res.status(200).send(rewritePlaylist(body, new URL(upstream.url || target.toString()), getPublicBase(req), playbackHeaders));
+      const playlistBase = context.original || new URL(upstream.url || target.toString());
+      const headersToForward = context.original ? context.headers : playbackHeaders;
+      return res.status(200).send(
+        rewritePlaylist(body, playlistBase, getPublicBase(req), headersToForward, usesExternalProxy)
+      );
     }
 
     for (const name of ["content-type", "content-length", "content-range", "accept-ranges", "etag", "last-modified"]) {
