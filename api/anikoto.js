@@ -346,15 +346,19 @@ export default async function handler(req, res) {
       return send(res, 200, { servers: [{ id: "anikoto", name: "AniKoto • Kwik" }] });
     }
     if (action === "streams") {
+      const category = req.query.category === "dub" ? "dub" : "sub";
+      const embedTask = getAniKotoEmbedFallback(
+        String(req.query.anilistId || ""),
+        String(req.query.malId || ""),
+        String(req.query.episode || "1"),
+        category
+      ).catch(() => []);
       try {
-        return send(res, 200, await streams(req, req.query.id, req.query.episodeId, req.query.category === "dub" ? "dub" : "sub"), "no-store");
+        const resolved = await streams(req, req.query.id, req.query.episodeId, category);
+        const embeds = await embedTask;
+        return send(res, 200, { ...resolved, embeds }, "no-store");
       } catch (streamError) {
-        const embeds = await getAniKotoEmbedFallback(
-          String(req.query.anilistId || ""),
-          String(req.query.malId || ""),
-          String(req.query.episode || "1"),
-          req.query.category === "dub" ? "dub" : "sub"
-        ).catch(() => []);
+        const embeds = await embedTask;
         if (embeds.length) {
           return send(res, 200, {
             sources: [],
