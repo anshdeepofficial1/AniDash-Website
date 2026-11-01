@@ -1,0 +1,8 @@
+{
+  "name": "anidash-watch-web",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  }
+}
