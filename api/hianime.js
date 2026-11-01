@@ -35,7 +35,7 @@ async function requestText(url, timeout = 6000) {
   return { html: await response.text(), url: response.url || url };
 }
 
-function mediaUrl(req, raw, isHls) {
+function mediaUrl(req, raw, isHls, playbackHeaders = {}) {
   try {
     const target = new URL(String(raw));
     if (target.protocol !== "https:") return String(raw);
@@ -48,7 +48,14 @@ function mediaUrl(req, raw, isHls) {
     const proto = String(req.headers["x-forwarded-proto"] || "https").split(",")[0].trim();
     const host = String(req.headers["x-forwarded-host"] || req.headers.host || "");
     if (!host) return target.toString();
-    return proto + "://" + host + "/api/media?url=" + encodeURIComponent(target.toString()) + "&hls=" + (isHls ? "1" : "0");
+    const safeHeaders = {};
+    for (const [key, value] of Object.entries(playbackHeaders || {})) {
+      if (/^(referer|origin|user-agent|accept)$/i.test(key) && typeof value === "string" && value.length <= 600) {
+        safeHeaders[key.toLowerCase()] = value;
+      }
+    }
+    const headerParam = Object.keys(safeHeaders).length ? "&headers=" + encodeURIComponent(JSON.stringify(safeHeaders)) : "";
+    return proto + "://" + host + "/api/media?url=" + encodeURIComponent(target.toString()) + "&hls=" + (isHls ? "1" : "0") + headerParam;
   } catch {
     return String(raw || "");
   }
@@ -243,7 +250,15 @@ function normaliseSources(req, rawSources, category, label) {
     const url = String(item?.url || item?.file || "");
     const isM3U8 = item?.isM3U8 === true || /\.m3u8(?:$|\?)/i.test(url);
     return {
-      url: mediaUrl(req, url, isM3U8),
+      url: mediaUrl(req, url, isM3U8, {
+        Referer: item?.referer || item?.headers?.Referer || item?.headers?.referer || SITE_BASE + "/",
+        Origin: (() => {
+          try { return new URL(item?.referer || item?.headers?.Referer || item?.headers?.referer || SITE_BASE + "/").origin; }
+          catch (_) { return SITE_BASE; }
+        })(),
+        "User-Agent": UA,
+        Accept: "*/*"
+      }),
       originalUrl: url,
       quality: String(item?.quality || "Auto"),
       type: String(item?.type || label),
