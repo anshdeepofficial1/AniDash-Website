@@ -54,14 +54,9 @@ function mediaUrl(req, raw, isHls) {
   }
 }
 
-async function getJson(path, timeout = 8500) {
-  const response = await fetch(API + path, {
-    headers: {
-      Accept: "application/json, text/plain, */*",
-      Origin: SITE,
-      Referer: SITE + "/",
-      "User-Agent": UA
-    },
+async function fetchJson(url, headers, timeout) {
+  const response = await fetch(url, {
+    headers,
     signal: AbortSignal.timeout(timeout)
   });
   if (!response.ok) throw new Error("JustAnime returned HTTP " + response.status);
@@ -70,6 +65,34 @@ async function getJson(path, timeout = 8500) {
     throw new Error(data?.error || "JustAnime returned an invalid response");
   }
   return data;
+}
+
+async function getJson(path, timeout = 8500) {
+  const headers = {
+    Accept: "application/json, text/plain, */*",
+    Origin: SITE,
+    Referer: SITE + "/",
+    "User-Agent": UA
+  };
+  const directUrl = API + path;
+  const relayUrl = new URL(process.env.JUSTANIME_RELAY_URL || "https://anidashweb.vercel.app/api/justanime");
+  relayUrl.searchParams.set("path", path);
+
+  const direct = fetchJson(directUrl, headers, timeout);
+  const relay = new Promise((resolve, reject) => {
+    setTimeout(() => {
+      fetchJson(relayUrl.toString(), { Accept: "application/json, text/plain, */*", "User-Agent": UA }, timeout)
+        .then(resolve, reject);
+    }, 300);
+  });
+
+  try {
+    return await Promise.any([direct, relay]);
+  } catch (error) {
+    const reasons = Array.isArray(error?.errors) ? error.errors : [];
+    const detail = reasons.map(item => item?.message).filter(Boolean).slice(0, 2).join("; ");
+    throw new Error("JustAnime direct and relay requests failed" + (detail ? ": " + detail : ""));
+  }
 }
 
 function getPath(id, episode, suffix = "") {
