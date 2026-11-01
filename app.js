@@ -583,8 +583,10 @@
     const sourceInfo = matches.length ? matches.map(match => match.provider.name + (match.mapped ? " (episode map)" : "")).join(", ") : "Built-in sources checked";
     const episodes = state.detailEpisodes || [];
     const providerRows = BUILTIN_PROVIDERS.map(provider => {
-      const result = state.detailMatches.find(match => match.provider.id === provider.id);
-      const available = result && !result.error;
+      const result = state.detailMatches.find(match =>
+        match && match.provider && match.provider.id === provider.id && match.episodesReady && Array.isArray(match.episodes)
+      ) || state.detailMatches.find(match => match && match.provider && match.provider.id === provider.id);
+      const available = result && !result.error && result.episodesReady === true;
       const status = available ? (result.mapped ? "Episode map ready" : "Title matched") :
         result && result.error && result.error.toLowerCase().includes("no confident title match") ? "No title match" :
         result && result.error ? "Temporarily unavailable" : "Checking";
