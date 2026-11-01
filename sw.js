@@ -1,4 +1,4 @@
-const CACHE_NAME = "anidash-watch-shell-v4";
+const CACHE_NAME = "anidash-watch-shell-v5";
 const SHELL = ["/", "/index.html", "/styles.css", "/app.js", "/manifest.webmanifest", "/icons/anidash-icon.png"];
 
 self.addEventListener("install", event => {
