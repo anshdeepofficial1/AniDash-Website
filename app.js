@@ -518,6 +518,27 @@
       }
     }
 
+    // The AniKoto web API can block its server-side AJAX stream calls. Keep a
+    // mapped AniKoto entry available using the same AniList episode numbers;
+    // its backend can then fall back to the official project's direct embed
+    // provider route without requiring the blocked site session endpoint.
+    const hasAniKoto = checked.some(match => match && match.provider.id === "anikoto" && match.episodesReady);
+    const episodeSource = checked.find(match => match && match.episodesReady && match.episodes && match.episodes.length);
+    const anikoto = BUILTIN_PROVIDERS.find(provider => provider.id === "anikoto");
+    if (!hasAniKoto && anikoto && episodeSource && (media.id != null || media.idMal != null)) {
+      checked.push({
+        provider: anikoto,
+        animeId: String(media.id || media.idMal),
+        item: { id: String(media.id || media.idMal), title: titleOf(media) },
+        score: 0,
+        mapped: true,
+        embedOnly: true,
+        idSource: "AniList/MAL",
+        episodes: episodeSource.episodes.map(item => ({ ...item, id: String(item.number) })),
+        episodesReady: true
+      });
+    }
+
     const order = { justanime: 0, hianime: 1, anikoto: 2 };
     checked.sort((a, b) => (order[a.provider?.id] ?? 9) - (order[b.provider?.id] ?? 9));
     const selected = checked.find(match => match && match.episodesReady) || null;
