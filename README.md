@@ -17,7 +17,7 @@ These three fixed source integrations are included. Viewers do not install or im
 
 - **JustAnime** — AniList numeric ID is used as the canonical anime ID, matching the Android provider. Search/episode requests use the direct API and the existing AniDash relay fallback. The native Automatic mode races the Momo, Zoko, Gigi and Neko server endpoints.
 - **HiAnime (legacy/best-effort)** — retains the Android app's legacy API, AniList episode-mapping fallback and VidNest resolver. The original HiAnime operation announced its goodbye in March 2026; similarly named current domains are not assumed to be official replacements. If its legacy resolver fails, the player moves on to other built-in sources.
-- **AniKoto** — uses its currently listed official domains (`anikototv.to`, `anikoto.cz`, `anikoto.me`, `anikoto.net`, `anikototv.se`) for catalogue and episode requests. Verified mirrors are raced in parallel. It tries the native Kwik extraction flow and requests the documented partner-embed fallback alongside it when available.
+- **AniKoto** — uses the current `AniKotoAPI` search and `/api/episodes/:animeId` contract. It uses the API's direct `/api/stream/embeds` provider route for AniList/MAL-based iframe playback, which the API documentation recommends when AJAX-dependent native server endpoints are blocked. Legacy website mirrors and Kwik extraction remain compatibility fallbacks.
 
 ## Playback and media relay
 
@@ -48,7 +48,8 @@ The app calls the AniList GraphQL API for discovery and anime information. AniLi
 ## API routes
 
 - `/api/justanime` — JustAnime search, full episode list, server catalogue and source resolution.
-- `/api/hianime` — legacy HiAnime search/episodes/server/source route and AniList episode-mapping fallback.
+- `/api/hianime` — legacy HiAnime search/episodes/server/source route and best-effort VidNest resolver.
+- `/api/episode-map` — standalone AniList-to-episode metadata mapping via Ani-Zip, independent of the legacy HiAnime API.
 - `/api/anikoto` — AniKoto search, paginated episode data, Kwik extraction and partner-embed fallback.
 - `/api/media` — restricted same-origin media/HLS relay. This is not an open proxy.
 
@@ -56,7 +57,8 @@ The app calls the AniList GraphQL API for discovery and anime information. AniLi
 
 - `HIANIME_API_URL` — override the legacy HiAnime API base URL.
 - `VIDNEST_SECRET` — override the server-side VidNest decryption key if the upstream protocol changes.
-- `ANIKOTO_BASE_URL` — prefer one of the official AniKoto domains listed above.
+- `ANIKOTO_API_URL` — override the current AniKotoAPI base URL (defaults to `https://anikototvapi.vercel.app/api`).
+- `ANIKOTO_BASE_URL` — override a legacy AniKoto website mirror used only as a fallback.
 - `JUSTANIME_RELAY_URL` — override the JustAnime relay URL; defaults to the existing AniDash relay.
 
 Do not put secrets or private API keys in `app.js` or in any browser-delivered file.
@@ -76,5 +78,6 @@ Run `python -m http.server 8080` in the repository root and open `http://localho
 
 - Actual stream playback depends on third-party sites, their anti-bot protections and their CDN URLs. The website code can preserve source headers and try fallbacks, but it cannot override an upstream outage or a blocked host.
 - The original HiAnime operation announced its goodbye in March 2026; its old API and VidNest decryption path are retained only as best-effort compatibility.
-- AniKoto's own API documentation notes that its server-side streaming endpoints can be blocked by the source's anti-bot protection. Its iframe partner fallback is also subject to the partner player and browser's embedding policy.
+- AniKoto's API documentation notes that its AJAX-dependent server/stream endpoints can be blocked by anti-bot protection. The current direct embed provider route avoids that AJAX path, but iframe playback is still subject to each partner player and browser embedding policy.
+- If AniList has no episode count and Ani-Zip has no episode mapping, AniDash cannot generate a reliable episode list for that title.
 - Watchlist and playback progress are stored locally in the browser; account-based AniList/MAL cross-device sync is not implemented.
