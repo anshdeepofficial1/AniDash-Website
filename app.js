@@ -362,7 +362,7 @@
       const media = await getAnime(id);
       if (token !== state.token) return;
       state.detail = media;
-      $("#view").innerHTML = '<div class="loading-state"><div class="loader"></div><p>Finding connected episode sources…</p></div>';
+      $("#view").innerHTML = '<div class="loading-state"><div class="loader"></div><p>Checking AniDash built-in sources…</p></div>';
       const matches = await findProviderMatches(media);
       if (token !== state.token) return;
       state.detailMatches = matches;
@@ -404,8 +404,8 @@
           '<p class="details-description">' + escapeHtml(cleanText(media.description) || "No synopsis is available for this title yet.") + '</p>' +
           '<div class="button-row"><button class="btn btn-primary" data-play-first="' + media.id + '" ' + (episodes.length ? "" : "disabled") + '>▶ Start watching</button><button class="btn btn-secondary" data-watchlist="' + media.id + '">' + (watched ? "✓ In watchlist" : "♡ Add to watchlist") + '</button></div>' +
         '</div></div></div>' +
-      '<div class="details-layout"><section class="content-panel"><div class="section-heading"><div><h2 class="panel-title">Episodes</h2><p class="section-note">' + (matches.length ? "Source: " + escapeHtml(sourceInfo) : "Episode numbers are based on AniList metadata until you connect a source.") + '</p></div><span class="watchlist-badge">' + episodes.length + ' listed</span></div>' +
-        '<div class="episode-toolbar"><select id="episode-source" class="select-control">' + (matches.length ? matches.map((match, index) => '<option value="' + index + '"' + (match === state.selectedMatch ? " selected" : "") + '>' + escapeHtml(match.provider.name) + '</option>').join("") : '<option value="">No connected source</option>') + '</select><input id="episode-filter" class="input-control" style="max-width:155px" placeholder="Find episode…"></div>' +
+      '<div class="details-layout"><section class="content-panel"><div class="section-heading"><div><h2 class="panel-title">Episodes</h2><p class="section-note">' + (matches.length ? "Source: " + escapeHtml(sourceInfo) : "Episode numbers are based on AniList metadata until AniDash finds a matching built-in source.") + '</p></div><span class="watchlist-badge">' + episodes.length + ' listed</span></div>' +
+        '<div class="episode-toolbar"><select id="episode-source" class="select-control">' + (matches.length ? matches.map((match, index) => '<option value="' + index + '"' + (match === state.selectedMatch ? " selected" : "") + '>' + escapeHtml(match.provider.name) + '</option>').join("") : '<option value="">No matching built-in source</option>') + '</select><input id="episode-filter" class="input-control" style="max-width:155px" placeholder="Find episode…"></div>' +
         '<div id="episode-list" class="episode-list">' + episodes.map(episodeCard).join("") + '</div>' +
         (matches.length ? '' : '<div class="notice" style="margin-top:14px">Try another built-in provider, or use a direct MP4/HLS link on the player screen. AniList supplies metadata, not video streams.</div>') +
       '</section><aside class="content-panel"><h2 class="panel-title">About this anime</h2><div class="info-list">' +
@@ -514,6 +514,13 @@
       state.player : { media: media, episode: episode, match: state.selectedMatch, streams: [], servers: [], tracks: [], selectedServer: "default", category: "sub", intro: null, outro: null, direct: store.manualStreams[String(id) + ":" + String(number)] || "" };
     state.player.media = media;
     state.player.episode = episode;
+    if (!state.player.match && state.selectedMatch) state.player.match = state.selectedMatch;
+    const defaultServer = state.player.match && state.player.match.provider
+      ? ({ justanime: "auto", hianime: "hd-1", anikoto: "anikoto" }[state.player.match.provider.id] || "auto")
+      : "auto";
+    if (!state.player.selectedServer || state.player.selectedServer === "default") {
+      state.player.selectedServer = defaultServer;
+    }
     if (token !== state.token) return;
     paintPlayer();
     if (state.player.direct) {
@@ -939,33 +946,6 @@
         video.currentTime = Number(range.end);
         video.play().catch(() => {});
       }
-      return;
-    }
-    if (target.hasAttribute("data-save-sources")) {
-      try {
-        const manifest = JSON.parse($("#source-config").value);
-        if (!manifest || !Array.isArray(manifest.providers)) throw new Error("Built-in sources are managed by AniDash.");
-        for (const provider of manifest.providers) {
-          if (!provider.id || !provider.name || !provider.baseUrl || !provider.endpoints) throw new Error("Only AniDash built-in providers are supported.");
-          const base = new URL(provider.baseUrl);
-          if (base.protocol !== "https:" && base.hostname !== "localhost") throw new Error("Only AniDash built-in providers are supported.");
-        }
-        store.providerManifest = manifest;
-        persist();
-        state.providers = manifest.providers;
-        closeModal();
-        toast("AniDash uses its built-in providers; custom manifests are not enabled.");
-        if (state.route === "/settings") renderSettings();
-      } catch (error) { toast(error.message); }
-      return;
-    }
-    if (target.hasAttribute("data-reset-sources")) {
-      store.providerManifest = null;
-      persist();
-      state.providers = null;
-      closeModal();
-      toast("AniDash built-in providers are managed by the website.");
-      if (state.route === "/settings") renderSettings();
       return;
     }
     if (target.hasAttribute("data-save-direct")) {
