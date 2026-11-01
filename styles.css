@@ -463,3 +463,207 @@ img { display: block; max-width: 100%; }
     grid-template-columns: minmax(0,1fr) 58px auto;
   }
 }
+
+
+
+/* Streaming-app home shelves and mobile-first polish */
+.main-panel { min-width: 0; }
+.home-hero { min-height: clamp(330px, 36vw, 470px); display: flex; align-items: end; }
+.home-hero .hero-content { width: min(620px, 68%); padding-top: 54px; }
+.home-shortcuts {
+  display: flex;
+  gap: 9px;
+  overflow-x: auto;
+  padding: 1px 1px 14px;
+  margin: -4px 0 22px;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+.home-shortcuts::-webkit-scrollbar,
+.anime-shelf::-webkit-scrollbar { display: none; }
+.home-shortcuts button {
+  flex: 0 0 auto;
+  min-height: 42px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 15px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  color: var(--soft);
+  background: rgba(255,255,255,.035);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.home-shortcuts button span { color: var(--accent); font-size: 15px; }
+.home-shortcuts button:active { transform: scale(.98); background: rgba(185,154,255,.12); }
+.shelf-section { margin-bottom: 31px; }
+.anime-shelf {
+  display: flex;
+  gap: 14px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x mandatory;
+  scroll-padding-inline: 2px;
+  padding: 2px 2px 10px;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+.anime-shelf .anime-card {
+  flex: 0 0 clamp(138px, 14.2vw, 178px);
+  width: clamp(138px, 14.2vw, 178px);
+  scroll-snap-align: start;
+}
+.resume-card .poster-wrap { isolation: isolate; }
+.resume-card .poster-wrap:after {
+  content: "";
+  position: absolute;
+  inset: 40% 0 0;
+  background: linear-gradient(0deg,rgba(3,4,9,.78),transparent);
+  pointer-events: none;
+}
+.resume-play {
+  position: absolute;
+  z-index: 2;
+  right: 10px;
+  bottom: 10px;
+  width: 35px;
+  height: 35px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: #15111e;
+  background: linear-gradient(135deg,#d7c2ff,#a88af7);
+  box-shadow: 0 5px 22px rgba(0,0,0,.35);
+  font-size: 13px;
+}
+.resume-card .poster-score { z-index: 2; }
+.resume-card:active .poster-wrap { transform: scale(.985); }
+.section-heading { align-items: center; }
+.section-link { padding: 8px 2px 8px 10px; min-height: 38px; }
+.topbar { min-width: 0; }
+.topbar-search { flex: 1 1 420px; min-width: 150px; }
+button, .anime-card, .episode-item, .player-episode { touch-action: manipulation; }
+.btn, .icon-button, .source-pill, .select-control, .input-control { min-height: 42px; }
+.video-frame iframe { position: absolute; inset: 0; width: 100%; height: 100%; }
+@media (max-width: 1020px) {
+  .home-hero .hero-content { width: min(660px, 78%); }
+  .anime-shelf { gap: 12px; }
+  .anime-shelf .anime-card { flex-basis: 154px; width: 154px; }
+}
+@media (max-width: 760px) {
+  html { min-height: 100%; }
+  body { min-height: 100dvh; min-height: 100svh; overscroll-behavior-y: none; }
+  .app-shell {
+    min-height: 100dvh;
+    min-height: 100svh;
+    display: block;
+    padding-bottom: calc(76px + env(safe-area-inset-bottom));
+  }
+  .main-panel { padding: 0 14px; }
+  .topbar {
+    position: sticky;
+    top: 0;
+    z-index: 35;
+    height: calc(64px + env(safe-area-inset-top));
+    margin: 0 -14px;
+    padding: env(safe-area-inset-top) 14px 0;
+    gap: 9px;
+    background: rgba(9,10,16,.91);
+    border-bottom: 1px solid var(--line);
+    backdrop-filter: blur(22px);
+    -webkit-backdrop-filter: blur(22px);
+  }
+  .mobile-brand { flex: 0 0 auto; }
+  .topbar-search {
+    flex: 1 1 auto;
+    min-width: 0;
+    height: 40px;
+    padding: 0 9px;
+  }
+  .topbar-search input { font-size: 11px; }
+  .topbar-search .search-glyph { font-size: 20px; }
+  .topbar-actions { flex: 0 0 auto; gap: 6px; }
+  .install-button { width: 36px; height: 36px; min-height: 36px; }
+  .profile-chip { min-width: 34px; min-height: 38px; }
+  .view-content { padding-top: 15px; padding-bottom: 30px; }
+  .home-hero {
+    min-height: 355px;
+    margin: 0 -1px 24px;
+    border-radius: 18px;
+    align-items: end;
+  }
+  .home-hero .hero-bg { background-position: 65% center; opacity: .57; }
+  .home-hero:before {
+    background: linear-gradient(90deg,rgba(8,9,15,.72),rgba(8,9,15,.15)),
+      linear-gradient(0deg,rgba(8,9,15,.97) 0%,rgba(8,9,15,.6) 38%,transparent 90%);
+  }
+  .home-hero .hero-content {
+    width: 100%;
+    max-width: none;
+    margin: 0;
+    padding: 24px 19px 21px;
+  }
+  .hero-kicker { font-size: 8px; letter-spacing: 1.4px; }
+  .home-hero .hero-title { font-size: clamp(31px, 9vw, 43px); margin: 12px 0 10px; }
+  .home-hero .hero-description { max-width: 95%; margin: 11px 0 16px; font-size: 11px; -webkit-line-clamp: 2; }
+  .home-hero .hero-actions { gap: 8px; }
+  .home-hero .hero-actions .btn { min-height: 42px; }
+  .home-shortcuts { gap: 8px; margin: -1px 0 18px; padding-bottom: 10px; }
+  .home-shortcuts button { min-height: 42px; padding: 0 13px; font-size: 10px; }
+  .shelf-section { margin-bottom: 25px; }
+  .shelf-section .section-heading { margin-bottom: 11px; }
+  .section-title { font-size: 17px; }
+  .section-note { font-size: 9px; }
+  .anime-shelf { gap: 10px; padding-bottom: 8px; }
+  .anime-shelf .anime-card { flex-basis: 126px; width: 126px; }
+  .anime-shelf .poster-wrap { border-radius: 10px; }
+  .anime-shelf .card-title { font-size: 10px; margin-top: 7px; }
+  .anime-shelf .card-subtitle { font-size: 8px; }
+  .resume-play { width: 31px; height: 31px; right: 8px; bottom: 8px; }
+  .mobile-dock {
+    min-height: calc(64px + env(safe-area-inset-bottom));
+    padding: 7px 6px calc(7px + env(safe-area-inset-bottom));
+    align-items: center;
+    background: rgba(10,11,18,.95);
+    -webkit-backdrop-filter: blur(24px);
+  }
+  .mobile-dock a { min-height: 46px; font-size: 9px; gap: 3px; }
+  .mobile-dock a span { font-size: 21px; }
+  .player-page { padding-bottom: 10px; }
+  .player-layout { grid-template-columns: minmax(0,1fr); gap: 12px; }
+  .player-sidebar { grid-template-columns: minmax(0,1fr); gap: 10px; }
+  .player-panel { padding: 13px; }
+  .player-episode-list { max-height: 260px; }
+  .player-topline { gap: 10px; margin-bottom: 12px; }
+  .video-frame { width: 100%; }
+  .player-under { gap: 12px; }
+  .player-controls { display: flex; flex-wrap: wrap; gap: 7px; }
+  .player-controls .btn { min-width: 0; min-height: 42px; }
+  .episode-toolbar { gap: 7px; }
+  .episode-toolbar .select-control { flex: 1 1 100%; }
+  .episode-toolbar .input-control { flex: 1 1 100px; min-width: 0; }
+  .episode-jump-input { flex: 0 0 68px !important; }
+  .episode-page-actions { width: 100%; justify-content: center; }
+  .episode-page-actions .btn { min-height: 38px; }
+}
+@media (max-width: 420px) {
+  .main-panel { padding-inline: 12px; }
+  .topbar { margin-inline: -12px; padding-inline: 12px; gap: 7px; }
+  .mobile-brand .brand-mark { width: 28px; height: 28px; }
+  .mobile-brand b { font-size: 17px; }
+  .topbar-search { height: 38px; padding-inline: 7px; }
+  .topbar-search input { font-size: 10px; }
+  .topbar-search input::placeholder { font-size: 9px; }
+  .topbar-search .search-glyph { display: none; }
+  .install-button { width: 33px; height: 33px; }
+  .home-hero { min-height: 335px; }
+  .anime-shelf .anime-card { flex-basis: 116px; width: 116px; }
+}
+@media (max-width: 760px) and (display-mode: standalone) {
+  .topbar {
+    padding-top: max(env(safe-area-inset-top), 8px);
+    height: calc(64px + max(env(safe-area-inset-top), 8px));
+  }
+}
