@@ -42,7 +42,7 @@ function mediaUrl(req, raw, isHls) {
     const hosts = [
       "neko.justanime.to", "nexabloom.top", "give6beforegtav.site",
       "megaplay.buzz", "megacloud.blog", "megacloud.tv",
-      "rapid-cloud.co", "rapid-cloud.ru", "vidnest.fun"
+      "rapid-cloud.co", "rapid-cloud.ru", "vidnest.fun", "norami.top", "kryntal.top", "akirax.buzz", "vid-tube.site"
     ];
     if (!hosts.some(host => target.hostname === host || target.hostname.endsWith("." + host))) return target.toString();
     const proto = String(req.headers["x-forwarded-proto"] || "https").split(",")[0].trim();
