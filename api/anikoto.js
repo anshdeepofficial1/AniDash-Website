@@ -1,6 +1,17 @@
-const SITE_BASES = [
-  String(process.env.ANIKOTO_BASE_URL || "https://anikoto.pw").replace(/\/$/, "")
+const DEFAULT_SITE_BASES = [
+  "https://anikoto.pw",
+  "https://anikototv.to",
+  "https://anikoto.cz",
+  "https://anikoto.me",
+  "https://anikoto.net",
+  "https://anikototv.se"
 ];
+const SITE_BASES = [
+  process.env.ANIKOTO_BASE_URL
+    ? String(process.env.ANIKOTO_BASE_URL).replace(/\/$/, "")
+    : null,
+  ...DEFAULT_SITE_BASES
+].filter((value, index, rows) => value && rows.indexOf(value) === index);
 const API_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Safari/537.36";
 const KWIK_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
 
@@ -232,9 +243,20 @@ async function streams(req, animeSession, episodeId, category) {
   if (parts.length !== 2 || parts[0] !== String(animeSession) || !parts[1]) {
     throw new Error("AniKoto episode session is missing. Reload the episode list and try again.");
   }
-  const base = SITE_BASES[0];
-  const playUrl = new URL(base + "/play/" + encodeURIComponent(parts[0]) + "/" + encodeURIComponent(parts[1]));
-  const page = await requestText(playUrl.toString(), { Referer: base + "/" }, 3500);
+  let base = SITE_BASES[0];
+  let page = null;
+  let lastPageError = null;
+  for (const candidateBase of SITE_BASES) {
+    const playUrl = new URL(candidateBase + "/play/" + encodeURIComponent(parts[0]) + "/" + encodeURIComponent(parts[1]));
+    try {
+      page = await requestText(playUrl.toString(), { Referer: candidateBase + "/" }, 3500);
+      base = candidateBase;
+      break;
+    } catch (error) {
+      lastPageError = error;
+    }
+  }
+  if (!page) throw lastPageError || new Error("AniKoto player page is unavailable on all known mirrors");
   const menu = page.text;
   const buttons = [...menu.matchAll(/<button\b[^>]*>([\s\S]*?)<\/button>/gi)].map(match => ({
     tag: match[0].match(/^<button\b[^>]*>/i)?.[0] || match[0],
