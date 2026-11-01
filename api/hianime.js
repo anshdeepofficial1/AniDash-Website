@@ -226,19 +226,28 @@ async function fetchVidNest(path) {
   return JSON.parse(plain.toString("utf8"));
 }
 
-function normaliseSources(req, rawSources, category, label) {
+function upstreamHeader(sources, names, fallback) {
+  for (const source of sources) {
+    if (!source || typeof source !== "object") continue;
+    const key = Object.keys(source).find(candidate => names.some(name => candidate.toLowerCase() === name.toLowerCase()));
+    if (key && typeof source[key] === "string" && source[key]) return source[key];
+  }
+  return fallback;
+}
+
+function normaliseSources(req, rawSources, category, label, inheritedHeaders = {}) {
   return (Array.isArray(rawSources) ? rawSources : []).map(item => {
     const url = String(item?.url || item?.file || "");
     const isM3U8 = item?.isM3U8 === true || /\.m3u8(?:$|\?)/i.test(url);
     return {
       url: mediaUrl(req, url, isM3U8, {
-        Referer: item?.referer || item?.headers?.Referer || item?.headers?.referer || SITE_BASE + "/",
-        Origin: (() => {
-          try { return new URL(item?.referer || item?.headers?.Referer || item?.headers?.referer || SITE_BASE + "/").origin; }
+        Referer: upstreamHeader([item?.headers, inheritedHeaders], ["referer"], item?.referer || SITE_BASE + "/"),
+        Origin: upstreamHeader([item?.headers, inheritedHeaders], ["origin"], (() => {
+          try { return new URL(item?.referer || upstreamHeader([inheritedHeaders], ["referer"], SITE_BASE + "/")).origin; }
           catch (_) { return SITE_BASE; }
-        })(),
-        "User-Agent": UA,
-        Accept: "*/*"
+        })()),
+        "User-Agent": upstreamHeader([item?.headers, inheritedHeaders], ["user-agent"], UA),
+        Accept: upstreamHeader([item?.headers, inheritedHeaders], ["accept"], "*/*")
       }),
       originalUrl: url,
       quality: String(item?.quality || "Auto"),
@@ -268,7 +277,7 @@ async function streams(req, animeId, episodeId, anilistId, serverName, category)
     url.searchParams.set("category", lang);
     const payload = await requestJson(url.toString(), 3500);
     const data = payload?.data;
-    const sources = normaliseSources(req, data?.sources, lang, server);
+    const sources = normaliseSources(req, data?.sources, lang, server, data?.headers || {});
     if (sources.length) {
       return {
         sources,
@@ -300,7 +309,7 @@ async function streams(req, animeId, episodeId, anilistId, serverName, category)
     return await Promise.any([...new Set(paths)].map(async path => {
       const data = await fetchVidNest(path);
       const raw = data?.sources || data?.multiSrc || [];
-      const parsed = normaliseSources(req, raw, lang, path.startsWith("aniwave") ? "AniWave" : path.startsWith("hianime") ? "HiAnime HD-2" : "MegaPlay");
+      const parsed = normaliseSources(req, raw, lang, path.startsWith("aniwave") ? "AniWave" : path.startsWith("hianime") ? "HiAnime HD-2" : "MegaPlay", data?.headers || {});
       if (!parsed.length) throw new Error("No streams returned");
       return {
         sources: parsed,
