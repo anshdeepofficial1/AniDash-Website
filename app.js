@@ -317,7 +317,7 @@
         });
         const best = [...unique.values()].map(item => ({
           item,
-          score: titleMatchScore(titleOf(media), item.title)
+          score: Math.max(...rawTitles.map(title => titleMatchScore(title, item.title)))
         })).sort((a, b) => b.score - a.score)[0];
         return best && best.score >= 45
           ? { provider, animeId: String(best.item.id), item: best.item, score: best.score }
