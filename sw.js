@@ -1,5 +1,5 @@
-const CACHE_NAME = "anidash-watch-shell-v1";
-const SHELL = ["/", "/index.html", "/styles.css", "/app.js", "/manifest.webmanifest", "/sources.json", "/icons/anidash-icon.png"];
+const CACHE_NAME = "anidash-watch-shell-v2";
+const SHELL = ["/", "/index.html", "/styles.css", "/app.js", "/manifest.webmanifest", "/icons/anidash-icon.png"];
 self.addEventListener("install", event => {
   event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(SHELL)));
   self.skipWaiting();
