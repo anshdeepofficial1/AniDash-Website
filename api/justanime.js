@@ -53,7 +53,7 @@ function mediaUrl(req, raw, isHls) {
   }
 }
 
-async function getJson(path) {
+async function getJson(path, timeout = 8500) {
   const response = await fetch(API + path, {
     headers: {
       Accept: "application/json, text/plain, */*",
@@ -61,7 +61,7 @@ async function getJson(path) {
       Referer: SITE + "/",
       "User-Agent": UA
     },
-    signal: AbortSignal.timeout(14000)
+    signal: AbortSignal.timeout(timeout)
   });
   if (!response.ok) throw new Error("JustAnime returned HTTP " + response.status);
   const data = await response.json();
@@ -221,26 +221,37 @@ async function streams(req, animeId, episode, server, category) {
   } else if (explicit === "animegg" || explicit === "gigi") {
     endpoints = [getPath(animeId, episode, "/animegg")];
   } else if (explicit === "anineko" || explicit === "neko") {
-    endpoints = [getPath(animeId, episode, "/anineko/" + cleanCategory + "/hd1"), getPath(animeId, episode, "/anineko/" + cleanCategory)];
+    endpoints = [getPath(animeId, episode, "/anineko/" + cleanCategory)];
   } else {
     throw new Error("Unknown JustAnime server");
   }
 
-  let lastError = null;
-  for (const endpoint of endpoints) {
-    try {
-      const payload = await getJson(endpoint);
-      const parsed = normalizeBlock(payload, endpoint, cleanCategory, req);
-      if (parsed) {
-        const intro = parsed.intro || payload.intro || payload.sub?.intro || payload.dub?.intro || null;
-        const outro = parsed.outro || payload.outro || payload.sub?.outro || payload.dub?.outro || null;
-        return { ...parsed, intro, outro, servers: SERVER_OPTIONS[cleanCategory] };
-      }
-    } catch (error) {
-      lastError = error;
-    }
+  async function tryEndpoint(endpoint) {
+    const payload = await getJson(endpoint, 8500);
+    const parsed = normalizeBlock(payload, endpoint, cleanCategory, req);
+    if (!parsed || !parsed.sources.length) throw new Error("No " + cleanCategory.toUpperCase() + " streams at " + endpoint);
+    return {
+      ...parsed,
+      intro: parsed.intro || payload.intro || payload.sub?.intro || payload.dub?.intro || null,
+      outro: parsed.outro || payload.outro || payload.sub?.outro || payload.dub?.outro || null,
+      servers: SERVER_OPTIONS[cleanCategory]
+    };
   }
-  throw new Error("No playable " + cleanCategory.toUpperCase() + " stream was returned by JustAnime" + (lastError ? ": " + lastError.message : ""));
+
+  if (explicit !== "auto" && explicit !== "default") {
+    return tryEndpoint(endpoints[0]);
+  }
+
+  // Android uses a small concurrent race with fallback hosts. The web serverless
+  // route races the same fixed endpoints so a slow first host does not consume
+  // the whole function timeout.
+  try {
+    return await Promise.any(endpoints.map(tryEndpoint));
+  } catch (error) {
+    const reasons = Array.isArray(error?.errors) ? error.errors : [];
+    const detail = reasons.map(item => item?.message).filter(Boolean).slice(0, 2).join("; ");
+    throw new Error("No playable " + cleanCategory.toUpperCase() + " stream was returned by JustAnime" + (detail ? ": " + detail : ""));
+  }
 }
 
 export default async function handler(req, res) {
