@@ -391,7 +391,7 @@
     const genres = (media.genres || []).slice(0, 10);
     const watched = isInWatchlist(media.id);
     const matches = state.detailMatches.filter(match => !match.error);
-    const sourceInfo = matches.length ? matches.map(match => match.provider.name).join(", ") : "No provider connected";
+    const sourceInfo = matches.length ? matches.map(match => match.provider.name).join(", ") : "No built-in provider matched this title";
     const episodes = state.detailEpisodes || [];
     const relationItems = media.relations && media.relations.edges ? media.relations.edges.filter(edge => edge.node && edge.node.type === "ANIME").slice(0, 6) : [];
     const malLink = media.idMal ? '<a href="https://myanimelist.net/anime/' + media.idMal + '" target="_blank" rel="noopener">MyAnimeList ↗</a>' : "Not mapped";
@@ -407,7 +407,7 @@
       '<div class="details-layout"><section class="content-panel"><div class="section-heading"><div><h2 class="panel-title">Episodes</h2><p class="section-note">' + (matches.length ? "Source: " + escapeHtml(sourceInfo) : "Episode numbers are based on AniList metadata until you connect a source.") + '</p></div><span class="watchlist-badge">' + episodes.length + ' listed</span></div>' +
         '<div class="episode-toolbar"><select id="episode-source" class="select-control">' + (matches.length ? matches.map((match, index) => '<option value="' + index + '"' + (match === state.selectedMatch ? " selected" : "") + '>' + escapeHtml(match.provider.name) + '</option>').join("") : '<option value="">No connected source</option>') + '</select><input id="episode-filter" class="input-control" style="max-width:155px" placeholder="Find episode…"></div>' +
         '<div id="episode-list" class="episode-list">' + episodes.map(episodeCard).join("") + '</div>' +
-        (matches.length ? '' : '<div class="notice" style="margin-top:14px">Connect a provider in Settings → Sources, or use a direct MP4/HLS link on the player screen. AniList supplies metadata, not video streams.</div>') +
+        (matches.length ? '' : '<div class="notice" style="margin-top:14px">Try another built-in provider, or use a direct MP4/HLS link on the player screen. AniList supplies metadata, not video streams.</div>') +
       '</section><aside class="content-panel"><h2 class="panel-title">About this anime</h2><div class="info-list">' +
         infoRow("Genres", genres.length ? genres.join(", ") : "Not listed") +
         infoRow("Season", [media.season, media.seasonYear].filter(Boolean).join(" ") || "Not listed") +
@@ -749,12 +749,11 @@
   function renderSettings() {
     loadProviders().then(providers => {
       if (state.route !== "/settings") return;
-      const manifest = store.providerManifest || { version: 1, providers: providers };
-      $("#source-config").value = JSON.stringify(manifest, null, 2);
-      $("#provider-count").textContent = providers.length + (providers.length === 1 ? " source configured" : " sources configured");
+      const count = $("#provider-count");
+      if (count) count.textContent = providers.map(provider => provider.name).join(" · ");
     });
-    $("#view").innerHTML = pageHead("PREFERENCES", "Settings", "Manage source connectors, playback defaults and the app experience.") +
-      '<div class="settings-grid"><section class="settings-card"><div class="eyebrow">STREAMING</div><h3>Built-in sources</h3><p id="provider-count">JustAnime · HiAnime · AniKoto</p><p>AniDash ships with three native source providers. Their search, episodes, SUB/DUB servers and stream resolvers are maintained with the website. No extensions or user source manifests are required.</p><button class="btn btn-primary" data-open-sources>View built-in sources</button></section>' +
+    $("#view").innerHTML = pageHead("PREFERENCES", "Settings", "Manage built-in sources, playback defaults and the app experience.") +
+      '<div class="settings-grid"><section class="settings-card"><div class="eyebrow">STREAMING</div><h3>Built-in sources</h3><p id="provider-count">JustAnime · HiAnime · AniKoto</p><p>AniDash ships with three native source providers. Their search, episode lists, SUB/DUB server choices and stream resolvers are maintained with the website. No extensions or user source manifests are required.</p><button class="btn btn-primary" data-open-sources>View built-in sources</button></section>' +
       '<section class="settings-card"><div class="eyebrow">LOCAL DATA</div><h3>Your watch activity</h3><p>Watchlist and playback progress are stored on this device. Clearing browser storage will remove this local data.</p><button class="btn btn-quiet" data-clear-history>Clear watch history</button><button class="btn btn-quiet" data-clear-watchlist style="margin-left:6px">Clear watchlist</button></section>' +
       '<section class="settings-card"><div class="eyebrow">INSTALLATION</div><h3>Install AniDash</h3><p>Add the website to your device home screen or desktop app launcher for an app-like experience.</p><button class="btn btn-secondary" data-install>Installation guide</button></section>' +
       '<section class="settings-card"><div class="eyebrow">CATALOGUE</div><h3>AniList + MAL metadata</h3><p>Anime details, artwork, ratings and MyAnimeList IDs are read from the AniList public catalogue. No account sign-in is required for discovery.</p><a class="btn btn-quiet" href="https://docs.anilist.co/guide/graphql/" target="_blank" rel="noopener">API information ↗</a></section></div>';
