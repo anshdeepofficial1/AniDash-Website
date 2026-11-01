@@ -109,8 +109,8 @@
       sort + ", isAdult: false" + (extra || "") + ") { " + MEDIA_FIELDS + " } } }";
   }
 
-  async function getCollection(sort, page, perPage) {
-    const data = await gql(pageQuery(sort, page || 1, perPage || 18), { page: page || 1, perPage: perPage || 18 });
+  async function getCollection(sort, page, perPage, extra) {
+    const data = await gql(pageQuery(sort, page || 1, perPage || 18, extra || ""), { page: page || 1, perPage: perPage || 18 });
     return data.Page;
   }
 
@@ -160,6 +160,31 @@
       '</div>' + grid(items) + '</section>';
   }
 
+  function shelf(title, note, items, route) {
+    const rows = (items || []).filter(Boolean);
+    if (!rows.length) return "";
+    return '<section class="section shelf-section"><div class="section-heading"><div><h2 class="section-title">' + escapeHtml(title) + '</h2>' +
+      (note ? '<p class="section-note">' + escapeHtml(note) + '</p>' : '') + '</div>' +
+      (route ? '<button class="section-link" data-route="' + route + '">View all ↗</button>' : '') +
+      '</div><div class="anime-shelf">' + rows.map(card).join("") + '</div></section>';
+  }
+
+  function resumeShelf(items) {
+    const rows = (items || []).filter(item => item && item.media);
+    if (!rows.length) return "";
+    return '<section class="section shelf-section"><div class="section-heading"><div><h2 class="section-title">Continue watching</h2><p class="section-note">Pick up exactly where you stopped.</p></div><button class="section-link" data-route="/history">View history ↗</button></div>' +
+      '<div class="anime-shelf">' + rows.map(item => {
+        const media = item.media;
+        const pct = item.duration > 0 ? Math.min(100, Math.max(0, item.position / item.duration * 100)) : 0;
+        const poster = imageOf(media);
+        return '<article class="anime-card resume-card" data-resume="' + escapeHtml(media.id) + '" tabindex="0" role="button" aria-label="Resume ' + escapeHtml(titleOf(media)) + ' episode ' + escapeHtml(item.episode) + '">' +
+          '<div class="poster-wrap">' + (poster ? '<img loading="lazy" src="' + escapeHtml(poster) + '" alt="">' : '<div class="poster-fallback">' + escapeHtml(titleOf(media)) + '</div>') +
+          '<span class="poster-score">EP ' + escapeHtml(item.episode || 1) + '</span><span class="resume-play">▶</span></div>' +
+          '<div class="card-title">' + escapeHtml(titleOf(media)) + '</div><p class="card-subtitle">' + escapeHtml(item.episodeTitle || ("Episode " + (item.episode || 1))) + '</p>' +
+          '<div class="card-progress"><span style="width:' + pct + '%"></span></div></article>';
+      }).join("") + '</div></section>';
+  }
+
   function pageHead(eyebrow, title, subtitle, extra) {
     return '<div class="page-head"><div><div class="eyebrow">' + escapeHtml(eyebrow) + '</div><h1 class="page-title">' + escapeHtml(title) + '</h1>' +
       (subtitle ? '<p class="page-subtitle">' + escapeHtml(subtitle) + '</p>' : '') + '</div>' + (extra || '') + '</div>';
@@ -167,29 +192,55 @@
 
   async function renderHome() {
     const token = ++state.token;
-    showLoading("Finding your next favourite…");
+    showLoading("Building your anime home…");
     try {
-      const results = await Promise.all([
+      const requests = [
         getCollection("TRENDING_DESC", 1, 18),
         getCollection("POPULARITY_DESC", 1, 18),
-        getCollection("SCORE_DESC", 1, 18)
-      ]);
+        getCollection("SCORE_DESC", 1, 18),
+        getCollection("TRENDING_DESC", 1, 18, ", status: RELEASING"),
+        getCollection("POPULARITY_DESC", 1, 18, ", status: NOT_YET_RELEASED"),
+        getCollection("POPULARITY_DESC", 1, 18, ", format: MOVIE"),
+        getCollection("SCORE_DESC", 1, 18, ", averageScore_greater: 75, popularity_lesser: 35000")
+      ];
+      const settled = await Promise.allSettled(requests);
       if (token !== state.token) return;
-      state.home = { trending: results[0].media, popular: results[1].media, top: results[2].media };
-      const hero = results[0].media[0];
+      const rows = settled.map(result => result.status === "fulfilled" && result.value && Array.isArray(result.value.media)
+        ? result.value.media : []);
+      const [trending, popular, top, airing, upcoming, movies, hidden] = rows;
+      if (![...rows].some(list => list.length)) throw new Error("AniList did not return any anime sections. Please retry.");
+
+      state.home = { trending, popular, top, airing, upcoming, movies, hidden };
+      const hero = trending[0] || popular[0] || top[0];
       const heroImage = hero && (hero.bannerImage || imageOf(hero));
-      const continueItems = Object.values(store.history).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)).slice(0, 6);
+      const continueItems = Object.values(store.history)
+        .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)).slice(0, 10);
+      const watchlistItems = Object.values(store.watchlist).slice(0, 12);
+
+      const quickLinks = '<div class="home-shortcuts">' +
+        '<button data-route="/discover"><span>◈</span> Discover</button>' +
+        '<button data-route="/search"><span>⌕</span> Search anime</button>' +
+        '<button data-route="/library"><span>♡</span> My watchlist</button>' +
+        '<button data-route="/history"><span>◷</span> History</button>' +
+      '</div>';
+
       $("#view").innerHTML =
-        (hero ? '<section class="hero-stage"><div class="hero-bg" style="background-image:url(&quot;' + escapeHtml(heroImage) + '&quot;)"></div><div class="hero-content">' +
-          '<div class="hero-kicker">Trending right now</div><h1 class="hero-title">' + escapeHtml(titleOf(hero)) + '</h1>' +
+        (hero ? '<section class="hero-stage home-hero"><div class="hero-bg" style="background-image:url(&quot;' + escapeHtml(heroImage) + '&quot;)"></div><div class="hero-content">' +
+          '<div class="hero-kicker">Your next anime obsession</div><h1 class="hero-title">' + escapeHtml(titleOf(hero)) + '</h1>' +
           '<div class="hero-meta"><span>★ ' + formatScore(hero.averageScore) + '</span><span>' + escapeHtml(hero.format || "Anime") + '</span><span>' + escapeHtml(mediaYear(hero)) + '</span><span>' + escapeHtml(hero.status || "") + '</span></div>' +
-          '<p class="hero-description">' + escapeHtml(cleanText(hero.description) || "Discover details, episodes and connected streams for this series.") + '</p>' +
+          '<p class="hero-description">' + escapeHtml(cleanText(hero.description) || "Explore the story, browse episodes and discover more anime.") + '</p>' +
           '<div class="hero-actions"><button class="btn btn-primary" data-anime="' + hero.id + '">Explore anime <span>→</span></button><button class="btn btn-secondary" data-watchlist="' + hero.id + '">♡ Add to list</button></div>' +
           '</div></section>' : '') +
-        (continueItems.length ? section("Pick up where you left off", "Your recent progress is saved on this device.", continueItems.map(item => item.media).filter(Boolean)) : '') +
-        section("Trending this season", "What anime fans are watching right now.", results[0].media.slice(0, 12), "/discover") +
-        section("Popular picks", "Big stories, fan favourites and new discoveries.", results[1].media.slice(0, 12), "/discover") +
-        section("Top rated", "Highly rated titles from the AniList catalogue.", results[2].media.slice(0, 12), "/discover");
+        quickLinks +
+        resumeShelf(continueItems) +
+        shelf("Airing this week", "Fresh episodes from currently releasing series.", airing.slice(0, 14), "/discover") +
+        shelf("Trending right now", "The series viewers are talking about.", trending.slice(0, 14), "/discover") +
+        shelf("Popular with fans", "Big adventures, favourites and crowd-pleasers.", popular.slice(0, 14), "/discover") +
+        (watchlistItems.length ? shelf("From your watchlist", "Saved anime, ready when you are.", watchlistItems, "/library") : '') +
+        shelf("Coming soon", "Upcoming anime to add to your list.", upcoming.slice(0, 14), "/discover") +
+        shelf("Anime movies", "Feature-length stories for your next movie night.", movies.slice(0, 14), "/discover") +
+        shelf("Top rated", "Highly rated titles from the AniList catalogue.", top.slice(0, 14), "/discover") +
+        shelf("Hidden gems", "Well-rated series beyond the most popular charts.", hidden.slice(0, 14), "/discover");
     } catch (error) {
       if (token !== state.token) return;
       $("#view").innerHTML = '<div class="empty-state"><div class="empty-icon">◌</div><h3>Could not load the catalogue</h3><p>' + escapeHtml(error.message) + '</p><button class="btn btn-primary" data-route="/home">Try again</button></div>';
