@@ -32,6 +32,7 @@ async function requestText(url, headers = {}, timeout = 7000) {
     headers: {
       "User-Agent": API_USER_AGENT,
       Accept: "text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8",
+      Cookie: "__ddg1=;__ddg2_=",
       Referer: SITE_BASES[0] + "/",
       ...headers
     },
