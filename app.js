@@ -618,11 +618,17 @@
     if (!state.detail) return;
     const match = state.detailMatches.filter(item => !item.error)[Number(index)];
     if (!match) return;
-    showLoading("Loading episodes from " + match.provider.name + "…");
     try {
-      const episodes = await episodesFromMatch(match, state.detail);
+      const episodes = match.episodesReady && match.episodes
+        ? match.episodes
+        : await episodesFromMatch(match, state.detail);
+      if (!episodes.length) throw new Error("The provider returned no episodes.");
+      match.episodes = episodes;
+      match.episodesReady = true;
       state.selectedMatch = match;
-      state.detailEpisodes = episodes.length ? episodes : generatedEpisodes(state.detail);
+      state.detailEpisodes = episodes;
+      state.episodePage = 1;
+      state.episodeFilter = "";
       paintAnimeDetails(state.detail);
     } catch (error) {
       toast("Source unavailable: " + error.message);
@@ -694,6 +700,8 @@
       state.player : { media: media, episode: episode, match: state.selectedMatch, streams: [], servers: [], tracks: [], selectedServer: "default", category: "sub", intro: null, outro: null, direct: store.manualStreams[String(id) + ":" + String(number)] || "" };
     state.player.media = media;
     state.player.episode = episode;
+    const activeEpisodeIndex = state.detailEpisodes.findIndex(item => Number(item.number) === Number(number));
+    state.playerEpisodePage = activeEpisodeIndex >= 0 ? Math.floor(activeEpisodeIndex / PLAYER_EPISODES_PER_PAGE) + 1 : 1;
     if (!state.player.match && state.selectedMatch) state.player.match = state.selectedMatch;
     const defaultServer = state.player.match && state.player.match.provider
       ? ({ justanime: "auto", hianime: "hd-1", anikoto: "anikoto" }[state.player.match.provider.id] || "auto")
@@ -724,6 +732,7 @@
       '<aside class="player-sidebar"><div class="player-panel"><h3>Streaming source</h3><div class="source-row" id="provider-pills"></div><div style="height:12px"></div><h3>Audio & server</h3><div class="source-row" id="category-pills"><button class="source-pill active" data-category="sub">SUB</button><button class="source-pill" data-category="dub">DUB</button></div><div style="height:9px"></div><div class="source-row" id="server-pills"><span class="form-help">Loading built-in source servers…</span></div><div style="height:12px"></div><div class="source-row" id="quality-pills"></div></div>' +
       '<div class="player-panel"><h3>Episode list</h3><div class="player-episode-list">' + playerEpisodeItems() + '</div></div>' +
       '<div class="notice">Playback source: ' + escapeHtml(player.match && player.match.provider ? player.match.provider.name : "Direct link") + '. If this server fails, try another server or source.</div></aside></div></div>';
+    renderPlayerEpisodeBrowser();
     renderPlayerEpisodeBrowser();
     updateActiveNav("/watch");
   }
@@ -1213,6 +1222,34 @@
         state.selectedMatch = null;
         state.player = { media: media, episode: { id: String(item.episode), number: item.episode, title: item.episodeTitle || "Episode " + item.episode }, match: null, streams: [], servers: [], tracks: [], selectedServer: "default", category: "sub", direct: store.manualStreams[String(media.id) + ":" + String(item.episode)] || "" };
         navigate("/watch/" + media.id + "/" + item.episode);
+      }
+      return;
+    }
+    if (target.hasAttribute("data-episode-go")) {
+      jumpToEpisode(target.getAttribute("data-episode-go"));
+      return;
+    }
+    if (target.hasAttribute("data-episode-page")) {
+      const scope = target.getAttribute("data-episode-scope") || "detail";
+      const pageSize = scope === "player" ? PLAYER_EPISODES_PER_PAGE : DETAIL_EPISODES_PER_PAGE;
+      const filtered = matchingEpisodes(
+        state.detailEpisodes,
+        scope === "player" ? state.playerEpisodeFilter : state.episodeFilter
+      );
+      const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
+      let page = scope === "player" ? state.playerEpisodePage : state.episodePage;
+      const action = target.getAttribute("data-episode-page");
+      if (action === "first") page = 1;
+      else if (action === "prev") page--;
+      else if (action === "next") page++;
+      else if (action === "last") page = pageCount;
+      page = Math.max(1, Math.min(pageCount, page));
+      if (scope === "player") {
+        state.playerEpisodePage = page;
+        renderPlayerEpisodeBrowser();
+      } else {
+        state.episodePage = page;
+        renderEpisodeBrowser();
       }
       return;
     }
