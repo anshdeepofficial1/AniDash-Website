@@ -687,22 +687,44 @@
     }
     if (!state.detail || String(state.detail.id) !== String(id)) {
       state.detail = media;
-      state.detailMatches = await findProviderMatches(media);
-      const match = state.detailMatches.find(item => !item.error) || null;
-      state.selectedMatch = match;
-      state.detailEpisodes = match ? await episodesFromMatch(match, media).catch(() => []) : [];
-      if (!state.detailEpisodes.length) state.detailEpisodes = generatedEpisodes(media);
+      const prepared = await prepareMediaSources(media);
+      if (token !== state.token) return;
+      state.detailMatches = prepared.matches;
+      state.selectedMatch = prepared.selected;
+      state.detailEpisodes = prepared.episodes.length ? prepared.episodes : generatedEpisodes(media);
+      state.episodePage = 1;
+      state.episodeFilter = "";
+      state.playerEpisodeFilter = "";
     }
+
     const episode = state.detailEpisodes.find(item => Number(item.number) === Number(number)) || {
       id: String(number), number: Number(number), title: "Episode " + number, generated: true
     };
-    state.player = state.player && state.player.media && String(state.player.media.id) === String(id) ?
-      state.player : { media: media, episode: episode, match: state.selectedMatch, streams: [], servers: [], tracks: [], selectedServer: "default", category: "sub", intro: null, outro: null, direct: store.manualStreams[String(id) + ":" + String(number)] || "" };
+    const currentMatchStillValid = state.player && state.player.match &&
+      state.detailMatches.some(match => match.provider.id === state.player.match.provider.id && match.episodesReady);
+    state.player = state.player && state.player.media && String(state.player.media.id) === String(id)
+      ? state.player
+      : {
+          media: media,
+          episode: episode,
+          match: state.selectedMatch,
+          streams: [],
+          embeds: [],
+          availableProviders: [],
+          servers: [],
+          tracks: [],
+          selectedServer: "default",
+          category: "sub",
+          intro: null,
+          outro: null,
+          direct: store.manualStreams[String(id) + ":" + String(number)] || ""
+        };
     state.player.media = media;
     state.player.episode = episode;
+    if (!currentMatchStillValid || !state.player.match) state.player.match = state.selectedMatch;
     const activeEpisodeIndex = state.detailEpisodes.findIndex(item => Number(item.number) === Number(number));
     state.playerEpisodePage = activeEpisodeIndex >= 0 ? Math.floor(activeEpisodeIndex / PLAYER_EPISODES_PER_PAGE) + 1 : 1;
-    if (!state.player.match && state.selectedMatch) state.player.match = state.selectedMatch;
+
     const defaultServer = state.player.match && state.player.match.provider
       ? ({ justanime: "auto", hianime: "hd-1", anikoto: "anikoto" }[state.player.match.provider.id] || "auto")
       : "auto";
@@ -713,7 +735,7 @@
     paintPlayer();
     if (state.player.direct) {
       attachStream(state.player.direct, { quality: "Direct link", type: /\.m3u8(\?|$)/i.test(state.player.direct) ? "hls" : "mp4" }, []);
-    } else if (state.player.match && !episode.generated) {
+    } else {
       await loadPlayerStreams(token);
     }
   }
