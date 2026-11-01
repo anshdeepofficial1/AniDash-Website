@@ -41,7 +41,7 @@ function mediaUrl(req, raw, isHls) {
     if (target.protocol !== "https:") return String(raw);
     const allowed = [
       "neko.justanime.to", "nexabloom.top", "give6beforegtav.site",
-      "megaplay.buzz", "zokoanime.video", "animegg.org"
+      "megaplay.buzz", "zokoanime.video", "animegg.org", "norami.top", "kryntal.top", "akirax.buzz", "vid-tube.site"
     ];
     const hostAllowed = allowed.some(host => target.hostname === host || target.hostname.endsWith("." + host));
     if (!hostAllowed) return target.toString();
