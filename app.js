@@ -633,7 +633,7 @@
     const hasPrev = episodeIndex > 0;
     const hasNext = episodeIndex >= 0 && episodeIndex < state.detailEpisodes.length - 1;
     $("#view").innerHTML = '<div class="player-page"><div class="player-topline"><button class="back-button" data-anime="' + media.id + '" aria-label="Back to anime">←</button><div><h1>' + escapeHtml(titleOf(media)) + '</h1><p>Episode ' + escapeHtml(episode.number) + ' · ' + escapeHtml(episode.title) + '</p></div></div>' +
-      '<div class="player-layout"><section><div class="video-frame"><video id="anime-video" controls playsinline webkit-playsinline preload="metadata"></video><div class="player-overlay" id="player-overlay"><div class="loader"></div><strong>Preparing your player</strong><p>Checking the connected source and browser playback support…</p></div></div>' +
+      '<div class="player-layout"><section><div class="video-frame"><video id="anime-video" controls playsinline webkit-playsinline preload="metadata"></video><iframe id="anime-embed" title="Episode stream" allow="autoplay; fullscreen; picture-in-picture; encrypted-media" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen hidden></iframe><div class="player-overlay" id="player-overlay"><div class="loader"></div><strong>Preparing your player</strong><p>Checking the connected source and browser playback support…</p></div></div>' +
       '<div class="player-under"><div><h2>' + escapeHtml(episode.title) + '</h2><p>' + escapeHtml(titleOf(media)) + ' · Episode ' + escapeHtml(episode.number) + '</p></div><div class="player-controls"><button class="btn btn-quiet" data-prev ' + (hasPrev ? "" : "disabled") + '>← Previous</button><button class="btn btn-quiet" data-next ' + (hasNext ? "" : "disabled") + '>Next →</button><button class="btn btn-secondary" data-open-direct>Paste stream link</button></div></div>' +
       '<div class="button-row" style="margin-top:14px" id="skip-buttons"></div></section>' +
       '<aside class="player-sidebar"><div class="player-panel"><h3>Streaming source</h3><div class="source-row" id="provider-pills"></div><div style="height:12px"></div><h3>Audio & server</h3><div class="source-row" id="category-pills"><button class="source-pill active" data-category="sub">SUB</button><button class="source-pill" data-category="dub">DUB</button></div><div style="height:9px"></div><div class="source-row" id="server-pills"><span class="form-help">Loading built-in source servers…</span></div><div style="height:12px"></div><div class="source-row" id="quality-pills"></div></div>' +
@@ -847,12 +847,38 @@
       showPlayerOverlay("Insecure stream blocked", "Only HTTPS video sources are allowed on the deployed website.", true);
       return;
     }
+
     const video = $("#anime-video");
+    const embed = $("#anime-embed");
+    const overlay = $("#player-overlay");
     if (!video) return;
     if (state.hls) {
       try { state.hls.destroy(); } catch (_) {}
       state.hls = null;
     }
+
+    const isEmbed = !!(stream && (stream.isEmbed === true || String(stream.type || "").toLowerCase() === "embed"));
+    if (isEmbed) {
+      video.pause();
+      video.removeAttribute("src");
+      video.load();
+      video.style.display = "none";
+      if (embed) {
+        embed.hidden = false;
+        embed.src = parsed.toString();
+      }
+      state.currentVideo = parsed.toString();
+      if (overlay) overlay.style.display = "none";
+      const skip = $("#skip-buttons");
+      if (skip) skip.innerHTML = "";
+      return;
+    }
+
+    if (embed) {
+      embed.hidden = true;
+      embed.src = "about:blank";
+    }
+    video.style.display = "block";
     video.pause();
     video.removeAttribute("src");
     while (video.firstChild) video.removeChild(video.firstChild);
@@ -866,7 +892,6 @@
       video.appendChild(el);
     });
     const isHls = stream && (stream.isM3U8 === true || String(stream.type || "").toLowerCase().includes("hls") || /\.m3u8(\?|$)/i.test(url));
-    const overlay = $("#player-overlay");
     if (isHls && video.canPlayType("application/vnd.apple.mpegurl")) {
       video.src = url;
     } else if (isHls && window.Hls && window.Hls.isSupported()) {
@@ -875,7 +900,7 @@
       state.hls.attachMedia(video);
       state.hls.on(window.Hls.Events.ERROR, function (_event, data) {
         if (data && data.fatal) {
-          showPlayerOverlay("Stream playback failed", "The browser could not load this HLS stream. Try a different source or quality.", true);
+          showPlayerOverlay("Stream playback failed", "The browser could not load this HLS stream. AniDash can try another built-in source.", true);
           try { state.hls.destroy(); } catch (_) {}
           state.hls = null;
         }
@@ -1129,7 +1154,8 @@
     }
     if (target.hasAttribute("data-stream")) {
       const index = Number(target.getAttribute("data-stream"));
-      const stream = state.player.streams[index];
+      const list = state.player.streams.length ? state.player.streams : (state.player.embeds || []);
+      const stream = list[index];
       if (stream) {
         $$("[data-stream]").forEach(el => el.classList.toggle("active", Number(el.getAttribute("data-stream")) === index));
         attachStream(stream.url || stream.src || stream.file, stream, state.player.tracks);
