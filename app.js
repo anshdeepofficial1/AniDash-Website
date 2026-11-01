@@ -583,8 +583,8 @@
           '<div class="button-row"><button class="btn btn-primary" data-play-first="' + media.id + '" ' + (episodes.length ? "" : "disabled") + '>▶ Start watching</button><button class="btn btn-secondary" data-watchlist="' + media.id + '">' + (watched ? "✓ In watchlist" : "♡ Add to watchlist") + '</button></div>' +
         '</div></div></div>' +
       '<div class="details-layout"><section class="content-panel"><div class="section-heading"><div><h2 class="panel-title">Episodes</h2><p class="section-note">' + (matches.length ? "Source: " + escapeHtml(sourceInfo) : "AniDash checks all three built-in providers and uses AniList episode mapping as a fallback.") + '</p></div><span class="watchlist-badge">' + episodes.length + ' listed</span></div>' +
-        '<div class="episode-toolbar"><select id="episode-source" class="select-control">' + (matches.length ? matches.map((match, index) => '<option value="' + index + '"' + (match === state.selectedMatch ? " selected" : "") + '>' + escapeHtml(match.provider.name + (match.mapped ? " (episode map)" : "")) + '</option>').join("") : '<option value="">No episode source available</option>') + '</select><input id="episode-filter" class="input-control" style="max-width:155px" placeholder="Find episode…"><button class="btn btn-quiet" data-refresh-sources>Retry sources</button></div>' +
-        '<div id="episode-list" class="episode-list">' + episodes.map(episodeCard).join("") + '</div>' +
+        '<div class="episode-toolbar"><select id="episode-source" class="select-control">' + (matches.length ? matches.map((match, index) => '<option value="' + index + '"' + (match === state.selectedMatch ? " selected" : "") + '>' + escapeHtml(match.provider.name + (match.mapped ? " (episode map)" : "")) + '</option>').join("") : '<option value="">No episode source available</option>') + '</select><input id="episode-filter" class="input-control" style="max-width:180px" placeholder="Search episodes…"><input id="episode-jump" class="input-control episode-jump-input" type="number" min="1" placeholder="EP #"><button class="btn btn-quiet" data-episode-go="detail">Go</button><button class="btn btn-quiet" data-refresh-sources>Retry sources</button></div>' +
+        '<div id="episode-list" class="episode-list"></div><div id="episode-pagination"></div>' +
         (!episodes.length ? '<div class="notice" style="margin-top:14px">No episode list was returned. Check the source status below and retry when an upstream service is available.</div>' : '') +
         '<div class="builtin-sources-panel"><div class="section-heading"><div><h3 class="panel-title">Built-in sources</h3><p class="section-note">These three sources are included with AniDash. No extensions are needed.</p></div></div>' + providerRows + '</div>' +
       '</section><aside class="content-panel"><h2 class="panel-title">About this anime</h2><div class="info-list">' +
@@ -596,6 +596,7 @@
         infoRow("Sources", sourceInfo) +
       '</div></aside></div>' +
       (relationItems.length ? '<section class="section" style="margin-top:28px"><div class="section-heading"><div><h2 class="section-title">Related anime</h2></div></div><div class="anime-grid">' + relationItems.map(edge => relationCard(edge.node)).join("") + '</div></section>' : '');
+    renderEpisodeBrowser();
   }
 
   function relationCard(item) {
@@ -667,8 +668,8 @@
   }
 
   function playerEpisodeItems() {
-    if (!state.player || !state.detailEpisodes) return "";
-    return state.detailEpisodes.map(episode => '<button class="player-episode' + (Number(episode.number) === Number(state.player.episode.number) ? " active" : "") + '" data-player-episode="' + episode.number + '"><span>' + episode.number + '</span>' + escapeHtml(episode.title) + '</button>').join("");
+    return '<div class="player-episode-tools"><input id="player-episode-filter" class="input-control" placeholder="Find episode…"><input id="player-episode-jump" class="input-control episode-jump-input" type="number" min="1" placeholder="EP #"><button class="btn btn-quiet" data-episode-go="player">Go</button></div>' +
+      '<div id="player-episode-items"></div><div id="player-episode-pagination"></div>';
   }
 
   async function renderWatch(id, number) {
@@ -723,6 +724,7 @@
       '<aside class="player-sidebar"><div class="player-panel"><h3>Streaming source</h3><div class="source-row" id="provider-pills"></div><div style="height:12px"></div><h3>Audio & server</h3><div class="source-row" id="category-pills"><button class="source-pill active" data-category="sub">SUB</button><button class="source-pill" data-category="dub">DUB</button></div><div style="height:9px"></div><div class="source-row" id="server-pills"><span class="form-help">Loading built-in source servers…</span></div><div style="height:12px"></div><div class="source-row" id="quality-pills"></div></div>' +
       '<div class="player-panel"><h3>Episode list</h3><div class="player-episode-list">' + playerEpisodeItems() + '</div></div>' +
       '<div class="notice">Playback source: ' + escapeHtml(player.match && player.match.provider ? player.match.provider.name : "Direct link") + '. If this server fails, try another server or source.</div></aside></div></div>';
+    renderPlayerEpisodeBrowser();
     updateActiveNav("/watch");
   }
 
@@ -1316,10 +1318,14 @@
 
   document.addEventListener("input", event => {
     if (event.target.id === "episode-filter") {
-      const term = slug(event.target.value);
-      $$(".episode-item").forEach(item => {
-        item.hidden = term && !slug(item.textContent).includes(term);
-      });
+      state.episodeFilter = event.target.value;
+      state.episodePage = 1;
+      renderEpisodeBrowser();
+    }
+    if (event.target.id === "player-episode-filter") {
+      state.playerEpisodeFilter = event.target.value;
+      state.playerEpisodePage = 1;
+      renderPlayerEpisodeBrowser();
     }
   });
 
