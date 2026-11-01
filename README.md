@@ -1,20 +1,27 @@
 # AniDash Watch Web
 
-A standalone, responsive anime discovery and streaming PWA. This folder is deliberately separate from `website/`; the existing AniDash download website is not changed by this project.
+A standalone, responsive anime discovery and streaming PWA. This repository is separate from the main AniDash Android app and the AniDash download/marketing website.
 
-## Included in this first build
+## Included
 
-- AniList-powered anime discovery, search, rankings, detailed metadata, artwork, genres, airing status and mapped MAL ID links.
+- AniList-powered anime discovery, search, rankings, artwork, details, genres, airing status and mapped MAL ID links.
 - Local watchlist and continue-watching history.
-- Episode lists supplied by a configured provider, with catalogue episode-number fallback.
+- Provider-supplied episode lists, with catalogue episode-number fallback.
 - JSON provider adapters for search, episode discovery, SUB/DUB server lists and stream resolution.
 - MP4 and HLS playback, native HLS on Safari/iPhone and hls.js on supported browsers.
 - Subtitle tracks, source/quality selection, next/previous episode controls, playback resume and skip-intro/outro metadata.
 - Installable PWA shell and responsive phone/tablet/desktop layouts.
 
-## Deploy as the separate Watch project
+## Vercel deployment
 
-In the existing Vercel project for the Watch domain, set **Root Directory** to `watch-web`, keep the framework preset as **Other**, and leave build command/output directory empty. Do not change the download site's Vercel project or its root directory (`website`).
+Import this repository as its own Vercel project. Use:
+
+- **Framework preset:** Other
+- **Root directory:** repository root (leave the field empty or use `.`)
+- **Build command:** leave empty
+- **Output directory:** leave empty
+
+The static website is served directly from the repository root. Do not point this project at the main AniDash repository or its `website/` folder.
 
 ## Catalogue
 
@@ -32,17 +39,15 @@ This build does not assume a catalogue provider is also a video provider. Connec
 
 Endpoint templates support `{query}`, `{page}`, `{id}`, `{anilistId}`, `{malId}`, `{episodeId}`, `{episode}`, `{server}`, and `{category}`.
 
-Example stream response:
+Example stream response (JSON):
 
-```json
-{
-  "servers": [{"id":"main","name":"Main","isDub":false},{"id":"dub","name":"English Dub","isDub":true}],
-  "sources": [{"url":"https://media.example/episode.m3u8","quality":"1080p","type":"hls","isM3U8":true,"isDub":false,"headers":{}}],
-  "tracks": [{"url":"https://media.example/subtitles/en.vtt","lang":"English","type":"subtitles"}],
-  "intro": {"start":80,"end":165},
-  "outro": {"start":1320,"end":1440}
-}
-```
+    {
+      "servers": [{"id":"main","name":"Main","isDub":false}],
+      "sources": [{"url":"https://media.example/episode.m3u8","quality":"1080p","type":"hls","isM3U8":true,"isDub":false}],
+      "tracks": [{"url":"https://media.example/subtitles/en.vtt","lang":"English","type":"subtitles"}],
+      "intro": {"start":80,"end":165},
+      "outro": {"start":1320,"end":1440}
+    }
 
 A browser cannot attach arbitrary Origin/Referer headers to a media element. If your authorised provider requires custom headers or has CORS restrictions, expose a server-side relay under your own domain and restrict it to explicit upstream hosts and paths. Do not use an open proxy.
 
@@ -54,13 +59,8 @@ Open the deployed site in Safari, tap Share, choose **Add to Home Screen**, then
 
 ## Local testing
 
-```bash
-cd watch-web
-python -m http.server 8080
-```
+Run `python -m http.server 8080` in this repository, then open `http://localhost:8080`.
 
-Then open `http://localhost:8080`.
-
-## Limits of this initial build
+## Current limitations
 
 Provider-specific API adapters have not yet been wired because the exact source URLs/contracts have not been supplied for this web build. Watchlist and playback progress are browser-local in this version; cross-device AniList/MAL account sync is not yet enabled.
