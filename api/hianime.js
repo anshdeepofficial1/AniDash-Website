@@ -347,7 +347,7 @@ export default async function handler(req, res) {
         String(req.query.server || "hd-1"),
         String(req.query.category || "sub")
       );
-      return send(res, 200, result);
+      return send(res, 200, result, "no-store");
     }
     return send(res, 400, { error: "Unknown HiAnime action" });
   } catch (error) {
