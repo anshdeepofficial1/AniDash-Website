@@ -79,7 +79,7 @@ async function fetchAllowed(target, req, custom = {}) {
       method: "GET",
       redirect: "manual",
       headers: headersFor(current, req, custom),
-      signal: AbortSignal.timeout(22000)
+      signal: AbortSignal.timeout(8500)
     });
     if (![301, 302, 303, 307, 308].includes(response.status)) return response;
     const location = response.headers.get("location");
