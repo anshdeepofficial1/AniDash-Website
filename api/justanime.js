@@ -41,148 +41,44 @@ function mediaUrl(req, raw, isHls, playbackHeaders = {}) {
     if (target.protocol !== "https:") return String(raw);
     const allowed = [
       "neko.justanime.to", "nexabloom.top", "give6beforegtav.site",
-      "megaplay.buzz", "zokoanime.video", "animegg.org", "norami.top", "kryntal.top", "akirax.buzz", "vid-tube.site"
+      "megaplay.buzz", "zokoanime.video", "animegg.org",
+      "kwik.cx", "kwik.si", "kwik.to", "kwik.li",
+      "megacloud.blog", "megacloud.tv", "rapid-cloud.co", "rapid-cloud.ru",
+      "vidnest.fun", "norami.top", "kryntal.top", "akirax.buzz", "vid-tube.site"
     ];
-    const hostAllowed = allowed.some(host => target.hostname === host || target.hostname.endsWith("." + host));
-    if (!hostAllowed) return target.toString();
+    if (!allowed.some(host => target.hostname === host || target.hostname.endsWith("." + host))) {
+      return target.toString();
+    }
+
     const proto = String(req.headers["x-forwarded-proto"] || "https").split(",")[0].trim();
     const host = String(req.headers["x-forwarded-host"] || req.headers.host || "");
     if (!host) return target.toString();
+
     const safeHeaders = {};
     for (const [key, value] of Object.entries(playbackHeaders || {})) {
       if (/^(referer|origin|user-agent|accept)$/i.test(key) && typeof value === "string" && value.length <= 600) {
         safeHeaders[key.toLowerCase()] = value;
       }
     }
-    const alreadyExternalProxy = target.hostname === "neko.justanime.to" && target.pathname.includes("m3u8-proxy");
-    const externalProxy = alreadyExternalProxy
-      ? target.toString()
-      : "https://neko.justanime.to/m3u8-proxy?url=" +
+
+    const useNativeJustAnimeProxy = [
+      "neko.justanime.to", "nexabloom.top", "give6beforegtav.site"
+    ].some(domain => target.hostname === domain || target.hostname.endsWith("." + domain));
+
+    let mediaTarget = target.toString();
+    if (useNativeJustAnimeProxy) {
+      mediaTarget = "https://neko.justanime.to/m3u8-proxy?url=" +
         encodeURIComponent(target.toString()) +
         "&headers=" + encodeURIComponent(JSON.stringify(safeHeaders));
-    return proto + "://" + host + "/api/media?url=" + encodeURIComponent(externalProxy) +
-      "&hls=" + (isHls ? "1" : "0");
+    }
+    const headerParam = useNativeJustAnimeProxy || !Object.keys(safeHeaders).length
+      ? ""
+      : "&headers=" + encodeURIComponent(JSON.stringify(safeHeaders));
+    return proto + "://" + host + "/api/media?url=" + encodeURIComponent(mediaTarget) +
+      "&hls=" + (isHls ? "1" : "0") + headerParam;
   } catch {
     return String(raw || "");
   }
-}
-
-async function fetchJson(url, headers, timeout) {
-  const response = await fetch(url, {
-    headers,
-    signal: AbortSignal.timeout(timeout)
-  });
-  if (!response.ok) throw new Error("JustAnime returned HTTP " + response.status);
-  const data = await response.json();
-  if (!data || typeof data !== "object" || data.error) {
-    throw new Error(data?.error || "JustAnime returned an invalid response");
-  }
-  return data;
-}
-
-async function getJson(path, timeout = 8500) {
-  const headers = {
-    Accept: "application/json, text/plain, */*",
-    Origin: SITE,
-    Referer: SITE + "/",
-    "User-Agent": UA
-  };
-  const directUrl = API + path;
-  const relayUrl = new URL(process.env.JUSTANIME_RELAY_URL || "https://anidashweb.vercel.app/api/justanime");
-  relayUrl.searchParams.set("path", path);
-
-  const direct = fetchJson(directUrl, headers, timeout);
-  const relay = new Promise((resolve, reject) => {
-    setTimeout(() => {
-      fetchJson(relayUrl.toString(), { Accept: "application/json, text/plain, */*", "User-Agent": UA }, timeout)
-        .then(resolve, reject);
-    }, 300);
-  });
-
-  try {
-    return await Promise.any([direct, relay]);
-  } catch (error) {
-    const reasons = Array.isArray(error?.errors) ? error.errors : [];
-    const detail = reasons.map(item => item?.message).filter(Boolean).slice(0, 2).join("; ");
-    throw new Error("JustAnime direct and relay requests failed" + (detail ? ": " + detail : ""));
-  }
-}
-
-function getPath(id, episode, suffix = "") {
-  const cleanId = String(id).replace(/[^0-9]/g, "");
-  const cleanEpisode = String(episode).replace(/[^0-9.]/g, "");
-  if (!cleanId || !cleanEpisode) throw new Error("Invalid JustAnime anime or episode ID");
-  return "/watch/" + cleanId + "/episode/" + cleanEpisode + suffix;
-}
-
-function normalizeSearch(item) {
-  const title = item?.title && typeof item.title === "object"
-    ? (item.title.english || item.title.romaji || item.title.native || "Unknown")
-    : (item?.title || item?.name || "Unknown");
-  const id = item?.id ?? item?.animeId;
-  return {
-    id: id == null ? "" : String(id),
-    title: String(title),
-    image: item?.cover || item?.poster || item?.image || "",
-    type: item?.type || "",
-    year: item?.year ?? "",
-    episodes: item?.episodes ?? null
-  };
-}
-
-async function search(query, page) {
-  const url = new URL(API + "/search");
-  url.searchParams.set("query", query);
-  url.searchParams.set("page", String(page));
-  const data = await getJson(url.pathname + url.search);
-  const results = Array.isArray(data.results) ? data.results : [];
-  return {
-    results: results.map(normalizeSearch).filter(item => item.id && item.title !== "Unknown"),
-    page,
-    hasMore: data.hasNextPage === true || (Number(data.totalPages) > page)
-  };
-}
-
-async function episodes(animeId) {
-  const id = String(animeId).replace(/[^0-9]/g, "");
-  if (!id) throw new Error("Invalid JustAnime anime ID");
-  const first = await getJson("/anime/" + id + "/episodes?page=1");
-  const pages = [first];
-  let totalPages = Number(first.totalPages || first.pageInfo?.lastPage || 0);
-  if (!totalPages && first.hasNextPage) totalPages = 25;
-  totalPages = Math.min(25, Math.max(1, totalPages || 1));
-  if (totalPages > 1) {
-    const remaining = await Promise.all(
-      Array.from({ length: totalPages - 1 }, (_, index) =>
-        getJson("/anime/" + id + "/episodes?page=" + (index + 2)).catch(() => null)
-      )
-    );
-    pages.push(...remaining.filter(Boolean));
-  }
-  const flattened = pages.flatMap(page => Array.isArray(page.episodes) ? page.episodes : []);
-  const seen = new Set();
-  const list = flattened.map((item, index) => {
-    const number = Number(item.number ?? index + 1);
-    return {
-      id: String(number),
-      number,
-      title: item.title || "Episode " + number,
-      thumbnail: item.image || "",
-      date: item.airDate || "",
-      isFiller: item.filler === true || item.filler === 1 || item.isFiller === true || String(item.type || "").toLowerCase() === "filler"
-    };
-  }).filter(item => Number.isFinite(item.number) && item.number > 0 && !seen.has(item.number) && seen.add(item.number));
-  list.sort((a, b) => a.number - b.number);
-  return { episodes: list, totalEpisodes: list.length };
-}
-
-function normalizeTracks(raw, fallback = []) {
-  const values = Array.isArray(raw) ? raw : fallback;
-  return values.map(item => ({
-    url: String(item?.url || item?.file || ""),
-    lang: String(item?.lang || item?.label || "English"),
-    type: "subtitles"
-  })).filter(item => item.url);
 }
 
 function headerValue(sources, names, fallback) {
