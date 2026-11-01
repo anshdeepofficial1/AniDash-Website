@@ -24,7 +24,7 @@ These three fixed source integrations are included. Viewers do not install or im
 - Player tries all returned server candidates first, then tries the next built-in provider for the same episode.
 - SUB/DUB, server and provider changes clear old failure state and start a fresh resolution.
 - MP4/HLS playback, native HLS on Safari/iPhone, hls.js on supported browsers, iframe-based partner players, subtitles and intro/outro skip metadata.
-- Same-origin `/api/media` relay is restricted to an explicit list of source/CDN hosts. Safe `Referer`, `Origin`, `User-Agent` and `Accept` headers are carried through HLS master playlists, child playlists and segments. Signed media responses are not cached.
+- Same-origin `/api/media` relay is restricted to an explicit list of source/CDN hosts. JustAnime follows the same two-hop `neko.justanime.to/m3u8-proxy` flow as the Android web relay; the relay carries safe `Referer`, `Origin`, `User-Agent` and `Accept` headers through HLS master playlists, child playlists, segments and keys. Other built-in providers use the restricted direct relay. Signed media responses are not cached.
 - The player has a Retry all built-in sources action after a provider failure.
 
 Provider sites and their APIs are third-party services. Their availability, domains, response formats, anti-bot protections, CDN hosts and browser restrictions can change. A catalogue or stream URL response does not guarantee that the browser can play it. No site can guarantee that every episode is available while upstream services refuse requests.
