@@ -132,8 +132,8 @@ function normaliseEpisode(item, index) {
 }
 
 async function resolveAniListId(animeId, givenId) {
-  if (givenId && /^\\d+$/.test(String(givenId))) return String(givenId);
-  if (/^\\d+$/.test(String(animeId))) return String(animeId);
+  if (givenId && /^\d+$/.test(String(givenId))) return String(givenId);
+  if (/^\d+$/.test(String(animeId))) return String(animeId);
   // Never scrape a similarly named, unverified HiAnime copy to infer IDs.
   // AniDash's AniList catalogue supplies the mapping for its built-in flow.
   return null;
