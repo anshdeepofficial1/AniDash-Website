@@ -35,6 +35,191 @@ function positiveInt(value, fallback = 1, max = 100) {
   return Number.isFinite(parsed) ? Math.min(max, Math.max(1, parsed)) : fallback;
 }
 
+
+const RELAY_BASE = String(process.env.JUSTANIME_RELAY_URL || "https://anidashweb.vercel.app/api/justanime").replace(/\/$/, "");
+
+function allowedJustAnimePath(path) {
+  const value = String(path || "");
+  return /^\/search\?(?:[^#]*)$/.test(value) ||
+    /^\/anime\/\d{1,12}\/episodes\?page=\d{1,2}$/.test(value) ||
+    /^\/watch\/\d{1,12}\/episode\/\d{1,5}(?:\.\d{1,3})?(?:\/(?:megaplay|zokoanime|animegg|anineko\/(?:sub|dub)(?:\/hd1)?))?$/.test(value);
+}
+
+async function requestJson(url, timeout = 8500) {
+  const response = await fetch(url, {
+    headers: {
+      Accept: "application/json, text/plain, */*",
+      Origin: SITE,
+      Referer: SITE + "/",
+      "User-Agent": UA
+    },
+    redirect: "follow",
+    signal: AbortSignal.timeout(timeout)
+  });
+  const body = await response.text();
+  if (!response.ok) throw new Error("HTTP " + response.status);
+  let payload;
+  try { payload = JSON.parse(body); }
+  catch { throw new Error("JustAnime returned a non-JSON response"); }
+  if (!payload || typeof payload !== "object" || payload.error) {
+    throw new Error(payload?.error || "JustAnime returned an invalid response");
+  }
+  return payload;
+}
+
+async function getJson(req, path, timeout = 8500) {
+  const safePath = String(path || "");
+  if (!allowedJustAnimePath(safePath)) throw new Error("Invalid JustAnime API path");
+  try {
+    return await requestJson(API + safePath, timeout);
+  } catch (directError) {
+    try {
+      const relay = new URL(RELAY_BASE);
+      relay.searchParams.set("path", safePath);
+      return await requestJson(relay.toString(), timeout);
+    } catch (relayError) {
+      throw new Error("JustAnime API failed: " + directError.message + "; relay failed: " + relayError.message);
+    }
+  }
+}
+
+function getPath(animeId, episode, suffix = "") {
+  const id = String(animeId || "").trim();
+  const ep = String(episode ?? "").trim();
+  if (!/^\d{1,12}$/.test(id)) throw new Error("JustAnime requires the numeric AniList anime ID");
+  if (!/^\d{1,5}(?:\.\d{1,3})?$/.test(ep) || Number(ep) <= 0) {
+    throw new Error("Invalid JustAnime episode number");
+  }
+  const safeSuffix = String(suffix || "");
+  if (safeSuffix && !/^\/(?:megaplay|zokoanime|animegg|anineko\/(?:sub|dub)(?:\/hd1)?)$/.test(safeSuffix)) {
+    throw new Error("Unknown JustAnime server");
+  }
+  return "/watch/" + id + "/episode/" + ep + safeSuffix;
+}
+
+function normaliseAnime(item) {
+  const rawTitle = item?.title || item?.name || "Unknown";
+  const title = typeof rawTitle === "string"
+    ? rawTitle
+    : (rawTitle.english || rawTitle.romaji || rawTitle.native || "Unknown");
+  return {
+    id: String(item?.id || item?.animeId || item?.slug || ""),
+    title: String(title),
+    image: String(item?.cover || item?.poster || item?.image || ""),
+    type: String(item?.type || ""),
+    year: item?.year ?? item?.releaseDate ?? "",
+    episodes: item?.episodes ?? item?.number ?? null
+  };
+}
+
+function normaliseEpisode(item, index) {
+  const number = Number(item?.number ?? item?.episode ?? item?.episodeNumber ?? index + 1);
+  return {
+    id: String(number),
+    number,
+    title: String(item?.title || item?.name || "Episode " + number),
+    thumbnail: String(item?.image || item?.thumbnail || item?.snapshot || ""),
+    date: String(item?.airDate || item?.date || ""),
+    isFiller: item?.filler === true || item?.filler === 1 || item?.isFiller === true ||
+      String(item?.type || "").toLowerCase() === "filler"
+  };
+}
+
+function normaliseTracks(rows) {
+  return (Array.isArray(rows) ? rows : [])
+    .filter(item => item && item.lang !== "thumbnails" && item.kind !== "thumbnails")
+    .map(item => ({
+      url: String(item.url || item.file || ""),
+      lang: String(item.lang || item.label || "English"),
+      type: "subtitles"
+    }))
+    .filter(item => item.url);
+}
+
+async function search(req, query, page) {
+  const params = new URLSearchParams({ query: String(query), page: String(page) });
+  const payload = await getJson(req, "/search?" + params.toString(), 9000);
+  const rows = Array.isArray(payload.results) ? payload.results
+    : Array.isArray(payload.data) ? payload.data
+    : Array.isArray(payload.data?.results) ? payload.data.results
+    : [];
+  const results = rows.map(normaliseAnime).filter(item => item.id && item.title !== "Unknown");
+  return {
+    results,
+    page,
+    hasMore: payload.hasNextPage === true || payload.pageInfo?.hasNextPage === true ||
+      Number(payload.totalPages || 1) > page
+  };
+}
+
+async function episodes(req, animeId) {
+  const id = String(animeId || "").trim();
+  if (!/^\d{1,12}$/.test(id)) throw new Error("JustAnime requires the numeric AniList anime ID");
+
+  async function fetchPage(page) {
+    return getJson(req, "/anime/" + id + "/episodes?page=" + page, 10000);
+  }
+
+  const first = await fetchPage(1);
+  const firstRows = Array.isArray(first.episodes) ? first.episodes : [];
+  if (!firstRows.length) throw new Error("JustAnime returned no episodes for this anime");
+
+  const totalPages = Number(first.totalPages || first.pageInfo?.lastPage || 0);
+  const hasNextPage = first.hasNextPage === true || first.pageInfo?.hasNextPage === true;
+  const pages = [first];
+
+  if (totalPages > 1) {
+    const lastPage = Math.min(25, Math.max(1, Math.floor(totalPages)));
+    const additional = await Promise.all(
+      Array.from({ length: lastPage - 1 }, (_, index) =>
+        fetchPage(index + 2).catch(() => null)
+      )
+    );
+    pages.push(...additional.filter(Boolean));
+  } else if (hasNextPage || firstRows.length >= 100) {
+    for (let page = 2; page <= 25; page++) {
+      let next;
+      try { next = await fetchPage(page); } catch { break; }
+      const rows = Array.isArray(next.episodes) ? next.episodes : [];
+      if (!rows.length) break;
+      pages.push(next);
+      if (next.hasNextPage !== true && rows.length < 100) break;
+    }
+  }
+
+  const unique = new Map();
+  pages.flatMap(value => Array.isArray(value.episodes) ? value.episodes : [])
+    .map(normaliseEpisode)
+    .filter(item => Number.isFinite(item.number) && item.number > 0)
+    .sort((a, b) => a.number - b.number)
+    .forEach(item => { if (!unique.has(item.number)) unique.set(item.number, item); });
+
+  const list = [...unique.values()];
+  return {
+    episodes: list,
+    totalEpisodes: Number(first.totalEpisodes || list.length),
+    animeId: id
+  };
+}
+
+async function relayPath(path) {
+  if (!allowedJustAnimePath(path)) throw new Error("Invalid JustAnime path");
+  const response = await fetch(API + path, {
+    headers: {
+      Accept: "application/json, text/plain, */*",
+      Origin: SITE,
+      Referer: SITE + "/",
+      "User-Agent": UA
+    },
+    redirect: "follow",
+    signal: AbortSignal.timeout(15000)
+  });
+  const body = await response.text();
+  if (!response.ok) throw new Error("JustAnime upstream returned HTTP " + response.status);
+  try { return JSON.parse(body); }
+  catch { throw new Error("JustAnime upstream returned an invalid response"); }
+}
+
 function mediaUrl(req, raw, isHls, playbackHeaders = {}) {
   try {
     const target = new URL(String(raw));
@@ -204,27 +389,42 @@ async function streams(req, animeId, episode, server, category) {
 export default async function handler(req, res) {
   if (req.method !== "GET") return send(res, 405, { error: "Use GET" });
   try {
+    // A path-only request is the same-origin relay used by the Android provider
+    // when direct requests to the JustAnime API are unavailable.
+    if (req.query.path) {
+      const payload = await relayPath(String(req.query.path));
+      return send(res, 200, payload, "no-store");
+    }
+
     const action = String(req.query.action || "");
     if (action === "search") {
       const query = String(req.query.query || "").trim().slice(0, 100);
       if (!query) return send(res, 400, { error: "A search query is required" });
-      return send(res, 200, await search(query, positiveInt(req.query.page, 1, 25)));
+      const page = positiveInt(req.query.page, 1, 25);
+      return send(res, 200, await search(req, query, page));
     }
     if (action === "episodes") {
-      return send(res, 200, await episodes(req.query.id));
+      return send(res, 200, await episodes(req, String(req.query.id || "")));
     }
     if (action === "servers") {
       const category = req.query.category === "dub" ? "dub" : "sub";
-      return send(res, 200, { servers: SERVER_OPTIONS[category] });
+      return send(res, 200, { servers: SERVER_OPTIONS[category], category });
     }
     if (action === "streams") {
       const animeId = String(req.query.id || "");
-      const episode = String(req.query.episode || "");
-      if (!animeId || !episode) return send(res, 400, { error: "Anime ID and episode number are required" });
-      return send(res, 200, await streams(req, animeId, episode, req.query.server, req.query.category), "no-store");
+      const episode = String(req.query.episode || req.query.episodeId || "");
+      if (!animeId || !episode) {
+        return send(res, 400, { error: "Anime ID and episode number are required" });
+      }
+      return send(
+        res,
+        200,
+        await streams(req, animeId, episode, req.query.server, req.query.category),
+        "no-store"
+      );
     }
     return send(res, 400, { error: "Unknown JustAnime action" });
   } catch (error) {
-    return send(res, 502, { error: error?.message || "JustAnime is temporarily unavailable" });
+    return send(res, 502, { error: error?.message || "JustAnime is temporarily unavailable" }, "no-store");
   }
 }
