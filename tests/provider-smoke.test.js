@@ -70,7 +70,7 @@ test("built-in provider routes retain episode and playback fallbacks", async () 
 
       if (url.includes("/watch/21/episode/1/megaplay")) {
         return makeFetchResponse({
-          sub: {
+          dub: {
             sources: [{
               url: "https://megaplay.buzz/hls/master.m3u8",
               quality: "1080p"
@@ -111,11 +111,12 @@ test("built-in provider routes retain episode and playback fallbacks", async () 
       episode: "1",
       episodeId: "1",
       server: "megaplay",
-      category: "sub"
+      category: "dub"
     });
     assert.equal(justAnimeStreams.statusCode, 200);
     assert.equal(justAnimeStreams.body.sources.length, 1);
     assert.equal(justAnimeStreams.body.sources[0].isM3U8, true);
+    assert.equal(justAnimeStreams.body.sources[0].isDub, true);
     assert.match(justAnimeStreams.body.sources[0].url, /\/api\/media\?/);
 
     const hiAnimeEpisodes = await invoke(hiAnime, {
@@ -138,6 +139,7 @@ test("built-in provider routes retain episode and playback fallbacks", async () 
     });
     assert.equal(aniKotoEmbeds.statusCode, 200);
     assert.equal(aniKotoEmbeds.body.mode, "direct-embed-api");
+    assert.ok(aniKotoEmbeds.body.embeds.every(item => item.isDub === true));
     assert.equal(aniKotoEmbeds.body.embeds.length, 3);
     assert.ok(aniKotoEmbeds.body.embeds.some(item => item.url.includes("megaplay.buzz")));
     assert.ok(aniKotoEmbeds.body.embeds.some(item => item.url.includes("anixo.buzz")));
