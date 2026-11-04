@@ -147,7 +147,7 @@ function normaliseEpisode(item, index) {
   };
 }
 
-function normaliseTracks(rows) {
+function normalizeTracks(rows) {
   return (Array.isArray(rows) ? rows : [])
     .filter(item => item && item.lang !== "thumbnails" && item.kind !== "thumbnails")
     .map(item => ({
