@@ -396,48 +396,11 @@ function buildDirectAniKotoEmbeds(anilistId, malId, episode, category) {
   return results;
 }
 
-async function getAniKotoEmbedFallback(anilistId, malId, episode, category) {
-  const directEmbeds = buildDirectAniKotoEmbeds(anilistId, malId, episode, category);
-  const safeAniList = /^\d{1,12}$/.test(String(anilistId || "")) ? String(anilistId) : "";
-  const safeMal = /^\d{1,12}$/.test(String(malId || "")) ? String(malId) : "";
-  if (!safeAniList && !safeMal) return directEmbeds;
-
-  // Prefer first-party local URL construction; the shared API is an optional
-  // extra source and may be unavailable or rate-limited.
-  const endpoint = new URL(ANIKOTO_API_BASE + "/stream/embeds");
-  if (safeAniList) endpoint.searchParams.set("anilist", safeAniList);
-  if (safeMal) endpoint.searchParams.set("mal", safeMal);
-  endpoint.searchParams.set("ep", String(Math.max(1, Math.min(9999, Number.parseInt(episode, 10) || 1))));
-  endpoint.searchParams.set("lang", category === "dub" ? "dub" : "sub");
-
-  try {
-    const response = await fetch(endpoint.toString(), {
-      headers: { Accept: "application/json", "User-Agent": API_USER_AGENT },
-      signal: AbortSignal.timeout(3500)
-    });
-    if (!response.ok) return directEmbeds;
-    const payload = await response.json();
-    const rows = Array.isArray(payload?.results?.providers) ? payload.results.providers : [];
-    const allowed = new Set(["megaplay.buzz", "anixo.buzz", "megavid.buzz"]);
-    const remoteEmbeds = rows.map(item => {
-      let url;
-      try { url = new URL(String(item?.url || "")); } catch { return null; }
-      if (url.protocol !== "https:" || !allowed.has(url.hostname.toLowerCase())) return null;
-      return {
-        id: String(item.id || url.hostname),
-        name: String(item.name || item.id || "AniKoto partner"),
-        url: url.toString(),
-        type: "embed",
-        isEmbed: true,
-        iframeReady: true,
-        isDub: category === "dub"
-      };
-    }).filter(Boolean);
-    const seen = new Set(directEmbeds.map(item => item.url));
-    return [...directEmbeds, ...remoteEmbeds.filter(item => !seen.has(item.url))];
-  } catch {
-    return directEmbeds;
-  }
+function getAniKotoEmbedFallback(anilistId, malId, episode, category) {
+  // These provider URLs are deterministic from AniList/MAL IDs. Do not wait
+  // on the shared API: its own documentation warns that it may be rate-limited
+  // or paused, while these local URL builders are enough to start the iframe.
+  return buildDirectAniKotoEmbeds(anilistId, malId, episode, category);
 }
 
 export default async function handler(req, res) {
