@@ -381,7 +381,7 @@ async function streams(req, animeId, episode, server, category) {
   }
 
   async function tryEndpoint(endpoint) {
-    const payload = await getJson(endpoint, 8500);
+    const payload = await getJson(req, endpoint, 8500);
     const parsed = normalizeBlock(payload, endpoint, cleanCategory, req);
     if (!parsed || !parsed.sources.length) throw new Error("No " + cleanCategory.toUpperCase() + " streams at " + endpoint);
     return {
