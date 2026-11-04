@@ -364,37 +364,80 @@ async function streams(req, animeSession, episodeId, category) {
   };
 }
 
-async function getAniKotoEmbedFallback(anilistId, malId, episode, category) {
-  if (!/^\d+$/.test(anilistId) && !/^\d+$/.test(malId)) return [];
+function buildDirectAniKotoEmbeds(anilistId, malId, episode, category) {
+  const safeAniList = /^\d{1,12}$/.test(String(anilistId || "")) ? String(anilistId) : "";
+  const safeMal = /^\d{1,12}$/.test(String(malId || "")) ? String(malId) : "";
   const safeEpisode = Math.max(1, Math.min(9999, Number.parseInt(episode, 10) || 1));
-  const endpoint = new URL("https://anikototvapi.vercel.app/api/stream/embeds");
-  if (/^\d+$/.test(anilistId)) endpoint.searchParams.set("anilist", anilistId);
-  if (/^\d+$/.test(malId)) endpoint.searchParams.set("mal", malId);
-  endpoint.searchParams.set("ep", String(safeEpisode));
+  const lang = category === "dub" ? "dub" : "sub";
+  const results = [];
+  const add = (id, name, url) => results.push({
+    id,
+    name,
+    url,
+    type: "embed",
+    isEmbed: true,
+    iframeReady: true,
+    isDub: lang === "dub"
+  });
+
+  // These URL builders mirror the provider registry documented by AniKotoAPI.
+  // They let playback continue even while the shared AniKoto API is paused.
+  if (safeMal) {
+    add("megaplay", "MegaPlay", "https://megaplay.buzz/stream/mal/" + safeMal + "/" + safeEpisode + "/" + lang);
+    add("megavid", "Megavid", "https://megavid.buzz/mal/" + safeMal + "/" + safeEpisode + "/" + lang + "?color=%23e63946&autoplay=true");
+  } else if (safeAniList) {
+    add("megaplay", "MegaPlay", "https://megaplay.buzz/stream/ani/" + safeAniList + "/" + safeEpisode + "/" + lang);
+    add("megavid", "Megavid", "https://megavid.buzz/ani/" + safeAniList + "/" + safeEpisode + "/" + lang + "?color=%23e63946&autoplay=true");
+  }
+
+  if (safeAniList) {
+    add("anixo", "AniXo", "https://anixo.buzz/embed/ani/" + safeAniList + "/" + safeEpisode + "/" + lang + "?color=%23e63946");
+  }
+  return results;
+}
+
+async function getAniKotoEmbedFallback(anilistId, malId, episode, category) {
+  const directEmbeds = buildDirectAniKotoEmbeds(anilistId, malId, episode, category);
+  const safeAniList = /^\d{1,12}$/.test(String(anilistId || "")) ? String(anilistId) : "";
+  const safeMal = /^\d{1,12}$/.test(String(malId || "")) ? String(malId) : "";
+  if (!safeAniList && !safeMal) return directEmbeds;
+
+  // Prefer first-party local URL construction; the shared API is an optional
+  // extra source and may be unavailable or rate-limited.
+  const endpoint = new URL(ANIKOTO_API_BASE + "/stream/embeds");
+  if (safeAniList) endpoint.searchParams.set("anilist", safeAniList);
+  if (safeMal) endpoint.searchParams.set("mal", safeMal);
+  endpoint.searchParams.set("ep", String(Math.max(1, Math.min(9999, Number.parseInt(episode, 10) || 1))));
   endpoint.searchParams.set("lang", category === "dub" ? "dub" : "sub");
 
-  const response = await fetch(endpoint.toString(), {
-    headers: { Accept: "application/json", "User-Agent": API_USER_AGENT },
-    signal: AbortSignal.timeout(5000)
-  });
-  if (!response.ok) throw new Error("AniKoto embed fallback returned HTTP " + response.status);
-  const payload = await response.json();
-  const rows = Array.isArray(payload?.results?.providers) ? payload.results.providers : [];
-  const allowed = new Set(["megaplay.buzz", "anixo.buzz", "megavid.buzz"]);
-  return rows.map(item => {
-    let url;
-    try { url = new URL(String(item?.url || "")); } catch { return null; }
-    if (url.protocol !== "https:" || !allowed.has(url.hostname.toLowerCase())) return null;
-    return {
-      id: String(item.id || url.hostname),
-      name: String(item.name || item.id || "AniKoto partner"),
-      url: url.toString(),
-      type: "embed",
-      isEmbed: true,
-      iframeReady: true,
-      isDub: category === "dub"
-    };
-  }).filter(Boolean);
+  try {
+    const response = await fetch(endpoint.toString(), {
+      headers: { Accept: "application/json", "User-Agent": API_USER_AGENT },
+      signal: AbortSignal.timeout(3500)
+    });
+    if (!response.ok) return directEmbeds;
+    const payload = await response.json();
+    const rows = Array.isArray(payload?.results?.providers) ? payload.results.providers : [];
+    const allowed = new Set(["megaplay.buzz", "anixo.buzz", "megavid.buzz"]);
+    const remoteEmbeds = rows.map(item => {
+      let url;
+      try { url = new URL(String(item?.url || "")); } catch { return null; }
+      if (url.protocol !== "https:" || !allowed.has(url.hostname.toLowerCase())) return null;
+      return {
+        id: String(item.id || url.hostname),
+        name: String(item.name || item.id || "AniKoto partner"),
+        url: url.toString(),
+        type: "embed",
+        isEmbed: true,
+        iframeReady: true,
+        isDub: category === "dub"
+      };
+    }).filter(Boolean);
+    const seen = new Set(directEmbeds.map(item => item.url));
+    return [...directEmbeds, ...remoteEmbeds.filter(item => !seen.has(item.url))];
+  } catch {
+    return directEmbeds;
+  }
 }
 
 export default async function handler(req, res) {
