@@ -24,3 +24,4 @@ jobs:
           node --check api/hianime.js
           node --check api/anikoto.js
           node --check api/media.js
+          node --check api/episode-map.js
