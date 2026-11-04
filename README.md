@@ -15,13 +15,13 @@ A standalone responsive anime discovery and streaming PWA. This repository is se
 
 These three fixed source integrations are included. Viewers do not install or import extensions.
 
-- **JustAnime** — AniList numeric ID is used as the canonical anime ID, matching the Android provider. Search/episode requests use the direct API and the existing AniDash relay fallback. The native Automatic mode races the Momo, Zoko, Gigi and Neko server endpoints.
-- **HiAnime (legacy/best-effort)** — retains the Android app's legacy API, AniList episode-mapping fallback and VidNest resolver. The original HiAnime operation announced its goodbye in March 2026; similarly named current domains are not assumed to be official replacements. If its legacy resolver fails, the player moves on to other built-in sources.
-- **AniKoto** — uses the current `AniKotoAPI` search and `/api/episodes/:animeId` contract. It uses the API's direct `/api/stream/embeds` provider route for AniList/MAL-based iframe playback, which the API documentation recommends when AJAX-dependent native server endpoints are blocked. Legacy website mirrors and Kwik extraction remain compatibility fallbacks.
+- **JustAnime** — Uses AniList numeric IDs as the canonical anime IDs, matching the Android provider. Search and paginated episode requests use the same API contract as the Android source. Automatic playback races Momo, the default endpoint, Zoko, Gigi and Neko; direct API requests have a same-origin relay fallback.
+- **HiAnime (legacy/best-effort)** — retains the Android app's legacy API and VidNest resolver. Numeric AniList IDs are validated correctly, and AniList/AniZip episode mapping is used even when another provider has already returned an episode list. The original HiAnime operation announced its goodbye in March 2026; similarly named current domains are not assumed to be official replacements.
+- **AniKoto** — uses the current `AniKotoAPI` search and episode contract where available, with legacy website mirrors and Kwik extraction as compatibility paths. If AniKoto's session/AJAX endpoints fail, AniDash constructs its documented MegaPlay, AniXo and Megavid iframe URLs locally from AniList/MAL IDs, so the shared hosted AniKoto API is not a single point of failure.
 
 ## Playback and media relay
 
-- Player tries all returned server candidates first, then tries the next built-in provider for the same episode.
+- Player tries the selected provider's automatic server candidates, then moves through the other built-in providers. JustAnime and HiAnime can use AniList episode-number mappings when their own episode APIs are down.
 - SUB/DUB, server and provider changes clear old failure state and start a fresh resolution.
 - MP4/HLS playback, native HLS on Safari/iPhone, hls.js on supported browsers, iframe-based partner players, subtitles and intro/outro skip metadata.
 - Same-origin `/api/media` relay is restricted to an explicit list of source/CDN hosts. JustAnime follows the same two-hop `neko.justanime.to/m3u8-proxy` flow as the Android web relay; the relay carries safe `Referer`, `Origin`, `User-Agent` and `Accept` headers through HLS master playlists, child playlists, segments and keys. Other built-in providers use the restricted direct relay. Signed media responses are not cached.
@@ -59,7 +59,7 @@ The app calls the AniList GraphQL API for discovery and anime information. AniLi
 - `VIDNEST_SECRET` — override the server-side VidNest decryption key if the upstream protocol changes.
 - `ANIKOTO_API_URL` — override the current AniKotoAPI base URL (defaults to `https://anikototvapi.vercel.app/api`).
 - `ANIKOTO_BASE_URL` — override a legacy AniKoto website mirror used only as a fallback.
-- `JUSTANIME_RELAY_URL` — override the JustAnime relay URL; defaults to the existing AniDash relay.
+- `JUSTANIME_RELAY_URL` — override the JustAnime JSON relay endpoint; the endpoint must support the `?path=` passthrough contract.
 
 Do not put secrets or private API keys in `app.js` or in any browser-delivered file.
 
