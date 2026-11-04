@@ -396,7 +396,7 @@ function buildDirectAniKotoEmbeds(anilistId, malId, episode, category) {
   return results;
 }
 
-function getAniKotoEmbedFallback(anilistId, malId, episode, category) {
+async function getAniKotoEmbedFallback(anilistId, malId, episode, category) {
   // These provider URLs are deterministic from AniList/MAL IDs. Do not wait
   // on the shared API: its own documentation warns that it may be rate-limited
   // or paused, while these local URL builders are enough to start the iframe.
