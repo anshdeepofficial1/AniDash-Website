@@ -436,7 +436,7 @@
   function generatedEpisodes(media) {
     const total = Number(media.episodes || 0);
     if (!total) return [];
-    const limit = Math.min(total, 300);
+    const limit = Math.min(total, 3000);
     return Array.from({ length: limit }, (_, index) => ({
       id: String(index + 1), number: index + 1, title: "Episode " + (index + 1),
       thumbnail: "", date: "", isFiller: false, generated: true
@@ -557,19 +557,24 @@
       }
     }));
 
-    // Always try the independent AniList episode-map endpoint before synthesising
-    // an episode list from the catalogue's episode count. This does not depend on
-    // the legacy HiAnime catalogue API being online.
-    const hasEpisodes = checked.some(match => match && match.episodesReady);
-    if (!hasEpisodes && media.id != null) {
-      const hianime = BUILTIN_PROVIDERS.find(provider => provider.id === "hianime");
+    // Use AniList/AniZip episode numbers independently for each provider.
+    // JustAnime and VidNest accept AniList IDs + episode numbers, so they do not
+    // need the legacy provider's own episode session IDs to attempt playback.
+    const hasReadyProvider = providerId => checked.some(match =>
+      match && match.provider?.id === providerId && match.episodesReady === true &&
+      Array.isArray(match.episodes) && match.episodes.length > 0
+    );
+
+    let aniListMappedEpisodes = [];
+    const validAniListId = media.id != null && /^\d{1,12}$/.test(String(media.id));
+    if (validAniListId && (!hasReadyProvider("justanime") || !hasReadyProvider("hianime"))) {
       try {
         const response = await fetch("/api/episode-map?anilistId=" + encodeURIComponent(String(media.id)), {
           headers: { Accept: "application/json" },
           cache: "default"
         });
         const payload = await response.json();
-        const mappedEpisodes = response.ok && Array.isArray(payload?.episodes)
+        aniListMappedEpisodes = response.ok && Array.isArray(payload?.episodes)
           ? payload.episodes.map(item => ({
               id: String(item.id || item.number),
               number: Number(item.number),
@@ -580,50 +585,69 @@
               mapped: true,
               raw: item
             })).filter(item => Number.isFinite(item.number) && item.number > 0)
+              .sort((a, b) => a.number - b.number)
           : [];
-        if (mappedEpisodes.length && hianime) {
-          const mappedMatch = {
-            provider: hianime,
-            animeId: String(media.id),
-            item: { id: String(media.id), title: titleOf(media) },
-            score: 0,
-            mapped: true,
-            mappingOnly: true,
-            idSource: "AniList",
-            episodes: mappedEpisodes,
-            episodesReady: true
-          };
-          const existingIndex = checked.findIndex(match => match?.provider?.id === "hianime");
-          if (existingIndex >= 0) checked[existingIndex] = mappedMatch;
-          else checked.push(mappedMatch);
-        }
       } catch (_) {
-        // Continue to the AniList episode-count fallback below.
+        aniListMappedEpisodes = [];
       }
     }
 
-    // The AniKoto web API can block its server-side AJAX stream calls. Keep a
-    // mapped AniKoto entry available using the same AniList episode numbers;
-    // its backend can then fall back to the official project's direct embed
-    // provider route without requiring the blocked site session endpoint.
-    const hasAniKoto = checked.some(match => match && match.provider.id === "anikoto" && match.episodesReady);
-    const episodeSource = checked.find(match => match && match.episodesReady && match.episodes && match.episodes.length);
-    const mappedEpisodes = episodeSource && episodeSource.episodes.length
-      ? episodeSource.episodes.map(item => ({ ...item, id: String(item.number) }))
+    // If AniZip is down but AniList knows the total count, create episode-number
+    // candidates. These IDs are valid for the AniList-based JustAnime/VidNest
+    // resolver and for AniKoto's external-ID embed providers.
+    const fallbackEpisodeNumbers = aniListMappedEpisodes.length
+      ? aniListMappedEpisodes
       : generatedEpisodes(media);
+
+    for (const providerId of ["justanime", "hianime"]) {
+      if (hasReadyProvider(providerId) || !validAniListId || !fallbackEpisodeNumbers.length) continue;
+      const provider = BUILTIN_PROVIDERS.find(item => item.id === providerId);
+      if (!provider) continue;
+      const mappedMatch = {
+        provider,
+        animeId: String(media.id),
+        item: { id: String(media.id), title: titleOf(media) },
+        score: 0,
+        mapped: true,
+        mappingOnly: true,
+        idSource: "AniList",
+        episodes: fallbackEpisodeNumbers.map(item => ({
+          ...item,
+          id: String(item.number)
+        })),
+        episodesReady: true
+      };
+      const existingIndex = checked.findIndex(match => match?.provider?.id === providerId);
+      if (existingIndex >= 0) checked[existingIndex] = mappedMatch;
+      else checked.push(mappedMatch);
+    }
+
+    // If AniKoto's catalogue session lookup fails, keep an AniList/MAL-mapped
+    // entry so its direct iframe providers can still be attempted.
+    const hasAniKoto = hasReadyProvider("anikoto");
+    const episodeSource = checked.find(match =>
+      match && match.episodesReady && Array.isArray(match.episodes) && match.episodes.length
+    );
+    const mappedEpisodes = episodeSource
+      ? episodeSource.episodes.map(item => ({ ...item, id: String(item.number) }))
+      : fallbackEpisodeNumbers;
     const anikoto = BUILTIN_PROVIDERS.find(provider => provider.id === "anikoto");
-    if (!hasAniKoto && anikoto && mappedEpisodes.length && (media.id != null || media.idMal != null)) {
-      checked.push({
+    if (!hasAniKoto && anikoto && mappedEpisodes.length && (validAniListId || media.idMal != null)) {
+      const anikotoMatch = {
         provider: anikoto,
         animeId: String(media.id || media.idMal),
         item: { id: String(media.id || media.idMal), title: titleOf(media) },
         score: 0,
         mapped: true,
+        mappingOnly: true,
         embedOnly: true,
         idSource: "AniList/MAL",
         episodes: mappedEpisodes,
         episodesReady: true
-      });
+      };
+      const existingIndex = checked.findIndex(match => match?.provider?.id === "anikoto");
+      if (existingIndex >= 0) checked[existingIndex] = anikotoMatch;
+      else checked.push(anikotoMatch);
     }
 
     const order = { justanime: 0, hianime: 1, anikoto: 2 };
