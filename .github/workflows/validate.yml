@@ -25,3 +25,4 @@ jobs:
           node --check api/anikoto.js
           node --check api/media.js
           node --check api/episode-map.js
+          node --test tests/provider-smoke.test.js
