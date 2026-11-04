@@ -45,7 +45,7 @@ function allowedJustAnimePath(path) {
     /^\/watch\/\d{1,12}\/episode\/\d{1,5}(?:\.\d{1,3})?(?:\/(?:megaplay|zokoanime|animegg|anineko\/(?:sub|dub)(?:\/hd1)?))?$/.test(value);
 }
 
-async function requestJson(url, timeout = 8500) {
+async function requestJson(url, timeout = 8500, signal) {
   const response = await fetch(url, {
     headers: {
       Accept: "application/json, text/plain, */*",
@@ -54,7 +54,9 @@ async function requestJson(url, timeout = 8500) {
       "User-Agent": UA
     },
     redirect: "follow",
-    signal: AbortSignal.timeout(timeout)
+    signal: signal
+      ? AbortSignal.any([signal, AbortSignal.timeout(timeout)])
+      : AbortSignal.timeout(timeout)
   });
   const body = await response.text();
   if (!response.ok) throw new Error("HTTP " + response.status);
@@ -70,16 +72,36 @@ async function requestJson(url, timeout = 8500) {
 async function getJson(req, path, timeout = 8500) {
   const safePath = String(path || "");
   if (!allowedJustAnimePath(safePath)) throw new Error("Invalid JustAnime API path");
-  try {
-    return await requestJson(API + safePath, timeout);
-  } catch (directError) {
-    try {
-      const relay = new URL(RELAY_BASE);
-      relay.searchParams.set("path", safePath);
-      return await requestJson(relay.toString(), timeout);
-    } catch (relayError) {
-      throw new Error("JustAnime API failed: " + directError.message + "; relay failed: " + relayError.message);
+
+  const directController = new AbortController();
+  const relayController = new AbortController();
+  let finished = false;
+  const direct = requestJson(API + safePath, timeout, directController.signal);
+  const relay = (async () => {
+    // Give the primary API a brief head start, but don't wait for its full
+    // timeout before opening the known-good AniDash relay.
+    await new Promise(resolve => setTimeout(resolve, 300));
+    if (finished || relayController.signal.aborted) {
+      throw new Error("Relay request cancelled after another route responded");
     }
+    const relayUrl = new URL(RELAY_BASE);
+    relayUrl.searchParams.set("path", safePath);
+    return requestJson(relayUrl.toString(), timeout, relayController.signal);
+  })();
+
+  try {
+    const payload = await Promise.any([direct, relay]);
+    finished = true;
+    directController.abort();
+    relayController.abort();
+    return payload;
+  } catch (error) {
+    finished = true;
+    directController.abort();
+    relayController.abort();
+    const reasons = Array.isArray(error?.errors) ? error.errors : [];
+    const detail = reasons.map(item => item?.message).filter(Boolean).slice(0, 2).join("; ");
+    throw new Error("JustAnime API and relay failed" + (detail ? ": " + detail : ""));
   }
 }
 
