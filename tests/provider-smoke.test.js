@@ -135,7 +135,7 @@ test("built-in provider routes retain episode and playback fallbacks", async () 
       episodeId: "1",
       anilistId: "21",
       malId: "21",
-      category: "sub"
+      category: "dub"
     });
     assert.equal(aniKotoEmbeds.statusCode, 200);
     assert.equal(aniKotoEmbeds.body.mode, "direct-embed-api");
