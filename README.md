@@ -15,13 +15,13 @@ A standalone responsive anime discovery and streaming PWA. This repository is se
 
 These three fixed source integrations are included. Viewers do not install or import extensions.
 
-- **JustAnime** — Uses AniList numeric IDs as the canonical anime IDs, matching the Android provider. Search and paginated episode requests use the same API contract as the Android source. Automatic playback races Momo, the default endpoint, Zoko, Gigi and Neko; direct API requests have a same-origin relay fallback.
+- **JustAnime** — Uses AniList numeric IDs as the canonical anime IDs, matching the Android provider. Search and paginated episode requests use the same API contract as the Android source. Automatic playback races Momo, the default endpoint, Zoko, Gigi and Neko; direct API and relay requests now race rather than waiting for a full timeout.
 - **HiAnime (legacy/best-effort)** — retains the Android app's legacy API and VidNest resolver. Numeric AniList IDs are validated correctly, and AniList/AniZip episode mapping is used even when another provider has already returned an episode list. The original HiAnime operation announced its goodbye in March 2026; similarly named current domains are not assumed to be official replacements.
 - **AniKoto** — uses the current `AniKotoAPI` search and episode contract where available, with legacy website mirrors and Kwik extraction as compatibility paths. If AniKoto's session/AJAX endpoints fail, AniDash constructs its documented MegaPlay, AniXo and Megavid iframe URLs locally from AniList/MAL IDs, so the shared hosted AniKoto API is not a single point of failure.
 
 ## Playback and media relay
 
-- Player tries the selected provider's automatic server candidates, then moves through the other built-in providers. JustAnime and HiAnime can use AniList episode-number mappings when their own episode APIs are down.
+- Player defaults to English DUB and resolves JustAnime, HiAnime and AniKoto in parallel. Direct HLS/MP4 sources are preferred, with iframe players used as a fallback after a short grace period. SUB remains available as a manual choice. AniKoto constructs its partner iframe URLs locally without waiting on the shared API. JustAnime and HiAnime can use AniList episode-number mappings when their own episode APIs are down.
 - SUB/DUB, server and provider changes clear old failure state and start a fresh resolution.
 - MP4/HLS playback, native HLS on Safari/iPhone, hls.js on supported browsers, iframe-based partner players, subtitles and intro/outro skip metadata.
 - Same-origin `/api/media` relay is restricted to an explicit list of source/CDN hosts. JustAnime follows the same two-hop `neko.justanime.to/m3u8-proxy` flow as the Android web relay; the relay carries safe `Referer`, `Origin`, `User-Agent` and `Accept` headers through HLS master playlists, child playlists, segments and keys. Other built-in providers use the restricted direct relay. Signed media responses are not cached.
