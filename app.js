@@ -488,8 +488,14 @@
   }
 
   function generatedEpisodes(media) {
-    const total = Number(media.episodes || 0);
-    if (!total) return [];
+    // Ongoing series often have no AniList 'episodes' total; the next-airing
+    // episode supplies a better count for a quick-access list.
+    const declared = Number(media?.episodes || 0);
+    const nextAiring = Number(media?.nextAiringEpisode?.episode || 0) - 1;
+    const known = Math.max(declared, nextAiring, 0);
+    // Without a known count, expose only a small, explicitly provisional set
+    // rather than showing an empty episode page while sources are checked.
+    const total = known || 30;
     const limit = Math.min(total, 3000);
     return Array.from({ length: limit }, (_, index) => ({
       id: String(index + 1), number: index + 1, title: "Episode " + (index + 1),
@@ -811,7 +817,9 @@
     const watched = isInWatchlist(media.id);
     const matches = state.detailMatches.filter(match => !match.error);
     const sourceInfo = matches.some(match => match.provisional)
-      ? "Episode numbers from AniList · Streaming availability checked when you play"
+      ? (media.episodes || media.nextAiringEpisode?.episode
+        ? "Quick access from anime metadata · Streaming checked on Play"
+        : "Quick-access episode numbers (unverified) · Streaming checked on Play")
       : matches.length ? matches.map(match => match.provider.name + (match.mapped ? " (episode map)" : "")).join(", ") : "Built-in sources checked";
     const episodes = state.detailEpisodes || [];
     const providerRows = BUILTIN_PROVIDERS.map(provider => {
