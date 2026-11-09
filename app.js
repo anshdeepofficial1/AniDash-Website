@@ -429,7 +429,7 @@
       const hour = new Date().getHours();
       const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
       $("#view").innerHTML =
-        '<section class="home-welcome"><div><span class="welcome-eyebrow">' + greeting + '</span><h1 class="welcome-title">AniDash</h1></div><div class="welcome-actions"><button data-route="/account" aria-label="Your profile">◎</button><button data-route="/settings" aria-label="Settings">⚙</button></div></section>' +
+        '<section class="home-welcome"><div><span class="welcome-eyebrow">' + greeting + '</span><h1 class="welcome-title">AniDash</h1></div><div class="welcome-actions"><button data-route="/account" aria-label="Your profile">' + uiIcon("user") + '</button><button data-route="/settings" aria-label="Settings">' + uiIcon("settings") + '</button></div></section>' +
         '<div class="trending-label">' + uiIcon("star") + ' Trending anime</div>' +
         spotlightPanel(spotlightItems) +
         quickLinks +
@@ -2862,6 +2862,7 @@
 
   // Stop orphaned audio and destroy HLS when leaving playback.
   window.addEventListener("hashchange", () => {
+    if (typeof window.scrollTo === "function") window.scrollTo(0, 0);
     const nextRoute = location.hash.replace(/^#\//, "").split("/")[0];
     if (nextRoute !== "watch") {
       const video = $("#anime-video");
