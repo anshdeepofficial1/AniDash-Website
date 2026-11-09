@@ -66,7 +66,7 @@ try {
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1 });
   const page = await context.newPage();
   page.on("pageerror", err => errors.push(err.message));
-  await page.route("https://graphql.anilist.co/**", async route => {
+  await context.route("https://graphql.anilist.co/**", async route => {
     const body = route.request().postDataJSON?.() || {};
     const single = typeof body.query === "string" && body.query.includes("Media(id:");
     const data = single ? { Media: anime } : { Page: { media: collection, pageInfo: { hasNextPage: false } } };
@@ -77,7 +77,7 @@ try {
       body: JSON.stringify({ data })
     });
   });
-  await page.route("https://example.com/**", route =>
+  await context.route("https://example.com/**", route =>
     route.fulfill({ status: 200, contentType: "image/svg+xml", body: imageSvg })
   );
   await page.goto(address + "/#/home", { waitUntil: "domcontentloaded" });
@@ -96,7 +96,8 @@ try {
   await page.locator('[data-category="sub"]').click();
   assert.equal(await page.locator('[data-category="sub"]').getAttribute("class").then(x => x.includes("active")), true);
 
-  const desktop = await context.newPage({ viewport: { width: 1440, height: 900 } });
+  const desktop = await context.newPage();
+  await desktop.setViewportSize({ width: 1440, height: 900 });
   desktop.on("pageerror", err => errors.push(err.message));
   await desktop.goto(address + "/#/home", { waitUntil: "domcontentloaded" });
   await desktop.locator(".home-hero").waitFor({ timeout: 15000 });
