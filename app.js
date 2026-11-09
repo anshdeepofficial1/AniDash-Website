@@ -1614,7 +1614,7 @@
     const parts = hash.split("?")[0].split("/").filter(Boolean);
     const current = "/" + (parts[0] || "home");
     state.route = current;
-    document.body.dataset.view = current.replace(/^\\//, "");
+    document.body.dataset.view = current.slice(1);
     updateActiveNav(current);
     if (current === "/home") return renderHome();
     if (current === "/discover") return renderDiscover();
