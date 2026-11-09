@@ -2032,10 +2032,13 @@
           }
         } else toast("Episode finished.");
       }
-      const account = window.AniDashAccount;
-      if (setting("trackProgress") && account?.authenticated()) {
-        account.saveToList(state.player.media.id, "CURRENT", Number(state.player.episode.number))
-          .catch(() => toast("Progress saved locally; AniList sync unavailable."));
+      // Exact AniList notes are queued by savePlaybackProgress().
+      const mal = window.AniDashMal;
+      const completed = Number(state.player.episode.number);
+      if (setting("trackProgress") && mal?.authenticated() && state.player.media.idMal) {
+        mal.updateProgress(state.player.media.idMal, completed,
+          state.player.media.episodes && completed >= Number(state.player.media.episodes) ? "completed" : "watching"
+        ).catch(() => toast("Saved locally; MAL episode sync unavailable."));
       }
     };
   }
@@ -2064,7 +2067,29 @@
       duration,
       updatedAt: now
     };
+    if (!store.libraryStatuses[String(media.id)] ||
+        store.libraryStatuses[String(media.id)] === "PLANNING") {
+      store.libraryStatuses[String(media.id)] = "CURRENT";
+    }
+    if (ended && media.episodes && Number(episode.number) >= Number(media.episodes)) {
+      store.libraryStatuses[String(media.id)] = "COMPLETED";
+    }
     persist();
+    const account = window.AniDashAccount;
+    if (account?.authenticated()) {
+      const key = String(media.id);
+      const previous = state.lastCloudProgressSync.get(key);
+      const position = Math.max(0,Math.floor(ended ? duration : currentTime));
+      const same = previous && previous.episode === Number(episode.number) &&
+        previous.position === position && now - previous.time < 10000;
+      if (!same && (force || ended || !previous || now - previous.time >= 10000)) {
+        state.lastCloudProgressSync.set(key,{episode:Number(episode.number),position,time:now});
+        account.syncPosition(media.id,Number(episode.number),position,Math.floor(duration),Boolean(ended))
+          .catch(error => {
+            if (state.route === "/watch") toast("Saved locally; AniList sync failed: " + error.message);
+          });
+      }
+    }
   }
 
 
