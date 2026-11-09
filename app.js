@@ -1836,7 +1836,59 @@
       return;
     }
     if (target.hasAttribute("data-watchlist")) {
-      toggleWatchlist(target.getAttribute("data-watchlist"));
+      void toggleWatchlist(target.getAttribute("data-watchlist"));
+      return;
+    }
+    if (target.hasAttribute("data-login-anilist")) {
+      try { await window.AniDashAccount.beginLogin(); }
+      catch (error) { toast(error.message); }
+      return;
+    }
+    if (target.hasAttribute("data-logout-anilist")) {
+      if (confirm("Sign out of AniList on this device? Your local watchlist stays saved.")) {
+        window.AniDashAccount?.logout();
+        toast("Signed out. Local watchlist remains available.");
+        renderAccount();
+      }
+      return;
+    }
+    if (target.hasAttribute("data-sync-library")) {
+      toast("Syncing your AniList library…");
+      const synced = await syncAniListLibrary();
+      if (synced) toast("AniList library updated · " + synced.length + " entries available.");
+      return;
+    }
+    if (target.hasAttribute("data-export-backup")) {
+      try {
+        const payload = {
+          format: "anidash-watch-library",
+          version: 2, exportedAt: new Date().toISOString(),
+          watchlist: store.watchlist, history: store.history,
+          preferences: store.preferences, hiddenCloudEntries: store.hiddenCloudEntries
+        };
+        const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement("a");
+        anchor.href = url;
+        anchor.download = "anidash-watch-backup.json";
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+        window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+        toast("Backup exported.");
+      } catch (error) { toast("Export failed: " + error.message); }
+      return;
+    }
+    if (target.hasAttribute("data-import-backup")) {
+      const input = $("#backup-file");
+      if (input) input.click();
+      return;
+    }
+    if (target.hasAttribute("data-persist-storage")) {
+      if (navigator.storage?.persist) {
+        const granted = await navigator.storage.persist();
+        toast(granted ? "Persistent storage granted." : "Storage request declined. Export backups regularly.");
+      } else toast("Persistent storage is not supported by this browser.");
       return;
     }
     if (target.hasAttribute("data-open-sources")) { openSourcesModal(); return; }
@@ -2031,17 +2083,19 @@
       if (confirm("Clear all locally saved watch progress?")) {
         store.history = {};
         persist();
-        renderHistory();
-        toast("Watch history cleared.");
+        if (state.route === "/settings") renderSettings();
+        toast("Local playback progress cleared.");
       }
       return;
     }
     if (target.hasAttribute("data-clear-watchlist")) {
       if (confirm("Clear your local watchlist?")) {
+        Object.keys(store.watchlist).forEach(key => { store.hiddenCloudEntries[key] = true; });
         store.watchlist = {};
         persist();
-        renderLibrary();
-        toast("Watchlist cleared.");
+        if (state.route === "/settings") renderSettings();
+        if (state.route === "/library") renderLibrary();
+        toast("Local watchlist cleared. AniList account entries were not changed.");
       }
       return;
     }
@@ -2054,7 +2108,47 @@
     }
   });
 
-  document.addEventListener("change", event => {
+  document.addEventListener("change", async event => {
+    if (event.target.id === "backup-file") {
+      const file = event.target.files?.[0];
+      if (!file) return;
+      try {
+        if (file.size > 5_000_000) throw new Error("Backup is too large (maximum 5 MB).");
+        const payload = JSON.parse(await file.text());
+        if (payload?.format !== "anidash-watch-library" || !payload.watchlist ||
+            typeof payload.watchlist !== "object" || Array.isArray(payload.watchlist)) {
+          throw new Error("This isn't an AniDash Watch backup.");
+        }
+        // Validate keys before merging to avoid imported prototype pollution.
+        const safeEntries = obj => Object.fromEntries(
+          Object.entries(obj || {}).filter(([id]) => /^\d{1,12}$/.test(id))
+        );
+        store.watchlist = { ...store.watchlist, ...safeEntries(payload.watchlist) };
+        store.history = { ...store.history, ...safeEntries(payload.history) };
+        const allowed = Object.keys(DEFAULT_PREFERENCES);
+        for (const key of allowed) {
+          if (Object.prototype.hasOwnProperty.call(payload.preferences || {}, key)) {
+            store.preferences[key] = payload.preferences[key];
+          }
+        }
+        store.hiddenCloudEntries = { ...store.hiddenCloudEntries, ...safeEntries(payload.hiddenCloudEntries) };
+        persist();
+        applyPreferences();
+        if (state.route === "/settings") renderSettings();
+        toast("Backup restored. Your existing library was preserved.");
+      } catch (error) { toast("Restore failed: " + error.message); }
+      return;
+    }
+    if (event.target.hasAttribute("data-setting")) {
+      const key = event.target.getAttribute("data-setting");
+      if (!Object.prototype.hasOwnProperty.call(DEFAULT_PREFERENCES, key)) return;
+      store.preferences[key] = event.target.type === "checkbox"
+        ? Boolean(event.target.checked) : event.target.value;
+      persist();
+      applyPreferences();
+      toast("Preference saved.");
+      return;
+    }
     if (event.target.id === "discover-sort") {
       state.discoverSort = event.target.value;
       renderDiscover();
