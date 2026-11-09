@@ -23,14 +23,35 @@
         history: raw.history || {},
         manualStreams: raw.manualStreams || {},
         providerManifest: raw.providerManifest || null,
-        adultContent: raw.adultContent === true
+        adultContent: raw.adultContent === true,
+        preferences: raw.preferences && typeof raw.preferences === "object" ? raw.preferences : {},
+        hiddenCloudEntries: raw.hiddenCloudEntries || {},
+        updatedAt: Number(raw.updatedAt || 0)
       };
     } catch (_) {
-      return { watchlist: {}, history: {}, manualStreams: {}, providerManifest: null, adultContent: false };
+      return { watchlist: {}, history: {}, manualStreams: {}, providerManifest: null, adultContent: false,
+        preferences: {}, hiddenCloudEntries: {}, updatedAt: 0 };
     }
   }
 
   const store = readStore();
+  const DEFAULT_PREFERENCES = {
+    themeMode: "light", preferredAudio: "dub", defaultQuality: "Auto",
+    autoEnableSubtitles: true, autoSkipIntro: false, showNextEpisodePrompt: true,
+    episodeViewMode: "list", preferredSource: "auto",
+    trackProgress: true
+  };
+  store.preferences = { ...DEFAULT_PREFERENCES, ...store.preferences };
+  const setting = key => store.preferences[key];
+  function applyPreferences() {
+    if (!document.body || !document.body.dataset) return;
+    const themeMode = setting("themeMode");
+    const systemDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+    document.body.dataset.theme = themeMode === "dark" || (themeMode === "system" && systemDark)
+      ? "dark" : "light";
+    document.body.dataset.episodeLayout = setting("episodeViewMode") || "list";
+  }
+  applyPreferences();
   const state = {
     route: "/home",
     token: 0,
@@ -66,8 +87,29 @@
   const slug = value => String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 
   function persist() {
+    store.updatedAt = Date.now();
     try { localStorage.setItem(STORE_KEY, JSON.stringify(store)); }
-    catch (_) { toast("This browser storage is full. Some history may not save."); }
+    catch (_) { toast("Browser storage is unavailable. Export your library as backup."); }
+    if (window.AniDashStorage) {
+      window.AniDashStorage.save(store).catch(() => {});
+    }
+  }
+  async function restoreStorage() {
+    if (!window.AniDashStorage) return;
+    try {
+      const backup = await window.AniDashStorage.load();
+      if (backup && Number(backup.updatedAt || 0) > Number(store.updatedAt || 0)) {
+        Object.assign(store, backup);
+        store.preferences = { ...DEFAULT_PREFERENCES, ...store.preferences };
+        persist();
+      } else if (!backup || Number(store.updatedAt || 0) >= Number(backup.updatedAt || 0)) {
+        // Migrate earlier localStorage-only installations into the recovery DB.
+        if (store.updatedAt || Object.keys(store.watchlist).length || Object.keys(store.history).length) {
+          window.AniDashStorage.save(store).catch(() => {});
+        }
+      }
+    } catch (_) {}
+    applyPreferences();
   }
 
   function toast(message) {
@@ -226,21 +268,20 @@
       state.home = { trending, popular, top, airing, upcoming, movies, hidden };
       const hero = trending[0] || popular[0] || top[0];
       const heroImage = hero && (hero.bannerImage || imageOf(hero));
-      const continueItems = Object.values(store.history)
-        .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)).slice(0, 10);
+      // Playback progress remains saved, but the user opted to hide the Continue Watching shelf.
       const watchlistItems = Object.values(store.watchlist).slice(0, 12);
 
       const quickLinks = '<div class="home-shortcuts">' +
         '<button data-route="/discover"><span>◈</span> Discover</button>' +
         '<button data-route="/search"><span>⌕</span> Search anime</button>' +
         '<button data-route="/library"><span>♡</span> My watchlist</button>' +
-        '<button data-route="/history"><span>◷</span> History</button>' +
+        '<button data-route="/account"><span>◎</span> Account</button>' +
       '</div>';
 
       const hour = new Date().getHours();
       const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
       $("#view").innerHTML =
-        '<section class="home-welcome"><div><span class="welcome-eyebrow">' + greeting + '</span><h1 class="welcome-title">AniDash</h1></div><div class="welcome-actions"><button data-route="/library" aria-label="Your library">▤</button><button data-route="/settings" aria-label="Settings">⚙</button></div></section>' +
+        '<section class="home-welcome"><div><span class="welcome-eyebrow">' + greeting + '</span><h1 class="welcome-title">AniDash</h1></div><div class="welcome-actions"><button data-route="/account" aria-label="Your profile">◎</button><button data-route="/settings" aria-label="Settings">⚙</button></div></section>' +
         '<div class="trending-label">★ &nbsp;Trending anime</div>' +
         (hero ? '<section class="hero-stage home-hero"><div class="hero-bg" style="background-image:url(&quot;' + escapeHtml(heroImage) + '&quot;)"></div><div class="hero-content">' +
           '<div class="hero-kicker">Your next anime obsession</div><h1 class="hero-title">' + escapeHtml(titleOf(hero)) + '</h1>' +
@@ -249,7 +290,6 @@
           '<div class="hero-actions"><button class="btn btn-primary" data-anime="' + hero.id + '">Explore anime <span>→</span></button><button class="btn btn-secondary" data-watchlist="' + hero.id + '">♡ Add to list</button></div>' +
           '</div></section>' : '') +
         quickLinks +
-        resumeShelf(continueItems) +
         shelf("Currently airing", "Fresh episodes from currently releasing series.", airing.slice(0, 14), "/discover") +
         shelf("Trending right now", "The series viewers are talking about.", trending.slice(0, 14), "/discover") +
         shelf("Popular with fans", "Big adventures, favourites and crowd-pleasers.", popular.slice(0, 14), "/discover") +
@@ -899,20 +939,80 @@
     }
   }
 
-  function toggleWatchlist(id) {
+  function findLocalMedia(id) {
     const key = String(id);
+    if (state.detail && String(state.detail.id) === key) return state.detail;
+    for (const collection of [
+      state.home && Object.values(state.home).flat(),
+      state.discover,
+      state.search,
+      Object.values(store.watchlist),
+      Object.values(store.history).map(entry => entry.media)
+    ]) {
+      const match = (collection || []).find(item => item && String(item.id) === key);
+      if (match) return match;
+    }
+    return null;
+  }
+
+  async function syncAniListLibrary() {
+    const account = window.AniDashAccount;
+    if (!account || !account.authenticated()) return;
+    try {
+      const cloudEntries = await account.list();
+      let changed = false;
+      for (const entry of cloudEntries) {
+        const id = String(entry.mediaId);
+        if (store.hiddenCloudEntries[id] || !entry.media || store.watchlist[id]) continue;
+        store.watchlist[id] = entry.media;
+        changed = true;
+      }
+      // Guest data is never discarded on account sign-in.
+      if (changed) persist();
+      if (state.route === "/library") renderLibrary();
+      if (state.route === "/account") renderAccount();
+      return cloudEntries;
+    } catch (error) {
+      toast("AniList sync unavailable: " + error.message);
+      return null;
+    }
+  }
+
+  async function toggleWatchlist(id) {
+    const key = String(id);
+    const account = window.AniDashAccount;
     if (store.watchlist[key]) {
       delete store.watchlist[key];
-      toast("Removed from your watchlist.");
+      store.hiddenCloudEntries[key] = true;
+      persist();
+      toast("Removed from this device's watchlist.");
+      if (account?.authenticated() && account.getEntry(id)?.status === "PLANNING") {
+        if (confirm("Also remove this title from your AniList Planning list?")) {
+          account.deletePlanning(id).then(ok => {
+            if (ok) toast("Removed from AniList as well.");
+          }).catch(error => toast("AniList removal failed: " + error.message));
+        }
+      }
     } else {
-      const media = state.detail && String(state.detail.id) === key ? state.detail :
-        state.home && [...state.home.trending, ...state.home.popular].find(item => String(item.id) === key);
-      if (media) store.watchlist[key] = media;
-      else store.watchlist[key] = { id: Number(key), title: { english: "Saved anime " + key }, coverImage: {} };
-      toast("Added to your watchlist.");
+      const media = findLocalMedia(id) || await getAnime(id).catch(() => null);
+      if (!media) {
+        toast("Could not save this title. Try again.");
+        return;
+      }
+      store.watchlist[key] = media;
+      delete store.hiddenCloudEntries[key];
+      persist();
+      toast("Added to your watchlist and saved on this device.");
+      if (account?.authenticated()) {
+        account.saveToList(Number(key), "PLANNING").then(() => {
+          toast("Watchlist synced to AniList.");
+        }).catch(error => {
+          toast("Saved locally; AniList sync failed: " + error.message);
+        });
+      }
     }
-    persist();
-    if (state.detail && String(state.detail.id) === key) paintAnimeDetails(state.detail);
+    if (state.detail && String(state.detail.id) === key && state.route === "/anime") paintAnimeDetails(state.detail);
+    if (state.route === "/library") renderLibrary();
   }
 
   async function startEpisode(number, episodeId) {
@@ -928,7 +1028,7 @@
       servers: [],
       tracks: [],
       selectedServer: state.selectedMatch && state.selectedMatch.provider ? ({ justanime: "auto", hianime: "hd-1", anikoto: "anikoto" }[state.selectedMatch.provider.id] || "auto") : "auto",
-      category: "dub",
+      category: setting("preferredAudio") === "sub" ? "sub" : "dub",
       intro: null,
       outro: null,
       direct: store.manualStreams[String(state.detail.id) + ":" + String(number)] || ""
@@ -969,7 +1069,7 @@
     const player = existingPlayer || {
       media, episode, match: state.selectedMatch, streams: [], embeds: [],
       availableProviders: [], servers: [], tracks: [], selectedServer: "auto",
-      category: "dub", intro: null, outro: null, requestId: 0,
+      category: setting("preferredAudio") === "sub" ? "sub" : "dub", intro: null, outro: null, requestId: 0,
       direct: store.manualStreams[String(id) + ":" + String(number)] || ""
     };
     const changedEpisode = Number(player.lastRenderedEpisode) !== Number(episode.number);
@@ -1058,9 +1158,11 @@
       match && match.provider && match.episodesReady &&
       Array.isArray(match.episodes) && match.episodes.length
     );
+    const preferred = allMatches.find(match => match.provider.id === setting("preferredSource"));
+    const firstMatch = player.manualProvider ? player.match : (preferred || player.match);
     const orderedMatches = [
-      player.match,
-      ...allMatches.filter(match => match !== player.match)
+      firstMatch,
+      ...allMatches.filter(match => match !== firstMatch)
     ].filter((match, index, rows) =>
       match && match.provider && match.episodesReady &&
       Array.isArray(match.episodes) &&
@@ -1263,7 +1365,26 @@
     player.selectedServer = winner.selectedServer;
     player.streams = winner.streams;
     player.embeds = winner.embeds;
-    player.candidates = [...winner.streams, ...winner.embeds];
+    const targetQuality = setting("defaultQuality");
+    const targetPixels = Number.parseInt(String(targetQuality), 10);
+    const qualityPixels = stream => {
+      const found = /(?:^|[^\d])(2160|1440|1080|720|480|360)(?:p|[^\d]|$)/i.exec(
+        String(stream.quality || stream.label || stream.name || "")
+      );
+      return found ? Number(found[1]) : 0;
+    };
+    const rankedStreams = [...winner.streams].sort((a, b) => {
+      const qa = qualityPixels(a);
+      const qb = qualityPixels(b);
+      if (Number.isFinite(targetPixels)) {
+        if (!qa && !qb) return 0;
+        if (!qa) return 1;
+        if (!qb) return -1;
+        return Math.abs(qa - targetPixels) - Math.abs(qb - targetPixels);
+      }
+      return qb - qa;
+    });
+    player.candidates = [...rankedStreams, ...winner.embeds];
     player.candidateIndex = 0;
     player.tracks = winner.tracks;
     player.intro = winner.intro;
@@ -1464,6 +1585,13 @@
       if (saved && Number(saved.episode) === Number(state.player.episode.number) && saved.position > 15 && video.duration > saved.position + 15) {
         video.currentTime = saved.position;
       }
+      if (video.textTracks && video.textTracks.length) {
+        try {
+          [...video.textTracks].forEach(track => {
+            track.mode = setting("autoEnableSubtitles") ? "showing" : "disabled";
+          });
+        } catch (_) {}
+      }
       video.play().catch(error => {
         if (state.currentVideo !== url) return;
         if (error?.name === "NotAllowedError") {
@@ -1498,17 +1626,45 @@
         showPlayerOverlay("Playback unavailable", "The selected link is not playable in this browser.", true);
       }
     };
-    video.ontimeupdate = () => savePlaybackProgress(video);
+    video.ontimeupdate = () => {
+      savePlaybackProgress(video);
+      const intro = state.player?.intro;
+      if (setting("autoSkipIntro") && intro && Number.isFinite(Number(intro.start)) &&
+          Number.isFinite(Number(intro.end)) && Number(intro.end) > Number(intro.start) &&
+          video.currentTime >= Number(intro.start) && video.currentTime < Number(intro.end)) {
+        video.currentTime = Number(intro.end);
+      }
+    };
+    video.onpause = () => savePlaybackProgress(video, false, true);
     video.onended = () => {
-      savePlaybackProgress(video, true);
-      toast("Episode finished. Choose Next to continue.");
+      savePlaybackProgress(video, true, true);
+      if (setting("showNextEpisodePrompt")) {
+        const next = state.detailEpisodes.find(ep => Number(ep.number) === Number(state.player.episode.number) + 1);
+        if (next) {
+          const over = $("#player-overlay");
+          if (over) {
+            over.style.display = "grid";
+            over.innerHTML = '<strong>Episode finished</strong><button class="btn btn-primary" data-next>▶ Next episode</button>';
+          }
+        } else toast("Episode finished.");
+      }
+      const account = window.AniDashAccount;
+      if (setting("trackProgress") && account?.authenticated()) {
+        account.saveToList(state.player.media.id, "CURRENT", Number(state.player.episode.number))
+          .catch(() => toast("Progress saved locally; AniList sync unavailable."));
+      }
     };
   }
 
-  function savePlaybackProgress(video, ended) {
-    if (!state.player || !video.duration || !Number.isFinite(video.duration)) return;
+  function savePlaybackProgress(video, ended, force = false) {
+    if (!setting("trackProgress") || !state.player) return;
+    const currentTime = Number(video?.currentTime || 0);
+    if (!Number.isFinite(currentTime) || currentTime < 0) return;
+    const duration = Number.isFinite(Number(video.duration)) && Number(video.duration) > 0
+      ? Number(video.duration) : 0;
+    if (!currentTime && !duration) return;
     const now = Date.now();
-    if (!ended && now - state.progressTimer < 7000) return;
+    if (!force && !ended && now - state.progressTimer < 3000) return;
     state.progressTimer = now;
     const media = state.player.media;
     const episode = state.player.episode;
@@ -1520,8 +1676,8 @@
       },
       episode: episode.number,
       episodeTitle: episode.title,
-      position: ended ? video.duration : video.currentTime,
-      duration: video.duration,
+      position: ended ? duration : currentTime,
+      duration,
       updatedAt: now
     };
     persist();
@@ -1530,10 +1686,13 @@
 
   function renderLibrary() {
     const items = Object.values(store.watchlist).sort((a, b) => titleOf(a).localeCompare(titleOf(b)));
+    const online = window.AniDashAccount && window.AniDashAccount.authenticated();
     $("#view").innerHTML =
-      pageHead("", "Your Library", "Your locally saved anime collection") +
-      '<nav class="library-tabs" aria-label="Library sections"><button class="active" data-route="/library">Watchlist</button><button data-route="/history">Continue Watching</button></nav>' +
-      (items.length ? grid(items) : '<div class="empty-state"><div class="empty-icon">♡</div><h3>Your list is waiting</h3><p>Open any anime and tap Add to watchlist to keep it here.</p><button class="btn btn-primary" data-route="/discover">Explore anime</button></div>');
+      pageHead("", "Your Library", "Your saved anime watchlist") +
+      '<div class="library-save-status">' + (online
+        ? '✓ Saved on this device · AniList sync available'
+        : '✓ Saved on this device · <button class="text-button" data-route="/account">Sign in for cloud sync</button>') + '</div>' +
+      (items.length ? grid(items) : '<div class="empty-state"><div class="empty-icon">♡</div><h3>Your watchlist is empty</h3><p>Add an anime to save it here. You can export a backup from Settings.</p><button class="btn btn-primary" data-route="/discover">Explore anime</button></div>');
   }
 
   function renderHistory() {
@@ -1548,17 +1707,90 @@
       }).join("") + '</div>' : '<div class="empty-state"><div class="empty-icon">◷</div><h3>No episodes watched yet</h3><p>When you start watching, AniDash will remember your episode and playback position on this device.</p><button class="btn btn-primary" data-route="/discover">Find anime</button></div>');
   }
 
+
+  function refreshProfileChip(user) {
+    const name = $(".profile-name");
+    const avatar = $(".profile-avatar");
+    if (name) name.textContent = user?.name || "Sign in";
+    if (avatar) {
+      const source = user?.avatar?.medium || user?.avatar?.large;
+      if (source && /^https:\/\//.test(source)) {
+        avatar.innerHTML = '<img src="' + escapeHtml(source) + '" alt="">';
+      } else {
+        avatar.textContent = user?.name ? user.name.slice(0, 1).toUpperCase() : "◎";
+      }
+    }
+  }
+
+  function renderAccount() {
+    const account = window.AniDashAccount;
+    const user = account?.currentUser();
+    const configured = account?.configured();
+    const avatarUrl = user?.avatar?.large || user?.avatar?.medium || "";
+    const avatar = avatarUrl && /^https:\/\//.test(avatarUrl)
+      ? '<img src="' + escapeHtml(avatarUrl) + '" alt="">'
+      : escapeHtml(user?.name?.slice(0, 1) || "◎");
+    const header = '<section class="account-hero"><div class="account-avatar">' + avatar + '</div><div><h2>' +
+      escapeHtml(user?.name || "Your AniDash account") + '</h2><p>' +
+      (user ? 'Connected to AniList · Your lists can sync across devices' : 'Sign in to sync anime lists between devices') +
+      '</p></div></section>';
+    const guestActions = '<div class="account-actions"><button class="btn btn-primary" data-login-anilist' +
+      (configured ? "" : " disabled") + '>Continue with AniList</button><button class="btn btn-secondary" data-route="/library">Use guest watchlist</button></div>' +
+      (!configured ? '<div class="notice">AniList sign-in needs a one-time website OAuth client ID configured by the site owner. Guest watchlists still save locally.</div>' : '') +
+      '<div class="account-info"><strong>Why AniList?</strong><p>Official account authorization without sharing your password with AniDash. It lets AniDash read your anime lists and save tracking progress after supported episodes.</p><p>AniKoto and HiAnime website passwords are not accepted by AniDash. JustAnime does not require a separate account to watch.</p></div>';
+    const connectedActions = '<div class="account-actions"><button class="btn btn-primary" data-sync-library>Sync AniList now</button>' +
+      '<a class="btn btn-secondary" href="' + escapeHtml(user?.siteUrl || "https://anilist.co") + '" rel="noopener noreferrer" target="_blank">Open AniList profile</a>' +
+      '<button class="btn btn-quiet" data-logout-anilist>Sign out</button></div>' +
+      '<div class="account-info"><strong>Account & privacy</strong><p>Your browser saves a local backup. AniList can sync lists and completed-episode progress, not the precise second where a video paused. Your AniList login token is stored in this browser; sign out on a shared device.</p><p>Provider websites maintain their own accounts. AniDash never asks for their passwords.</p></div>';
+    $("#view").innerHTML = pageHead("ACCOUNT", "Profile", user ? "Manage your connected AniList account" : "Sign in or continue as guest") +
+      header + (user ? connectedActions : guestActions);
+  }
+
+  function prefSelect(key, options, help) {
+    return '<div class="preference-row"><div><h3 class="preference-title">' + escapeHtml(options.label) +
+      '</h3><p class="preference-help">' + escapeHtml(help) + '</p></div><select class="select-control" data-setting="' +
+      escapeHtml(key) + '">' + options.values.map(pair => '<option value="' + escapeHtml(pair[0]) +
+      '"' + (String(setting(key)) === String(pair[0]) ? " selected" : "") + '>' + escapeHtml(pair[1]) + '</option>').join("") +
+      '</select></div>';
+  }
+  function prefToggle(key, title, help) {
+    return '<label class="preference-row"><div><h3 class="preference-title">' + escapeHtml(title) +
+      '</h3><p class="preference-help">' + escapeHtml(help) + '</p></div><input class="preference-toggle" type="checkbox" data-setting="' +
+      escapeHtml(key) + '"' + (setting(key) ? " checked" : "") + '></label>';
+  }
+  function settingsGroup(title, html) {
+    return '<h2 class="settings-section-label">' + escapeHtml(title) + '</h2><div class="settings-group">' + html + '</div>';
+  }
+
   function renderSettings() {
-    loadProviders().then(providers => {
-      if (state.route !== "/settings") return;
-      const count = $("#provider-count");
-      if (count) count.textContent = providers.map(provider => provider.name).join(" · ");
-    });
-    $("#view").innerHTML = pageHead("PREFERENCES", "Settings", "Manage built-in sources, playback defaults and the app experience.") +
-      '<div class="settings-grid"><section class="settings-card"><div class="eyebrow">STREAMING</div><h3>Built-in sources</h3><p id="provider-count">JustAnime · HiAnime · AniKoto</p><p>AniDash ships with three native source providers. Their search, episode lists, SUB/DUB server choices and stream resolvers are maintained with the website. No extensions or user source manifests are required.</p><button class="btn btn-primary" data-open-sources>View built-in sources</button></section>' +
-      '<section class="settings-card"><div class="eyebrow">LOCAL DATA</div><h3>Your watch activity</h3><p>Watchlist and playback progress are stored on this device. Clearing browser storage will remove this local data.</p><button class="btn btn-quiet" data-clear-history>Clear watch history</button><button class="btn btn-quiet" data-clear-watchlist style="margin-left:6px">Clear watchlist</button></section>' +
-      '<section class="settings-card"><div class="eyebrow">INSTALLATION</div><h3>Install AniDash</h3><p>Add the website to your device home screen or desktop app launcher for an app-like experience.</p><button class="btn btn-secondary" data-install>Installation guide</button></section>' +
-      '<section class="settings-card"><div class="eyebrow">CATALOGUE</div><h3>AniList + MAL metadata</h3><p>Anime details, artwork, ratings and MyAnimeList IDs are read from the AniList public catalogue. No account sign-in is required for discovery.</p><a class="btn btn-quiet" href="https://docs.anilist.co/guide/graphql/" target="_blank" rel="noopener">API information ↗</a></section></div>';
+    const connected = window.AniDashAccount?.authenticated();
+    $("#view").innerHTML = '<div class="settings-screen">' +
+      pageHead("", "Settings", "AniDash Android-inspired preferences for the web") +
+      settingsGroup("Account & sync", '<div class="preference-row"><div><h3 class="preference-title">AniList account</h3><p class="preference-help">' +
+        (connected ? 'Connected · Watchlist sync available' : 'Guest mode · local data only until you sign in') +
+        '</p></div><button class="btn btn-secondary" data-route="/account">' + (connected ? "Manage" : "Sign in") + '</button></div>' +
+        prefToggle("trackProgress", "Save playback progress", "Store the last watched episode and playback time on this device. No Continue Watching shelf is displayed.")) +
+      settingsGroup("Video Player", 
+        prefSelect("preferredAudio", { label:"Preferred audio", values:[["dub","English DUB"],["sub","Original SUB"]] }, "Default audio language when a source supports it.") +
+        prefSelect("defaultQuality", { label:"Preferred quality", values:[["Auto","Auto (recommended)"],["1080p","1080p"],["720p","720p"],["480p","480p"],["360p","360p"]] }, "Choose the closest stream quality actually offered by a source.") +
+        prefSelect("preferredSource", { label:"Priority source", values:[["auto","Automatic"],["justanime","JustAnime"],["hianime","HiAnime (legacy)"],["anikoto","AniKoto"]] }, "Sets which provider to try first; fallback providers remain available.") +
+        prefToggle("autoEnableSubtitles", "Auto-enable subtitles", "Enable available subtitle tracks when playback begins.") +
+        prefToggle("autoSkipIntro", "Auto-skip intros", "Skip verified intro time ranges when providers supply AniSkip timing.") +
+        prefToggle("showNextEpisodePrompt", "Next episode prompt", "Offer the next episode when the current video finishes.")) +
+      settingsGroup("Appearance & layout",
+        prefSelect("themeMode", { label:"Theme mode", values:[["light","Light"],["dark","Dark"],["system","Follow device"]] }, "Choose a light, dark or system-matched design.") +
+        prefSelect("episodeViewMode", { label:"Episode layout", values:[["list","List"],["grid","Grid"]] }, "How episodes appear on the anime details screen.")) +
+      settingsGroup("Data & storage",
+        '<div class="preference-row"><div><h3 class="preference-title">Local library backup</h3><p class="preference-help">Your watchlist, playback progress and settings are saved in browser storage with an IndexedDB recovery copy. Keep a JSON backup when changing browsers.</p></div><button class="btn btn-quiet" data-export-backup>Export JSON</button></div>' +
+        '<div class="preference-row"><div><h3 class="preference-title">Restore your library</h3><p class="preference-help">Import an AniDash Watch JSON backup. Existing entries are merged, not replaced.</p></div><button class="btn btn-quiet" data-import-backup>Import JSON</button><input class="backup-import" type="file" id="backup-file" accept=".json,application/json"></div>' +
+        '<div class="preference-row"><div><h3 class="preference-title">Protect offline storage</h3><p class="preference-help">Ask this browser to retain AniDash data when it supports persistent storage.</p></div><button class="btn btn-quiet" data-persist-storage>Request storage</button></div>' +
+        '<div class="preference-row"><div><h3 class="preference-title">Clear saved playback progress</h3><p class="preference-help">Remove playback history from this device without deleting your watchlist.</p></div><button class="btn btn-quiet" data-clear-history>Clear</button></div>' +
+        '<div class="preference-row"><div><h3 class="preference-title">Clear local watchlist</h3><p class="preference-help">Removes local titles only; AniList data will not be deleted.</p></div><button class="btn btn-quiet" data-clear-watchlist>Clear</button></div>') +
+      settingsGroup("App & support",
+        '<div class="preference-row"><div><h3 class="preference-title">Install AniDash</h3><p class="preference-help">Use the web app on an iPhone, Android phone or desktop.</p></div><button class="btn btn-quiet" data-install>Install guide</button></div>' +
+        '<div class="preference-row"><div><h3 class="preference-title">Sources & troubleshooting</h3><p class="preference-help">View JustAnime, HiAnime and AniKoto playback availability information.</p></div><button class="btn btn-quiet" data-open-sources>View sources</button></div>' +
+        '<div class="preference-row"><div><h3 class="preference-title">About</h3><p class="preference-help">AniDash Watch PWA · Android-inspired UI. Native downloads, OS permissions, Android notifications and AniCORE are not implemented on the website.</p></div><a class="btn btn-quiet" href="https://github.com/anshdeepofficial1/AniDash-Website" target="_blank" rel="noopener">GitHub</a></div>') +
+      '<p class="settings-footnote">Preferences are saved on this device. Logging into AniList syncs anime lists and optional watched-episode progress, but cannot transfer settings or exact video timestamps between browsers.</p></div>';
   }
 
   function openModal(content) {
@@ -1610,7 +1842,7 @@
   }
 
   function updateActiveNav(route) {
-    const active = route === "/watch" ? "/history" : route;
+    const active = route === "/watch" ? "/discover" : route;
     $$("[data-route]").forEach(item => {
       const value = item.getAttribute("data-route");
       item.classList.toggle("active", value === active || (route.startsWith("/anime") && value === "/discover"));
@@ -1631,7 +1863,8 @@
       return renderSearch(params.get("q") || "");
     }
     if (current === "/library") return renderLibrary();
-    if (current === "/history") return renderHistory();
+    if (current === "/history") { location.hash = "#/library"; return; }
+    if (current === "/account") return renderAccount();
     if (current === "/settings") return renderSettings();
     if (current === "/anime" && parts[1]) return renderAnime(parts[1]);
     if (current === "/watch" && parts[1]) return renderWatch(parts[1], parts[2] || "1");
@@ -1664,7 +1897,59 @@
       return;
     }
     if (target.hasAttribute("data-watchlist")) {
-      toggleWatchlist(target.getAttribute("data-watchlist"));
+      void toggleWatchlist(target.getAttribute("data-watchlist"));
+      return;
+    }
+    if (target.hasAttribute("data-login-anilist")) {
+      try { await window.AniDashAccount.beginLogin(); }
+      catch (error) { toast(error.message); }
+      return;
+    }
+    if (target.hasAttribute("data-logout-anilist")) {
+      if (confirm("Sign out of AniList on this device? Your local watchlist stays saved.")) {
+        window.AniDashAccount?.logout();
+        toast("Signed out. Local watchlist remains available.");
+        renderAccount();
+      }
+      return;
+    }
+    if (target.hasAttribute("data-sync-library")) {
+      toast("Syncing your AniList library…");
+      const synced = await syncAniListLibrary();
+      if (synced) toast("AniList library updated · " + synced.length + " entries available.");
+      return;
+    }
+    if (target.hasAttribute("data-export-backup")) {
+      try {
+        const payload = {
+          format: "anidash-watch-library",
+          version: 2, exportedAt: new Date().toISOString(),
+          watchlist: store.watchlist, history: store.history,
+          preferences: store.preferences, hiddenCloudEntries: store.hiddenCloudEntries
+        };
+        const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement("a");
+        anchor.href = url;
+        anchor.download = "anidash-watch-backup.json";
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+        window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+        toast("Backup exported.");
+      } catch (error) { toast("Export failed: " + error.message); }
+      return;
+    }
+    if (target.hasAttribute("data-import-backup")) {
+      const input = $("#backup-file");
+      if (input) input.click();
+      return;
+    }
+    if (target.hasAttribute("data-persist-storage")) {
+      if (navigator.storage?.persist) {
+        const granted = await navigator.storage.persist();
+        toast(granted ? "Persistent storage granted." : "Storage request declined. Export backups regularly.");
+      } else toast("Persistent storage is not supported by this browser.");
       return;
     }
     if (target.hasAttribute("data-open-sources")) { openSourcesModal(); return; }
@@ -1696,7 +1981,10 @@
     if (target.hasAttribute("data-install")) { openInstallGuide(); return; }
     if (target.hasAttribute("data-close")) { closeModal(); return; }
     if (target.hasAttribute("data-play-first")) {
-      const first = state.detailEpisodes[0];
+      const saved = setting("trackProgress") ? store.history[String(state.detail?.id)] : null;
+      const first = saved
+        ? state.detailEpisodes.find(ep => Number(ep.number) === Number(saved.episode)) || state.detailEpisodes[0]
+        : state.detailEpisodes[0];
       if (first) startEpisode(first.number, first.id);
       return;
     }
@@ -1709,6 +1997,8 @@
       const number = target.getAttribute("data-player-episode");
       const item = state.detailEpisodes.find(ep => Number(ep.number) === Number(number));
       if (item) {
+        const oldVideo = $("#anime-video");
+        if (oldVideo) { savePlaybackProgress(oldVideo, false, true); oldVideo.pause(); }
         state.player.episode = item;
         state.player.direct = store.manualStreams[String(state.player.media.id) + ":" + String(item.number)] || "";
         navigate("/watch/" + state.player.media.id + "/" + item.number);
@@ -1720,6 +2010,8 @@
       const index = state.detailEpisodes.findIndex(ep => Number(ep.number) === Number(state.player.episode.number));
       const item = state.detailEpisodes[index + direction];
       if (item) {
+        const oldVideo = $("#anime-video");
+        if (oldVideo) { savePlaybackProgress(oldVideo, false, true); oldVideo.pause(); }
         state.player.episode = item;
         state.player.direct = store.manualStreams[String(state.player.media.id) + ":" + String(item.number)] || "";
         navigate("/watch/" + state.player.media.id + "/" + item.number);
@@ -1776,6 +2068,7 @@
       const match = (state.detailMatches || []).find(item => item && item.episodesReady && item.provider.id === providerId);
       if (match) {
         state.player.match = match;
+        state.player.manualProvider = true;
         state.player.failedProviders = [];
         state.player.candidates = [];
         state.player.candidateIndex = 0;
@@ -1859,17 +2152,19 @@
       if (confirm("Clear all locally saved watch progress?")) {
         store.history = {};
         persist();
-        renderHistory();
-        toast("Watch history cleared.");
+        if (state.route === "/settings") renderSettings();
+        toast("Local playback progress cleared.");
       }
       return;
     }
     if (target.hasAttribute("data-clear-watchlist")) {
       if (confirm("Clear your local watchlist?")) {
+        Object.keys(store.watchlist).forEach(key => { store.hiddenCloudEntries[key] = true; });
         store.watchlist = {};
         persist();
-        renderLibrary();
-        toast("Watchlist cleared.");
+        if (state.route === "/settings") renderSettings();
+        if (state.route === "/library") renderLibrary();
+        toast("Local watchlist cleared. AniList account entries were not changed.");
       }
       return;
     }
@@ -1882,7 +2177,47 @@
     }
   });
 
-  document.addEventListener("change", event => {
+  document.addEventListener("change", async event => {
+    if (event.target.id === "backup-file") {
+      const file = event.target.files?.[0];
+      if (!file) return;
+      try {
+        if (file.size > 5_000_000) throw new Error("Backup is too large (maximum 5 MB).");
+        const payload = JSON.parse(await file.text());
+        if (payload?.format !== "anidash-watch-library" || !payload.watchlist ||
+            typeof payload.watchlist !== "object" || Array.isArray(payload.watchlist)) {
+          throw new Error("This isn't an AniDash Watch backup.");
+        }
+        // Validate keys before merging to avoid imported prototype pollution.
+        const safeEntries = obj => Object.fromEntries(
+          Object.entries(obj || {}).filter(([id]) => /^\d{1,12}$/.test(id))
+        );
+        store.watchlist = { ...store.watchlist, ...safeEntries(payload.watchlist) };
+        store.history = { ...store.history, ...safeEntries(payload.history) };
+        const allowed = Object.keys(DEFAULT_PREFERENCES);
+        for (const key of allowed) {
+          if (Object.prototype.hasOwnProperty.call(payload.preferences || {}, key)) {
+            store.preferences[key] = payload.preferences[key];
+          }
+        }
+        store.hiddenCloudEntries = { ...store.hiddenCloudEntries, ...safeEntries(payload.hiddenCloudEntries) };
+        persist();
+        applyPreferences();
+        if (state.route === "/settings") renderSettings();
+        toast("Backup restored. Your existing library was preserved.");
+      } catch (error) { toast("Restore failed: " + error.message); }
+      return;
+    }
+    if (event.target.hasAttribute("data-setting")) {
+      const key = event.target.getAttribute("data-setting");
+      if (!Object.prototype.hasOwnProperty.call(DEFAULT_PREFERENCES, key)) return;
+      store.preferences[key] = event.target.type === "checkbox"
+        ? Boolean(event.target.checked) : event.target.value;
+      persist();
+      applyPreferences();
+      toast("Preference saved.");
+      return;
+    }
     if (event.target.id === "discover-sort") {
       state.discoverSort = event.target.value;
       renderDiscover();
@@ -1924,13 +2259,37 @@
     if (nextRoute !== "watch") {
       const video = $("#anime-video");
       const embed = $("#anime-embed");
-      if (video) { video.pause(); video.removeAttribute("src"); video.load(); }
+      if (video) { savePlaybackProgress(video, false, true); video.pause(); video.removeAttribute("src"); video.load(); }
       if (embed) embed.src = "about:blank";
       if (state.hls) { try { state.hls.destroy(); } catch (_) {} state.hls = null; }
       if (state.playbackWatchdog) { window.clearTimeout(state.playbackWatchdog); state.playbackWatchdog = null; }
       if (state.player) state.player.requestId = (state.player.requestId || 0) + 1;
     }
     route();
+  });
+  window.addEventListener("pagehide", () => {
+    const video = $("#anime-video");
+    if (video) savePlaybackProgress(video, false, true);
+    persist();
+  });
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") {
+      const video = $("#anime-video");
+      if (video) savePlaybackProgress(video, false, true);
+    }
+  });
+  window.addEventListener("storage", event => {
+    if (event.key !== STORE_KEY || !event.newValue) return;
+    try {
+      const data = JSON.parse(event.newValue);
+      if (Number(data.updatedAt || 0) > Number(store.updatedAt || 0)) {
+        Object.assign(store, data);
+        store.preferences = { ...DEFAULT_PREFERENCES, ...store.preferences };
+        applyPreferences();
+        if (state.route === "/library") renderLibrary();
+        if (state.route === "/settings") renderSettings();
+      }
+    } catch (_) {}
   });
   window.addEventListener("online", () => toast("You are back online."));
   window.addEventListener("offline", () => toast("You are offline. The app shell is still available."));
@@ -1940,5 +2299,22 @@
   }
 
   loadProviders();
-  route();
+  const accountClient = window.AniDashAccount;
+  if (accountClient) accountClient.captureRedirect();
+  // Hydrate the backup before routing; this avoids briefly replacing an
+  // existing watchlist with an empty UI after reload.
+  Promise.resolve().then(restoreStorage).finally(() => {
+    route();
+    if (accountClient) {
+      accountClient.setHandler(user => {
+        refreshProfileChip(user);
+        if (state.route === "/account") renderAccount();
+        if (state.route === "/library") renderLibrary();
+      });
+      accountClient.init().then(async user => {
+        refreshProfileChip(user);
+        if (user) await syncAniListLibrary();
+      }).catch(() => {});
+    }
+  });
 })();

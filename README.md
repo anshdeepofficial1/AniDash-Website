@@ -5,11 +5,11 @@ A standalone responsive anime discovery and streaming PWA. This repository is se
 ## User experience
 
 - AniList-powered anime discovery, search, rankings, artwork, details and mapped MyAnimeList IDs.
-- Mobile-first home screen with a featured anime hero and swipeable shelves: Continue Watching, Currently Airing, Trending, Popular, Watchlist, Coming Soon, Movies, Top Rated and Hidden Gems.
+- Mobile-first home screen with a featured anime hero and swipeable shelves: Currently Airing, Trending, Popular, Watchlist, Coming Soon, Movies, Top Rated and Hidden Gems.
 - Responsive desktop layout plus phone-first Android and iOS PWA layout, safe-area handling, sticky mobile search, bottom navigation and larger touch targets.
-- Home-screen shortcuts for Search, Watchlist and Continue Watching.
+- Home-screen shortcuts for Search, Watchlist and Account.
 - Searchable episode lists with 50 episodes per page on anime details, 30 per page in the player, and direct episode-number jump.
-- Local watchlist and continue-watching history, resume position, and installable PWA shell.
+- Persistent local watchlist, last watched episode and playback position without a visible Continue Watching shelf, plus an installable PWA shell.
 
 ## Built-in streaming providers
 
@@ -25,7 +25,7 @@ These three fixed source integrations are included. Viewers do not install or im
 - SUB/DUB, server and provider changes clear old failure state and start a fresh resolution.
 - MP4/HLS playback, native HLS on Safari/iPhone, hls.js on supported browsers, iframe-based partner players, subtitles and intro/outro skip metadata.
 - Same-origin `/api/media` relay is restricted to an explicit list of source/CDN hosts. JustAnime follows the same two-hop `neko.justanime.to/m3u8-proxy` flow as the Android web relay; the relay carries safe `Referer`, `Origin`, `User-Agent` and `Accept` headers through HLS master playlists, child playlists, segments and keys. Other built-in providers use the restricted direct relay. Signed media responses are not cached.
-- The player has a Retry all built-in sources action after a provider failure.
+- The player has a Retry all built-in sources action after a provider failure. Web settings let users choose preferred SUB/DUB, quality, source priority, subtitles, intro skip, appearance and layout.
 
 Provider sites and their APIs are third-party services. Their availability, domains, response formats, anti-bot protections, CDN hosts and browser restrictions can change. A catalogue or stream URL response does not guarantee that the browser can play it. No site can guarantee that every episode is available while upstream services refuse requests.
 
@@ -53,8 +53,25 @@ The app calls the AniList GraphQL API for discovery and anime information. AniLi
 - `/api/anikoto` — AniKoto search, paginated episode data, Kwik extraction and partner-embed fallback.
 - `/api/media` — restricted same-origin media/HLS relay. This is not an open proxy.
 
+## AniList account setup (required for cloud login)
+
+AniDash Watch supports official AniList OAuth (implicit flow) and optional sync of the watchlist and completed episodes. Guest lists do **not** require login and use localStorage plus an IndexedDB recovery copy. Users can export/import JSON backups from Settings.
+
+**One-time setup by the website owner:**
+
+1. Go to AniList **Developer Settings → Create New Application**.
+2. Name it **AniDash Watch**. Register the exact redirect URL `https://anidash-watch.vercel.app/` (including the trailing slash).
+3. Copy the **Client ID** (not the Client Secret).
+4. In the AniDash Watch Vercel project, set environment variable `ANILIST_WEB_CLIENT_ID` to that numeric Client ID for Production and Preview environments as appropriate.
+5. Redeploy. Check `https://anidash-watch.vercel.app/api/auth-config`; its response must show `"enabled":true`. Then visit the live website, select **Account → Continue with AniList**, and approve the official AniList authorization screen.
+
+The OAuth state is validated before accepting a callback. AniDash never asks for AniList passwords; the user’s token is stored in browser localStorage so login survives a reload. Users should sign out of shared computers. Cross-device playback timestamps and settings are not synchronized; AniList tracks anime-list status and episode progress. Import of existing cloud entries merges rather than deletes local watchlist items. Deleting a local title doesn't automatically delete an AniList entry; removal from AniList Planning prompts for confirmation.
+
+No supported external OAuth APIs for JustAnime/HiAnime/AniKoto website account sessions were established. **Do not enter passwords for streaming sites into AniDash.** JustAnime advertises no sign-up required and optional AniList/MAL sync; the original HiAnime.to shut down in March 2026. Do not assume similarly branded sites share its accounts.
+
 ## Optional Vercel environment variables
 
+- `ANILIST_WEB_CLIENT_ID` — public numeric OAuth client ID, required for AniList account login. Never configure the client secret in the browser.
 - `HIANIME_API_URL` — override the legacy HiAnime API base URL.
 - `VIDNEST_SECRET` — override the server-side VidNest decryption key if the upstream protocol changes.
 - `ANIKOTO_API_URL` — override the current AniKotoAPI base URL (defaults to `https://anikototvapi.vercel.app/api`).
@@ -80,4 +97,4 @@ Run `python -m http.server 8080` in the repository root and open `http://localho
 - The original HiAnime operation announced its goodbye in March 2026; its old API and VidNest decryption path are retained only as best-effort compatibility.
 - AniKoto's API documentation notes that its AJAX-dependent server/stream endpoints can be blocked by anti-bot protection. The current direct embed provider route avoids that AJAX path, but iframe playback is still subject to each partner player and browser embedding policy.
 - If AniList has no episode count and Ani-Zip has no episode mapping, AniDash cannot generate a reliable episode list for that title.
-- Watchlist and playback progress are stored locally in the browser; account-based AniList/MAL cross-device sync is not implemented.
+- Local watchlists and playback progress use browser storage; wiping all browser site data can still remove unsynced data. Use Settings → Export JSON for backup. AniList cloud sync works after the website OAuth application is configured and the user signs in. MyAnimeList and streaming-provider account login are not supported by this website.

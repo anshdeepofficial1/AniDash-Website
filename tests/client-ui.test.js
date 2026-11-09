@@ -73,7 +73,9 @@ function createBrowser(initialHash) {
 }
 
 async function flushUI() {
-  for (let i = 0; i < 15; i++) await Promise.resolve();
+  for (let i = 0; i < 80; i++) await Promise.resolve();
+  await new Promise(resolve => setImmediate(resolve));
+  for (let i = 0; i < 20; i++) await Promise.resolve();
 }
 
 test("client script parses and mounts the intended application", () => {

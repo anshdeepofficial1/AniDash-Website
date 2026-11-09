@@ -19,13 +19,16 @@ jobs:
       - name: Validate JavaScript syntax
         run: |
           node --check app.js
+          node --check anilist-account.js
+          node --check library-storage.js
+          node --check api/auth-config.js
           node --check sw.js
           node --check api/justanime.js
           node --check api/hianime.js
           node --check api/anikoto.js
           node --check api/media.js
           node --check api/episode-map.js
-          node --test tests/provider-smoke.test.js tests/client-ui.test.js
+          node --test tests/provider-smoke.test.js tests/client-ui.test.js tests/account-auth.test.js
 
   visual:
     name: Real-browser UI smoke
