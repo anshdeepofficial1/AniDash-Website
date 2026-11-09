@@ -1343,10 +1343,19 @@
           importCloudPosition(entry.media, entry, "ANILIST");
         }
       }
-      try {
-        const favorites = await account.favorites();
-        for (const id of favorites) store.localFavorites[String(id)] = true;
-      } catch (_) {} // Favourites are optional; other library sections still work.
+      const [favoritesResult, mangaResult] = await Promise.allSettled([
+        account.favorites(), account.listManga()
+      ]);
+      if (favoritesResult.status === "fulfilled") {
+        for (const id of favoritesResult.value) store.localFavorites[String(id)] = true;
+      }
+      if (mangaResult.status === "fulfilled") {
+        for (const entry of mangaResult.value) {
+          if (entry?.media?.id && !store.mangaList[String(entry.media.id)]) {
+            store.mangaList[String(entry.media.id)] = entry.media;
+          }
+        }
+      }
       persist();
       if (state.route === "/library") renderLibrary();
       if (state.route === "/history") renderHistory();
@@ -2962,6 +2971,8 @@
     if (document.visibilityState === "hidden") {
       const video = $("#anime-video");
       if (video) savePlaybackProgress(video, false, true);
+    } else if (document.visibilityState === "visible") {
+      passiveCloudRefresh();
     }
   });
   window.addEventListener("storage", event => {
@@ -2977,7 +2988,23 @@
       }
     } catch (_) {}
   });
-  window.addEventListener("online", () => toast("You are back online."));
+
+  let lastPassiveCloudRefresh = 0;
+  let passiveRefreshPending = null;
+  function passiveCloudRefresh() {
+    if (state.route === "/watch" || !navigator.onLine ||
+        (!window.AniDashAccount?.authenticated() && !window.AniDashMal?.authenticated())) return;
+    const now = Date.now();
+    if (passiveRefreshPending || now - lastPassiveCloudRefresh < 120000) return;
+    lastPassiveCloudRefresh = now;
+    passiveRefreshPending = Promise.allSettled([
+      syncAniListLibrary(), syncMalLibrary()
+    ]).finally(() => { passiveRefreshPending = null; });
+  }
+  window.addEventListener("online", () => {
+    toast("You are back online.");
+    passiveCloudRefresh();
+  });
   window.addEventListener("offline", () => toast("You are offline. The app shell is still available."));
 
   if ("serviceWorker" in navigator && location.protocol === "https:") {
