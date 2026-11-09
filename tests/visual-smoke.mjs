@@ -85,7 +85,14 @@ try {
   await page.screenshot({ path: path.join(artifacts, "mobile-home.png") });
   assert.equal(await page.locator("#spotlight-count").textContent(), "1 / 10");
   await page.locator('[data-spotlight-next]').click();
-  assert.equal(await page.locator("#spotlight-count").textContent(), "2 / 10");
+  await page.waitForTimeout(100);
+  console.log("Spotlight diagnostic:", await page.evaluate(() => ({
+    current: document.querySelector("#spotlight-count")?.textContent,
+    pathname: location.hash, matches: document.querySelectorAll("[data-spotlight-next]").length,
+    visibleHero: document.querySelector("#spotlight-content")?.textContent?.slice(0,70)
+  })), "Page errors:", errors);
+  await page.waitForFunction(() => document.querySelector("#spotlight-count")?.textContent === "2 / 10",
+    null, { timeout: 2500 });
   await page.screenshot({ path: path.join(artifacts, "mobile-spotlight-next.png") });
   assert.equal(await page.locator('[data-route="/section/trending"]').count(), 1);
   await page.locator('[data-route="/section/trending"]').first().click();
