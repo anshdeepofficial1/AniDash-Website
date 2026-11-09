@@ -346,3 +346,9 @@ body { font-family:"Outfit","DM Sans",system-ui,sans-serif; }
 @media (prefers-reduced-motion:reduce) {
   .poster-wrap,.btn { transition:none; }
 }
+
+/* The Android home greeting replaces the redundant mobile web masthead. */
+@media (max-width: 760px) {
+  body[data-view="home"] .topbar { display:none; }
+  body[data-view="home"] .view-content { padding-top:calc(22px + env(safe-area-inset-top)); }
+}
