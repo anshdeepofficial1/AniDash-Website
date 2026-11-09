@@ -838,7 +838,7 @@
           '<div class="button-row"><button class="btn btn-primary" data-play-first="' + media.id + '" ' + (episodes.length ? "" : "disabled") + '>▶ Start watching</button><button class="btn btn-secondary" data-watchlist="' + media.id + '">' + (watched ? "✓ In watchlist" : "♡ Add to watchlist") + '</button></div>' +
         '</div></div></div>' +
       '<div class="details-layout"><section class="content-panel"><div class="section-heading"><div><h2 class="panel-title">Episodes</h2><p class="section-note">' + (matches.length ? "Source: " + escapeHtml(sourceInfo) : "AniDash checks all three built-in providers and uses AniList episode mapping as a fallback.") + '</p></div><span class="watchlist-badge">' + episodes.length + ' listed</span></div>' +
-        '<div class="episode-toolbar"><select id="episode-source" class="select-control">' + (matches.length ? matches.map((match, index) => '<option value="' + index + '"' + (match === state.selectedMatch ? " selected" : "") + '>' + escapeHtml(match.provider.name + (match.mapped ? " (episode map)" : "")) + '</option>').join("") : '<option value="">No episode source available</option>') + '</select><input id="episode-filter" class="input-control" style="max-width:180px" placeholder="Search episodes…"><input id="episode-jump" class="input-control episode-jump-input" type="number" min="1" placeholder="EP #"><button class="btn btn-quiet" data-episode-go="detail">Go</button><button class="btn btn-quiet" data-refresh-sources>Retry sources</button></div>' +
+        '<div class="episode-toolbar"><select id="episode-source" class="select-control">' + (matches.length ? matches.map((match, index) => '<option value="' + index + '"' + (match === state.selectedMatch ? " selected" : "") + '>' + escapeHtml(match.provider.name + (match.provisional ? " (quick access)" : match.mapped ? " (episode map)" : "")) + '</option>').join("") : '<option value="">No episode source available</option>') + '</select><input id="episode-filter" class="input-control" style="max-width:180px" placeholder="Search episodes…"><input id="episode-jump" class="input-control episode-jump-input" type="number" min="1" placeholder="EP #"><button class="btn btn-quiet" data-episode-go="detail">Go</button><button class="btn btn-quiet" data-refresh-sources>Retry sources</button></div>' +
         '<div id="episode-list" class="episode-list"></div><div id="episode-pagination"></div>' +
         (!episodes.length ? '<div class="notice" style="margin-top:14px">No episode list was returned. Check the source status below and retry when an upstream service is available.</div>' : '') +
         '<div class="builtin-sources-panel"><div class="section-heading"><div><h3 class="panel-title">Built-in sources</h3><p class="section-note">These three sources are included with AniDash. No extensions are needed.</p></div></div>' + providerRows + '</div>' +
@@ -1614,6 +1614,7 @@
     const parts = hash.split("?")[0].split("/").filter(Boolean);
     const current = "/" + (parts[0] || "home");
     state.route = current;
+    document.body.dataset.view = current.replace(/^\\//, "");
     updateActiveNav(current);
     if (current === "/home") return renderHome();
     if (current === "/discover") return renderDiscover();
