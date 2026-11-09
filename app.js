@@ -102,6 +102,11 @@
         Object.assign(store, backup);
         store.preferences = { ...DEFAULT_PREFERENCES, ...store.preferences };
         persist();
+      } else if (!backup || Number(store.updatedAt || 0) >= Number(backup.updatedAt || 0)) {
+        // Migrate earlier localStorage-only installations into the recovery DB.
+        if (store.updatedAt || Object.keys(store.watchlist).length || Object.keys(store.history).length) {
+          window.AniDashStorage.save(store).catch(() => {});
+        }
       }
     } catch (_) {}
     applyPreferences();
@@ -1992,6 +1997,8 @@
       const number = target.getAttribute("data-player-episode");
       const item = state.detailEpisodes.find(ep => Number(ep.number) === Number(number));
       if (item) {
+        const oldVideo = $("#anime-video");
+        if (oldVideo) { savePlaybackProgress(oldVideo, false, true); oldVideo.pause(); }
         state.player.episode = item;
         state.player.direct = store.manualStreams[String(state.player.media.id) + ":" + String(item.number)] || "";
         navigate("/watch/" + state.player.media.id + "/" + item.number);
@@ -2003,6 +2010,8 @@
       const index = state.detailEpisodes.findIndex(ep => Number(ep.number) === Number(state.player.episode.number));
       const item = state.detailEpisodes[index + direction];
       if (item) {
+        const oldVideo = $("#anime-video");
+        if (oldVideo) { savePlaybackProgress(oldVideo, false, true); oldVideo.pause(); }
         state.player.episode = item;
         state.player.direct = store.manualStreams[String(state.player.media.id) + ":" + String(item.number)] || "";
         navigate("/watch/" + state.player.media.id + "/" + item.number);
