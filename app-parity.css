@@ -114,3 +114,18 @@ body.cbz-active{overflow:hidden}
 .cbz-stage img{display:block;max-width:100%;max-height:100%;object-fit:contain}
 .cbz-controls{height:62px;display:flex;gap:10px;align-items:center;justify-content:center;background:#18231c;padding:9px}
 .cbz-controls .btn{min-width:120px}
+
+.download-list {display:grid;gap:12px;max-width:880px;margin-top:16px}
+.download-item{display:flex;align-items:center;gap:12px;padding:14px;background:var(--surface);
+  border-radius:19px;border:1px solid var(--line)}
+.download-glyph{width:45px;height:45px;display:grid;place-items:center;border-radius:14px;
+  background:var(--surface-2);color:var(--accent);flex-shrink:0}
+.download-details{min-width:0;flex:1}
+.download-details strong{font-size:12px;overflow-wrap:anywhere}
+.download-details p{font-size:10px;color:var(--muted);margin:5px 0 0}
+.cbz-storage-warning{background:#7b3c18;color:white;padding:10px 16px;font-size:12px;text-align:center}
+@media(max-width:760px){
+.download-item{flex-wrap:wrap;gap:10px}
+.download-details{flex-basis:calc(100% - 60px)}
+.download-item .btn{min-width:95px;font-size:11px}
+}

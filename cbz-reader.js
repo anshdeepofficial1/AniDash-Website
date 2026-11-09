@@ -39,7 +39,7 @@
     if (next) next.disabled = index >= pages.length-1;
     try { localStorage.setItem(storageKey, String(index)); } catch (_) {}
   }
-  async function open(file) {
+  async function open(file, options = {}) {
     if (!file) return;
     if (file.size > 500_000_000) throw new Error("File exceeds the 500 MB reader limit.");
     if (!window.JSZip) throw new Error("CBZ reader library could not load. Check your connection.");
@@ -52,6 +52,15 @@
     ).sort(natural.compare);
     if (!pages.length) { cleanup(); throw new Error("No readable image pages in this CBZ file."); }
     if (pages.length > 2000) { cleanup(); throw new Error("Too many pages in one CBZ archive."); }
+    let saveWarning = "";
+    if (options.save !== false && window.AniDashStorage?.saveMangaFile) {
+      try {
+        await window.AniDashStorage.saveMangaFile(file);
+        document.dispatchEvent(new CustomEvent("anidash:downloads-changed"));
+      } catch (error) {
+        saveWarning = error.message || "Unable to save this file offline.";
+      }
+    }
     storageKey = "anidash.cbz.resume." + file.name + "." + file.size;
     const root = document.createElement("section");
     root.id = "cbz-reader";
@@ -67,6 +76,12 @@
     document.body.appendChild(root);
     document.body.classList.add("cbz-active");
     $("#cbz-title").textContent = title;
+    if (saveWarning) {
+      const warning = document.createElement("div");
+      warning.className = "cbz-storage-warning";
+      warning.textContent = "Reader opened, but offline saving failed: " + saveWarning;
+      root.querySelector(".cbz-toolbar").after(warning);
+    }
     $("#cbz-close").addEventListener("click", cleanup);
     $("#cbz-prev").addEventListener("click", () => display(currentPage-1));
     $("#cbz-next").addEventListener("click", () => display(currentPage+1));
@@ -80,5 +95,10 @@
     else if (event.key === "ArrowRight") { event.preventDefault(); display(currentPage+1); }
     else if (event.key === "ArrowLeft") { event.preventDefault(); display(currentPage-1); }
   });
-  window.AniDashCBZ = { open, close:cleanup };
+  async function openSaved(id) {
+    const saved = await window.AniDashStorage?.getMangaFile(id);
+    if (!saved) throw new Error("This downloaded manga is no longer on this device.");
+    return open(saved, { save:false });
+  }
+  window.AniDashCBZ = { open, openSaved, close:cleanup };
 })();
