@@ -101,15 +101,15 @@
       ...(Array.isArray(media?.synonyms) ? media.synonyms : [])].filter(Boolean).join(" ");
     if (format === "OVA") return "OVA";
     if (format === "SPECIAL" || /special|chibi/i.test(title)) return "SP";
-    const seasonMatch = /(?:season|series)\\s*(\\d+)|\\b(\\d+)(?:st|nd|rd|th)\\s+season\\b|第\\s*(\\d+)\\s*季/i.exec(title);
-    const partMatch = /(?:part|cour)\\s*(\\d+)/i.exec(title);
+    const seasonMatch = /(?:season|series)\s*(\d+)|\b(\d+)(?:st|nd|rd|th)\s+season\b|第\s*(\d+)\s*季/i.exec(title);
+    const partMatch = /(?:part|cour)\s*(\d+)/i.exec(title);
     if (seasonMatch) {
       const number = Number(seasonMatch[1] || seasonMatch[2] || seasonMatch[3] || 1);
       const part = Number(partMatch?.[1] || 0);
       return part > 1 ? "S" + number + "-" + part : "S" + number;
     }
     if (partMatch && Number(partMatch[1]) > 1) return "S1-" + Number(partMatch[1]);
-    if (/\\bii\\b|season\\s*2|2nd\\s*season|wu\\s*mian\\s*ren/i.test(title)) return "S2";
+    if (/\bii\b|season\s*2|2nd\s*season|wu\s*mian\s*ren/i.test(title)) return "S2";
     return "S1";
   }
   const SECTIONS = {
