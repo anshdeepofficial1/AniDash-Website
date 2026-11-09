@@ -951,7 +951,8 @@
       category: "dub", intro: null, outro: null, requestId: 0,
       direct: store.manualStreams[String(id) + ":" + String(number)] || ""
     };
-    const changedEpisode = Number(player.episode?.number) !== Number(episode.number);
+    const changedEpisode = Number(player.lastRenderedEpisode) !== Number(episode.number);
+    player.lastRenderedEpisode = Number(episode.number);
     state.player = player;
     player.media = media;
     player.episode = episode;
@@ -1723,7 +1724,7 @@
       state.player.embeds = [];
       state.player.servers = [];
       state.player.selectedServer = ({ justanime: "auto", hianime: "hd-1", anikoto: "anikoto" }[state.player.match?.provider?.id] || "auto");
-      $("[data-category]").forEach(el => el.classList.toggle("active", el.getAttribute("data-category") === category));
+      $$("[data-category]").forEach(el => el.classList.toggle("active", el.getAttribute("data-category") === category));
       loadPlayerStreams(state.token);
       return;
     }
@@ -1745,7 +1746,7 @@
       const stream = list[index];
       if (stream) {
         state.player.candidateIndex = index;
-        $("[data-stream]").forEach(el => el.classList.toggle("active", Number(el.getAttribute("data-stream")) === index));
+        $$("[data-stream]").forEach(el => el.classList.toggle("active", Number(el.getAttribute("data-stream")) === index));
         attachStream(stream.url || stream.src || stream.file, stream, stream.isEmbed ? [] : state.player.tracks);
       }
       return;
