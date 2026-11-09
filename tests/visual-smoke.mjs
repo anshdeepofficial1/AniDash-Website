@@ -103,6 +103,32 @@ try {
   await page.getByRole("heading",{name:"Manga"}).first().waitFor({timeout:15000});
   await page.locator('[data-manga]').first().waitFor({timeout:15000});
   await page.screenshot({ path: path.join(artifacts, "mobile-manga.png") });
+
+  // Exercise actual IndexedDB blob persistence across a full browser reload.
+  const testCBZ = "UEsDBBQAAAAIAGU/aV07Lb2aPwAAAEYAAAAHAAAAMDAxLnBuZ+sM8HPn5ZLiYmBg4PX0cAkC0owgzMEGJOVFj3SCJVwcQzhkk3+cP/BBnoG1gcne89D/K0AJBk9XP5d1TglNAFBLAQIUAxQAAAAIAGU/aV07Lb2aPwAAAEYAAAAHAAAAAAAAAAAAAACAAQAAAAAwMDEucG5nUEsFBgAAAAABAAEANQAAAGQAAAAAAA==";
+  await page.evaluate(async base64 => {
+    const bytes = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
+    const file = new File([bytes], "verified-offline.cbz", { type:"application/zip" });
+    await window.AniDashStorage.saveMangaFile(file);
+  }, testCBZ);
+  await page.goto(address + "/#/downloads", { waitUntil:"domcontentloaded" });
+  await page.locator('[data-read-offline]').waitFor({ timeout:15000 });
+  assert.match(await page.locator(".download-details").textContent(), /verified-offline.cbz/);
+  await page.reload({ waitUntil:"domcontentloaded" });
+  await page.locator('[data-read-offline]').waitFor({ timeout:15000 });
+  const restored = await page.evaluate(async () => {
+    const files = await window.AniDashStorage.listMangaFiles();
+    const blob = await window.AniDashStorage.getMangaFile(files[0].id);
+    return { count:files.length, name:files[0].name, bytes:blob.size };
+  });
+  assert.equal(restored.count,1);
+  assert.equal(restored.name,"verified-offline.cbz");
+  assert.ok(restored.bytes > 100);
+  await page.screenshot({ path:path.join(artifacts,"mobile-downloads.png") });
+  page.once("dialog", dialog => dialog.accept());
+  await page.locator('[data-remove-offline]').click();
+  await page.getByText("No offline manga yet").waitFor({ timeout:15000 });
+
   await page.goto(address + "/#/home", { waitUntil: "domcontentloaded" });
   await page.locator(".home-hero").waitFor({ timeout: 15000 });
   // Save a guest watchlist entry, reload and verify durable browser storage.
