@@ -31,6 +31,7 @@ function createBrowser(initialHash) {
     return elements.get(selector);
   };
   const document = {
+    body: { dataset: {} },
     querySelector: selector => getElement(selector),
     querySelectorAll: () => [],
     createElement: () => ({
