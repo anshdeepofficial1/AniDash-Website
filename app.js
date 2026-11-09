@@ -548,6 +548,61 @@
       '">View all ' + uiIcon("chevron-right") + '</button></div><div class="anime-shelf">' +
       rows.map(item => card(item, "MANGA")).join("") + '</div></section>';
   }
+
+  function savedMangaShelf() {
+    const entries = Object.values(store.mangaList || {}).filter(media => media?.id);
+    if (!entries.length) return "";
+    return '<section class="section"><div class="section-heading"><h2 class="section-title">Your Manga Library</h2>' +
+      '<button class="section-link" data-route="/manga-library">View all ' + uiIcon("chevron-right") +
+      '</button></div><div class="anime-shelf">' +
+      entries.slice(0,12).map(media => card(media,"MANGA")).join("") + '</div></section>';
+  }
+  async function renderSavedManga() {
+    const token = ++state.token;
+    showLoading("Opening saved manga…");
+    if (window.AniDashAccount?.authenticated()) {
+      try {
+        const entries = await window.AniDashAccount.listManga();
+        for (const entry of entries) {
+          if (entry?.media?.id && !store.mangaList[String(entry.media.id)]) {
+            store.mangaList[String(entry.media.id)] = entry.media;
+          }
+        }
+        if (entries.length) persist();
+      } catch (error) { toast("Saved manga available locally; AniList refresh failed: " + error.message); }
+    }
+    if (token !== state.token || state.route !== "/manga-library") return;
+    const items = Object.values(store.mangaList).filter(media => media?.id);
+    $("#view").innerHTML = pageHead("", "Your Manga Library", "Saved locally and imported from AniList") +
+      '<div class="account-actions"><button class="btn btn-secondary" data-route="/manga">' +
+      uiIcon("chevron-left") + ' Discover manga</button><button class="btn btn-secondary" data-route="/downloads">' +
+      uiIcon("download") + ' Offline downloads</button></div>' +
+      (items.length ? mangaGrid(items) : '<div class="empty-state"><h3>No saved manga</h3>' +
+      '<p>Save a manga from its details page or connect AniList to import your reading list.</p>' +
+      '<button class="btn btn-primary" data-route="/manga">Browse manga</button></div>');
+  }
+  async function renderDownloads() {
+    const token = ++state.token;
+    showLoading("Loading offline downloads…");
+    const files = await (window.AniDashStorage?.listMangaFiles?.() || Promise.resolve([]));
+    if (token !== state.token || state.route !== "/downloads") return;
+    const rows = files.map(info => '<div class="download-item"><div class="download-glyph">' +
+      uiIcon("manga") + '</div><div class="download-details"><strong>' +
+      escapeHtml(info.name) + '</strong><p>' + (info.size / 1048576).toFixed(1) +
+      ' MB · Saved on this device</p></div><button class="btn btn-primary" data-read-offline="' +
+      escapeHtml(info.id) + '">' + uiIcon("eye") + ' Read</button><button class="btn btn-quiet" ' +
+      'data-remove-offline="' + escapeHtml(info.id) + '" aria-label="Delete offline manga ' +
+      escapeHtml(info.name) + '">Remove</button></div>').join("");
+    $("#view").innerHTML = pageHead("", "Downloads", "Your offline CBZ files, stored privately on this device") +
+      '<div class="account-actions"><button class="btn btn-primary" data-open-cbz>' +
+      uiIcon("download") + ' Import CBZ</button><button class="btn btn-secondary" data-route="/manga-library">' +
+      uiIcon("manga") + ' Saved Manga</button></div>' +
+      '<input id="cbz-file-input" type="file" accept=".cbz,application/zip" hidden>' +
+      (files.length ? '<div class="download-list">' + rows + '</div>' :
+      '<div class="empty-state"><h3>No offline manga yet</h3><p>Import a CBZ file you own. It can then be reopened without selecting it again.</p>' +
+      '<button class="btn btn-secondary" data-open-cbz>Choose CBZ file</button></div>') +
+      '<p class="official-read-note">Files stay in your browser’s IndexedDB and are not uploaded. Clearing site data can erase them, and available space depends on your browser.</p>';
+  }
   async function renderManga(term = "") {
     const token = ++state.token;
     showLoading("Opening Manga Library…");
@@ -567,9 +622,12 @@
         '<input id="manga-search-input" autocomplete="off" aria-label="Search manga" placeholder="Search manga titles…" value="' +
         escapeHtml(query) + '"><button class="btn btn-primary" type="submit">Search</button></form>' +
         '<div class="manga-topline"><div class="feature-chip">' + uiIcon("manga") +
-        ' AniList manga catalogue</div><button class="btn btn-secondary" data-open-cbz>' +
-        uiIcon("manga") + ' Read CBZ file</button></div>' +
+        ' AniList manga catalogue</div><div class="account-actions"><button class="btn btn-secondary" data-route="/manga-library">' +
+        uiIcon("bookmark") + ' Saved</button><button class="btn btn-secondary" data-route="/downloads">' +
+        uiIcon("download") + ' Downloads</button><button class="btn btn-secondary" data-open-cbz>' +
+        uiIcon("manga") + ' Import CBZ</button></div></div>' +
         '<input id="cbz-file-input" type="file" accept=".cbz,application/zip" style="display:none">' +
+        savedMangaShelf() +
         (query ? '<section class="section"><h2 class="section-title">Search results</h2>' + mangaGrid(rows[0]) + '</section>'
          : mangaShelf("Trending Manga",rows[0],"trending") +
            mangaShelf("All Time Popular",rows[1],"popular") +
@@ -2342,6 +2400,8 @@
       const params = new URLSearchParams(hash.split("?")[1] || "");
       return renderManga(params.get("q") || "");
     }
+    if (current === "/manga-library") return renderSavedManga();
+    if (current === "/downloads") return renderDownloads();
     if (current === "/manga-section" && parts[1]) {
       const params = new URLSearchParams(hash.split("?")[1] || "");
       return renderMangaSection(parts[1], Math.max(1, Number(params.get("page") || 1)));
@@ -2401,6 +2461,20 @@
     if (target.hasAttribute("data-open-cbz")) {
       const el = $("#cbz-file-input");
       if (el) el.click();
+      return;
+    }
+    if (target.hasAttribute("data-read-offline")) {
+      try { await window.AniDashCBZ.openSaved(target.getAttribute("data-read-offline")); }
+      catch (error) { toast(error.message); }
+      return;
+    }
+    if (target.hasAttribute("data-remove-offline")) {
+      const id = target.getAttribute("data-remove-offline");
+      if (confirm("Remove this CBZ from offline storage? The original file on your device will not be deleted.")) {
+        const ok = await window.AniDashStorage?.deleteMangaFile(id);
+        toast(ok ? "Offline file removed." : "Could not remove this file.");
+        if (ok && state.route === "/downloads") renderDownloads();
+      }
       return;
     }
     if (target.hasAttribute("data-save-manga")) {
@@ -2761,6 +2835,9 @@
     }
   });
 
+  document.addEventListener("anidash:downloads-changed", () => {
+    if (state.route === "/downloads") renderDownloads();
+  });
   document.addEventListener("change", async event => {
     if (event.target.id === "cbz-file-input") {
       const file = event.target.files?.[0];
