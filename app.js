@@ -6,7 +6,7 @@
   const STORE_KEY = "anidash.watch.web.v1";
   const API = "https://graphql.anilist.co";
   const MEDIA_FIELDS = [
-    "id idMal",
+    "id idMal synonyms",
     "title { romaji english native }",
     "coverImage { extraLarge large medium }",
     "bannerImage format status episodes duration averageScore popularity",
@@ -21,6 +21,10 @@
       return {
         watchlist: raw.watchlist || {},
         history: raw.history || {},
+        mangaList: raw.mangaList || {},
+        libraryStatuses: raw.libraryStatuses || {},
+        localFavorites: raw.localFavorites || {},
+        malStatuses: raw.malStatuses || {},
         manualStreams: raw.manualStreams || {},
         providerManifest: raw.providerManifest || null,
         adultContent: raw.adultContent === true,
@@ -29,7 +33,8 @@
         updatedAt: Number(raw.updatedAt || 0)
       };
     } catch (_) {
-      return { watchlist: {}, history: {}, manualStreams: {}, providerManifest: null, adultContent: false,
+      return { watchlist: {}, history: {}, mangaList: {}, libraryStatuses: {},
+        localFavorites: {}, malStatuses: {}, manualStreams: {}, providerManifest: null, adultContent: false,
         preferences: {}, hiddenCloudEntries: {}, updatedAt: 0 };
     }
   }
@@ -73,7 +78,10 @@
     currentVideo: null,
     hls: null,
     installEvent: null,
-    progressTimer: 0
+    progressTimer: 0,
+    spotlight: [], spotlightIndex: 0, spotlightTimer: null,
+    malEntries: [], libraryTab: "CURRENT", cloudSyncing: false,
+    mangaDetail: null, lastCloudProgressSync: new Map()
   };
 
   const escapeHtml = value => String(value == null ? "" : value).replace(/[&<>"']/g, char => ({
@@ -85,6 +93,44 @@
   const mediaYear = media => media && (media.seasonYear || (media.startDate && media.startDate.year)) || "";
   const imageOf = media => media && media.coverImage && (media.coverImage.extraLarge || media.coverImage.large || media.coverImage.medium) || "";
   const slug = value => String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const UI_ICON_NAMES = new Set(["home","compass","search","manga","library","user","settings",
+    "download","play","bookmark","chevron-right","chevron-left","chevron-down","heart","star",
+    "refresh","sliders","calendar","filter","history","check","info","shield","eye","cloud"]);
+  function uiIcon(name) {
+    const safe = UI_ICON_NAMES.has(name) ? name : "info";
+    return '<svg class="ui-icon" aria-hidden="true"><use href="/icons/ui-sprite.svg#' + safe + '"></use></svg>';
+  }
+  // Faithful port of Android's animeSeasonBadge() in anime_card_components.dart.
+  function animeSeasonBadge(media) {
+    const format = String(media?.format || "").toUpperCase();
+    if (format === "MOVIE") return "M";
+    if (format === "MUSIC") return "";
+    const title = [media?.title?.english, media?.title?.romaji, media?.title?.native,
+      ...(Array.isArray(media?.synonyms) ? media.synonyms : [])].filter(Boolean).join(" ");
+    if (format === "OVA") return "OVA";
+    if (format === "SPECIAL" || /special|chibi/i.test(title)) return "SP";
+    const seasonMatch = /(?:season|series)\s*(\d+)|\b(\d+)(?:st|nd|rd|th)\s+season\b|第\s*(\d+)\s*季/i.exec(title);
+    const partMatch = /(?:part|cour)\s*(\d+)/i.exec(title);
+    if (seasonMatch) {
+      const number = Number(seasonMatch[1] || seasonMatch[2] || seasonMatch[3] || 1);
+      const part = Number(partMatch?.[1] || 0);
+      return part > 1 ? "S" + number + "-" + part : "S" + number;
+    }
+    if (partMatch && Number(partMatch[1]) > 1) return "S1-" + Number(partMatch[1]);
+    if (/\bii\b|season\s*2|2nd\s*season|wu\s*mian\s*ren/i.test(title)) return "S2";
+    return "S1";
+  }
+  const SECTIONS = {
+    airing: { title: "Currently Airing", sort: "TRENDING_DESC", extra: ", status: RELEASING" },
+    trending: { title: "Trending Right Now", sort: "TRENDING_DESC", extra: "", ranked: true },
+    popular: { title: "All Time Popular", sort: "POPULARITY_DESC", extra: "" },
+    top: { title: "Top Rated", sort: "SCORE_DESC", extra: "" },
+    upcoming: { title: "Upcoming Series", sort: "POPULARITY_DESC", extra: ", status: NOT_YET_RELEASED" },
+    movies: { title: "Anime Movies", sort: "POPULARITY_DESC", extra: ", format: MOVIE" },
+    hidden: { title: "Hidden Gems", sort: "SCORE_DESC", extra: ", averageScore_greater: 75, popularity_lesser: 35000" }
+  };
+  const sectionUrl = key => "/section/" + encodeURIComponent(key);
+
 
   function persist() {
     store.updatedAt = Date.now();
@@ -186,20 +232,29 @@
     $("#view").innerHTML = '<section class="loading-state"><div class="loader"></div><p>' + escapeHtml(message || "Loading…") + '</p></section>';
   }
 
-  function card(media) {
-    const progress = store.history[String(media.id)];
+  function card(media, type = "ANIME") {
+    const isManga = type === "MANGA";
+    const progress = !isManga && store.history[String(media.id)];
     const poster = imageOf(media);
-    const pct = progress && progress.duration > 0 ? Math.max(0, Math.min(100, (progress.position / progress.duration) * 100)) : 0;
-    return '<article class="anime-card" data-anime="' + escapeHtml(media.id) + '" tabindex="0" role="button" aria-label="Open ' + escapeHtml(titleOf(media)) + '">' +
+    const pct = progress?.duration > 0 ? Math.max(0, Math.min(100, (progress.position / progress.duration) * 100)) : 0;
+    const tag = isManga ? "" : animeSeasonBadge(media);
+    const typeAttr = isManga ? "data-manga" : "data-anime";
+    const episodes = isManga ? (media.chapters ? media.chapters + " chapters" : media.format) :
+      (media.episodes ? media.episodes + " eps" : media.status);
+    return '<article class="anime-card" ' + typeAttr + '="' + escapeHtml(media.id) +
+      '" tabindex="0" role="button" aria-label="Open ' + escapeHtml(titleOf(media)) + '">' +
       '<div class="poster-wrap">' +
-        (poster ? '<img loading="lazy" src="' + escapeHtml(poster) + '" alt="' + escapeHtml(titleOf(media)) + '">' : '<div class="poster-fallback">' + escapeHtml(titleOf(media)) + '</div>') +
+        (poster ? '<img loading="lazy" src="' + escapeHtml(poster) + '" alt="' + escapeHtml(titleOf(media)) + '">' :
+        '<div class="poster-fallback">' + escapeHtml(titleOf(media)) + '</div>') +
         '<div class="poster-shade"></div>' +
-        (media.averageScore ? '<span class="poster-score">★ ' + formatScore(media.averageScore) + '</span>' : '') +
-        (media.format ? '<span class="poster-format">' + escapeHtml(media.format) + '</span>' : '') +
+        (tag ? '<span class="season-chip">' + escapeHtml(tag) + '</span>' : "") +
+        (media.averageScore ? '<span class="poster-score">' + uiIcon("star") + ' ' + formatScore(media.averageScore) + '</span>' : '') +
       '</div>' +
       '<div class="card-title">' + escapeHtml(titleOf(media)) + '</div>' +
-      '<p class="card-subtitle">' + escapeHtml([mediaYear(media), media.episodes ? media.episodes + " eps" : media.status].filter(Boolean).join(" · ")) + '</p>' +
-      (progress ? '<div class="card-progress"><span style="width:' + pct + '%"></span></div><div class="card-resume">Resume episode ' + escapeHtml(progress.episode || 1) + '</div>' : '') +
+      '<p class="card-subtitle">' + escapeHtml([mediaYear(media), episodes].filter(Boolean).join(" · ")) + '</p>' +
+      (progress ? '<div class="card-progress"><span style="width:' + pct + '%"></span></div><div class="card-resume">Episode ' +
+        escapeHtml(progress.episode || 1) + (progress.position > 0 ? " · " + Math.floor(progress.position / 60) + "m" : "") +
+        '</div>' : '') +
     '</article>';
   }
 
@@ -220,7 +275,7 @@
     if (!rows.length) return "";
     return '<section class="section shelf-section"><div class="section-heading"><div><h2 class="section-title">' + escapeHtml(title) + '</h2>' +
       (note ? '<p class="section-note">' + escapeHtml(note) + '</p>' : '') + '</div>' +
-      (route ? '<button class="section-link" data-route="' + route + '">View all ↗</button>' : '') +
+      (route ? '<button class="section-link" data-route="' + route + '">View all ' + uiIcon("chevron-right") + '</button>' : '') +
       '</div><div class="anime-shelf">' + rows.map(card).join("") + '</div></section>';
   }
 
@@ -245,6 +300,96 @@
       (subtitle ? '<p class="page-subtitle">' + escapeHtml(subtitle) + '</p>' : '') + '</div>' + (extra || '') + '</div>';
   }
 
+
+  function spotlightMarkup(media) {
+    const image = media?.bannerImage || imageOf(media);
+    return '<section class="hero-stage home-hero"><div class="hero-bg" style="background-image:url(&quot;' +
+      escapeHtml(image) + '&quot;)"></div><div class="hero-content">' +
+      '<div class="hero-kicker">Trending on AniDash</div>' +
+      '<h1 class="hero-title">' + escapeHtml(titleOf(media)) + '</h1>' +
+      '<div class="hero-meta"><span>' + uiIcon("star") + ' ' + formatScore(media?.averageScore) + '</span>' +
+      '<span>' + escapeHtml(animeSeasonBadge(media)) + '</span>' +
+      '<span>' + escapeHtml(media?.format || "Anime") + '</span>' +
+      '<span>' + escapeHtml(mediaYear(media)) + '</span></div>' +
+      '<div class="hero-actions"><button class="btn btn-primary" data-anime="' + media.id + '">' +
+        uiIcon("play") + ' Explore Anime</button><button class="btn btn-secondary" data-watchlist="' + media.id + '">' +
+        uiIcon("bookmark") + ' Save</button></div></div></section>';
+  }
+  function showSpotlight(index) {
+    if (state.route !== "/home" || !state.spotlight?.length) return;
+    const items = state.spotlight;
+    state.spotlightIndex = (index + items.length) % items.length;
+    const panel = $("#spotlight-content");
+    if (panel) panel.innerHTML = spotlightMarkup(items[state.spotlightIndex]);
+    $$("[data-spotlight-index]").forEach(el => {
+      el.classList.toggle("active", Number(el.getAttribute("data-spotlight-index")) === state.spotlightIndex);
+    });
+    const count = $("#spotlight-count");
+    if (count) count.textContent = (state.spotlightIndex + 1) + " / " + items.length;
+    scheduleSpotlight();
+  }
+  function scheduleSpotlight() {
+    if (state.spotlightTimer) window.clearTimeout(state.spotlightTimer);
+    if (state.route !== "/home" || !state.spotlight || state.spotlight.length < 2) return;
+    state.spotlightTimer = window.setTimeout(() => {
+      if (state.route !== "/home") return;
+      if (document.visibilityState === "hidden") { scheduleSpotlight(); return; }
+      showSpotlight(state.spotlightIndex + 1);
+    }, 2000);
+    if (state.spotlightTimer?.unref) state.spotlightTimer.unref();
+  }
+  function spotlightPanel(items) {
+    const first = items[0];
+    if (!first) return "";
+    return '<div class="spotlight-shell" aria-label="Trending anime carousel">' +
+      '<div id="spotlight-content">' + spotlightMarkup(first) + '</div>' +
+      '<button class="spotlight-control prev" data-spotlight-prev title="Previous trending anime" aria-label="Previous trending anime">' +
+        uiIcon("chevron-left") + '</button>' +
+      '<button class="spotlight-control next" data-spotlight-next title="Next trending anime" aria-label="Next trending anime">' +
+        uiIcon("chevron-right") + '</button>' +
+      '<div class="spotlight-count" id="spotlight-count">1 / ' + items.length + '</div>' +
+      '<div class="spotlight-dots">' + items.map((_,i) =>
+        '<button data-spotlight-index="' + i + '" class="' + (i===0 ? "active" : "") +
+        '" aria-label="Go to trending anime ' + (i+1) + '"></button>').join("") + '</div></div>';
+  }
+  async function renderSection(key, page = 1) {
+    const config = SECTIONS[key];
+    if (!config) { navigate("/discover"); return; }
+    const token = ++state.token;
+    showLoading("Loading " + config.title + "…");
+    try {
+      const result = await getCollection(config.sort, page, config.ranked ? 25 : 24, config.extra);
+      if (token !== state.token || state.route !== "/section") return;
+      const items = result.media || [];
+      const ranked = config.ranked;
+      const listHtml = ranked
+        ? '<div class="section-rank-list">' + items.map((media, index) =>
+            '<button class="section-rank-item" data-anime="' + media.id + '">' +
+            '<span class="section-rank-num">' + ((page - 1) * 25 + index + 1) + '</span>' +
+            '<img src="' + escapeHtml(imageOf(media)) + '" loading="lazy" alt="">' +
+            '<div><strong>' + escapeHtml(titleOf(media)) + '</strong><p>' +
+              escapeHtml([animeSeasonBadge(media), media.format, mediaYear(media),
+                media.episodes ? media.episodes + " episodes" : ""].filter(Boolean).join(" · ")) +
+            '</p><span class="preview-stat">' + (media.averageScore ? "★ " + formatScore(media.averageScore) : "") +
+            '</span></div>' + uiIcon("chevron-right") + '</button>'
+          ).join("") + '</div>'
+        : grid(items);
+      $("#view").innerHTML =
+        pageHead("EXPLORE ANIME", config.title, "A dedicated collection like the Android app",
+          '<button class="btn btn-quiet" data-route="/home">' + uiIcon("chevron-left") + ' Back</button>') +
+        listHtml + '<div class="section-pager">' +
+        '<button class="btn btn-secondary" data-section-page="' + key + '" data-page="' + (page-1) +
+          '"' + (page <= 1 ? " disabled" : "") + '>Previous</button>' +
+        '<span>Page ' + page + '</span>' +
+        '<button class="btn btn-primary" data-section-page="' + key + '" data-page="' + (page+1) +
+          '"' + (!result.pageInfo?.hasNextPage ? " disabled" : "") + '>Show More</button></div>';
+    } catch (error) {
+      if (token !== state.token) return;
+      $("#view").innerHTML = '<div class="empty-state"><h3>Could not load this section</h3><p>' +
+        escapeHtml(error.message) + '</p><button class="btn btn-primary" data-route="/discover">Browse other sections</button></div>';
+    }
+  }
+
   async function renderHome() {
     const token = ++state.token;
     showLoading("Building your anime home…");
@@ -266,9 +411,12 @@
       if (![...rows].some(list => list.length)) throw new Error("AniList did not return any anime sections. Please retry.");
 
       state.home = { trending, popular, top, airing, upcoming, movies, hidden };
-      const hero = trending[0] || popular[0] || top[0];
-      const heroImage = hero && (hero.bannerImage || imageOf(hero));
-      // Playback progress remains saved, but the user opted to hide the Continue Watching shelf.
+      const spotlightItems = (trending.length ? trending : popular.length ? popular : top).slice(0, 10);
+      state.spotlight = spotlightItems;
+      state.spotlightIndex = 0;
+      const continueItems = Object.values(store.history)
+        .filter(item => item && item.media && item.episode)
+        .sort((a,b) => (b.updatedAt || 0) - (a.updatedAt || 0)).slice(0, 12);
       const watchlistItems = Object.values(store.watchlist).slice(0, 12);
 
       const quickLinks = '<div class="home-shortcuts">' +
@@ -281,23 +429,20 @@
       const hour = new Date().getHours();
       const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
       $("#view").innerHTML =
-        '<section class="home-welcome"><div><span class="welcome-eyebrow">' + greeting + '</span><h1 class="welcome-title">AniDash</h1></div><div class="welcome-actions"><button data-route="/account" aria-label="Your profile">◎</button><button data-route="/settings" aria-label="Settings">⚙</button></div></section>' +
-        '<div class="trending-label">★ &nbsp;Trending anime</div>' +
-        (hero ? '<section class="hero-stage home-hero"><div class="hero-bg" style="background-image:url(&quot;' + escapeHtml(heroImage) + '&quot;)"></div><div class="hero-content">' +
-          '<div class="hero-kicker">Your next anime obsession</div><h1 class="hero-title">' + escapeHtml(titleOf(hero)) + '</h1>' +
-          '<div class="hero-meta"><span>★ ' + formatScore(hero.averageScore) + '</span><span>' + escapeHtml(hero.format || "Anime") + '</span><span>' + escapeHtml(mediaYear(hero)) + '</span><span>' + escapeHtml(hero.status || "") + '</span></div>' +
-          '<p class="hero-description">' + escapeHtml(cleanText(hero.description) || "Explore the story, browse episodes and discover more anime.") + '</p>' +
-          '<div class="hero-actions"><button class="btn btn-primary" data-anime="' + hero.id + '">Explore anime <span>→</span></button><button class="btn btn-secondary" data-watchlist="' + hero.id + '">♡ Add to list</button></div>' +
-          '</div></section>' : '') +
+        '<section class="home-welcome"><div><span class="welcome-eyebrow">' + greeting + '</span><h1 class="welcome-title">AniDash</h1></div><div class="welcome-actions"><button data-route="/account" aria-label="Your profile">' + uiIcon("user") + '</button><button data-route="/settings" aria-label="Settings">' + uiIcon("settings") + '</button></div></section>' +
+        '<div class="trending-label">' + uiIcon("star") + ' Trending anime</div>' +
+        spotlightPanel(spotlightItems) +
         quickLinks +
-        shelf("Currently airing", "Fresh episodes from currently releasing series.", airing.slice(0, 14), "/discover") +
-        shelf("Trending right now", "The series viewers are talking about.", trending.slice(0, 14), "/discover") +
-        shelf("Popular with fans", "Big adventures, favourites and crowd-pleasers.", popular.slice(0, 14), "/discover") +
+        resumeShelf(continueItems) +
+        shelf("Currently airing", "Fresh episodes from currently releasing series.", airing.slice(0, 14), sectionUrl("airing")) +
+        shelf("Trending right now", "The series viewers are talking about.", trending.slice(0, 14), sectionUrl("trending")) +
+        shelf("Popular with fans", "Big adventures, favourites and crowd-pleasers.", popular.slice(0, 14), sectionUrl("popular")) +
         (watchlistItems.length ? shelf("From your watchlist", "Saved anime, ready when you are.", watchlistItems, "/library") : '') +
-        shelf("Coming soon", "Upcoming anime to add to your list.", upcoming.slice(0, 14), "/discover") +
-        shelf("Anime movies", "Feature-length stories for your next movie night.", movies.slice(0, 14), "/discover") +
-        shelf("Top rated", "Highly rated titles from the AniList catalogue.", top.slice(0, 14), "/discover") +
-        shelf("Hidden gems", "Well-rated series beyond the most popular charts.", hidden.slice(0, 14), "/discover");
+        shelf("Coming soon", "Upcoming anime to add to your list.", upcoming.slice(0, 14), sectionUrl("upcoming")) +
+        shelf("Anime movies", "Feature-length stories for your next movie night.", movies.slice(0, 14), sectionUrl("movies")) +
+        shelf("Top rated", "Highly rated titles from the AniList catalogue.", top.slice(0, 14), sectionUrl("top")) +
+        shelf("Hidden gems", "Well-rated series beyond the most popular charts.", hidden.slice(0, 14), sectionUrl("hidden"));
+      scheduleSpotlight();
     } catch (error) {
       if (token !== state.token) return;
       $("#view").innerHTML = '<div class="empty-state"><div class="empty-icon">◌</div><h3>Could not load the catalogue</h3><p>' + escapeHtml(error.message) + '</p><button class="btn btn-primary" data-route="/home">Try again</button></div>';
@@ -318,12 +463,12 @@
       ];
       const home = state.home;
       const extraRows = (popular, upcoming) =>
-        shelf("All Time Popular", "", popular, "/discover") +
-        shelf("Upcoming Anime", "", upcoming, "/discover");
+        shelf("All Time Popular", "", popular, sectionUrl("popular")) +
+        shelf("Upcoming Anime", "", upcoming, sectionUrl("upcoming"));
       $("#view").innerHTML =
         pageHead("", "Discover Anime", "Find your next favorite series") +
         '<button class="discover-search-launch" data-route="/search"><span>⌕</span>Search anime titles…</button>' +
-        shelf(sort === "TRENDING_DESC" ? "Trending Now" : sort === "POPULARITY_DESC" ? "Most Popular" : "Top Rated", "", (data.media || []).slice(0, 14), "/discover") +
+        shelf(sort === "TRENDING_DESC" ? "Trending Now" : sort === "POPULARITY_DESC" ? "Most Popular" : "Top Rated", "", (data.media || []).slice(0, 14), sectionUrl(sort === "TRENDING_DESC" ? "trending" : sort === "POPULARITY_DESC" ? "popular" : "top")) +
         '<div id="discover-extras">' + (home ? extraRows(home.popular.slice(0, 12), home.upcoming.slice(0, 12)) : '') + '</div>' +
         '<section class="section"><div class="section-heading"><h2 class="section-title">Explore anime</h2></div>' +
         '<div class="toolbar"><select class="select-control" id="discover-sort">' + options.map(o =>
@@ -366,6 +511,143 @@
     }
     const input = $("#search-page-input");
     if (input) input.focus({ preventScroll: true });
+  }
+
+
+  const MANGA_FIELDS = [
+    "id title { romaji english native } synonyms",
+    "coverImage { extraLarge large medium } bannerImage format status chapters volumes",
+    "genres averageScore popularity siteUrl isAdult",
+    "description(asHtml: false) externalLinks { url site type language }"
+  ].join(" ");
+  const MANGA_SECTIONS = {
+    trending: { title:"Trending Manga", sort:"TRENDING_DESC", extra:"" },
+    popular: { title:"Popular Manga", sort:"POPULARITY_DESC", extra:"" },
+    upcoming: { title:"Upcoming Manga", sort:"POPULARITY_DESC", extra:", status: NOT_YET_RELEASED" },
+    top: { title:"Top Rated Manga", sort:"SCORE_DESC", extra:"" }
+  };
+  async function getMangaCollection(sort, page = 1, perPage = 20, extra = "", searchTerm = "") {
+    if (searchTerm) {
+      const query = "query ($search:String!,$page:Int!,$perPage:Int!){ Page(page:$page,perPage:$perPage){pageInfo{hasNextPage currentPage} media(type:MANGA,search:$search,sort:SEARCH_MATCH,isAdult:false){" + MANGA_FIELDS + "}}}";
+      const data = await gql(query, { search:searchTerm, page, perPage });
+      return data.Page;
+    }
+    const query = "query ($page:Int!,$perPage:Int!){ Page(page:$page,perPage:$perPage){pageInfo{hasNextPage currentPage} media(type:MANGA,sort:" +
+      sort + ",isAdult:false" + extra + "){" + MANGA_FIELDS + "}}}";
+    const data = await gql(query, { page, perPage });
+    return data.Page;
+  }
+  function mangaGrid(items) {
+    if (!items?.length) return '<div class="empty-state"><h3>No manga found</h3><p>Try a different category or search term.</p></div>';
+    return '<div class="anime-grid">' + items.map(item => card(item, "MANGA")).join("") + '</div>';
+  }
+  function mangaShelf(title, rows, sectionKey) {
+    if (!rows?.length) return "";
+    return '<section class="section shelf-section"><div class="section-heading"><h2 class="section-title">' +
+      escapeHtml(title) + '</h2><button class="section-link" data-route="/manga-section/' + sectionKey +
+      '">View all ' + uiIcon("chevron-right") + '</button></div><div class="anime-shelf">' +
+      rows.map(item => card(item, "MANGA")).join("") + '</div></section>';
+  }
+  async function renderManga(term = "") {
+    const token = ++state.token;
+    showLoading("Opening Manga Library…");
+    const query = String(term || "").trim();
+    try {
+      const results = query
+        ? await Promise.all([getMangaCollection("SEARCH_MATCH",1,24,"",query)])
+        : await Promise.all([
+          getMangaCollection("TRENDING_DESC",1,15),
+          getMangaCollection("POPULARITY_DESC",1,15),
+          getMangaCollection("POPULARITY_DESC",1,15,", status: NOT_YET_RELEASED")
+        ]);
+      if (token !== state.token || state.route !== "/manga") return;
+      const rows = results.map(item => item?.media || []);
+      $("#view").innerHTML = pageHead("", "Manga", "Discover manga, save reading lists and read CBZ files locally") +
+        '<form id="manga-search-form" class="search-box-large">' + uiIcon("search") +
+        '<input id="manga-search-input" autocomplete="off" aria-label="Search manga" placeholder="Search manga titles…" value="' +
+        escapeHtml(query) + '"><button class="btn btn-primary" type="submit">Search</button></form>' +
+        '<div class="manga-topline"><div class="feature-chip">' + uiIcon("manga") +
+        ' AniList manga catalogue</div><button class="btn btn-secondary" data-open-cbz>' +
+        uiIcon("manga") + ' Read CBZ file</button></div>' +
+        '<input id="cbz-file-input" type="file" accept=".cbz,application/zip" style="display:none">' +
+        (query ? '<section class="section"><h2 class="section-title">Search results</h2>' + mangaGrid(rows[0]) + '</section>'
+         : mangaShelf("Trending Manga",rows[0],"trending") +
+           mangaShelf("All Time Popular",rows[1],"popular") +
+           mangaShelf("Upcoming Manga",rows[2],"upcoming")) +
+        '<p class="official-read-note">Read chapters through official publisher links when available. Local CBZ reading is supported for files you own.</p>';
+    } catch (error) {
+      if (token !== state.token) return;
+      $("#view").innerHTML = '<div class="empty-state"><h3>Could not load manga</h3><p>' +
+        escapeHtml(error.message) + '</p><button class="btn btn-primary" data-route="/manga">Retry</button></div>';
+    }
+  }
+  async function renderMangaSection(sectionKey, page = 1) {
+    const section = MANGA_SECTIONS[sectionKey];
+    if (!section) { navigate("/manga"); return; }
+    const token = ++state.token;
+    showLoading("Loading " + section.title + "…");
+    try {
+      const result = await getMangaCollection(section.sort,page,24,section.extra);
+      if (token !== state.token || state.route !== "/manga-section") return;
+      $("#view").innerHTML = pageHead("MANGA",section.title,"Browse all titles in this collection",
+        '<button class="btn btn-secondary" data-route="/manga">' + uiIcon("chevron-left") + ' Back to Manga</button>') +
+        mangaGrid(result?.media || []) +
+        '<div class="section-pager"><button class="btn btn-secondary" data-manga-section-page="' + sectionKey +
+        '" data-page="' + (page-1) + '"' + (page<=1?" disabled":"") + '>Previous</button>' +
+        '<span>Page ' + page + '</span><button class="btn btn-primary" data-manga-section-page="' +
+        sectionKey + '" data-page="' + (page+1) + '"' +
+        (!result.pageInfo?.hasNextPage?" disabled":"") + '>Next</button></div>';
+    } catch (error) {
+      if (token !== state.token) return;
+      $("#view").innerHTML = '<div class="empty-state"><h3>Manga unavailable</h3><p>' +
+      escapeHtml(error.message) + '</p></div>';
+    }
+  }
+  async function renderMangaDetails(id) {
+    const token = ++state.token;
+    showLoading("Loading manga details…");
+    try {
+      const data = await gql("query ($id:Int!){Media(id:$id,type:MANGA){" + MANGA_FIELDS + "}}",{id:Number(id)});
+      if (token !== state.token || state.route !== "/manga-detail") return;
+      const media = data?.Media;
+      if (!media) throw new Error("Manga not found");
+      state.mangaDetail = media;
+      const allowedDomains = ["mangaplus.shueisha.co.jp","viz.com","kodansha.us",
+        "bookwalker.jp","global.bookwalker.jp","webtoons.com","mangaupdates.com",
+        "comic-walker.com","yenpress.com","tapas.io","manga-up.com"];
+      const official = (media.externalLinks || []).filter(link => {
+        try {
+          const url = new URL(link.url);
+          return url.protocol === "https:" && allowedDomains.some(host => url.hostname === host || url.hostname.endsWith("." + host));
+        } catch (_) {return false;}
+      });
+      const cover = imageOf(media);
+      $("#view").innerHTML = '<div class="details-hero"><div class="details-banner" style="background-image:url(&quot;' +
+        escapeHtml(media.bannerImage || cover) + '&quot;)"></div><div class="details-content">' +
+        '<img class="details-poster" src="' + escapeHtml(cover) + '" alt="">' +
+        '<div class="details-copy"><div class="eyebrow">MANGA DETAILS</div><h1 class="details-title">' +
+        escapeHtml(titleOf(media)) + '</h1><div class="details-meta"><span class="meta-chip">' +
+        escapeHtml(media.format || "Manga") + '</span><span class="meta-chip">' +
+        escapeHtml(media.chapters ? media.chapters + " Chapters" : "Ongoing chapters") +
+        '</span><span class="meta-chip">' + escapeHtml(media.status || "") +
+        '</span></div><p class="manga-detail-description">' + escapeHtml(cleanText(media.description) || "No description available.") +
+        '</p><div class="account-actions">' +
+        (official.length ? official.slice(0,3).map(link =>
+          '<a class="btn btn-primary" rel="noopener noreferrer" target="_blank" href="' + escapeHtml(link.url) +
+          '">' + uiIcon("manga") + ' Read at ' + escapeHtml(link.site || "Publisher") + '</a>').join("") : '') +
+        '<button class="btn btn-secondary" data-save-manga="' + media.id + '">' +
+          uiIcon("bookmark") + ' Save to reading list</button>' +
+        '<button class="btn btn-quiet" data-open-cbz>' + uiIcon("manga") + ' Open local CBZ</button>' +
+        '<input id="cbz-file-input" type="file" accept=".cbz,application/zip" style="display:none"></div>' +
+        '<p class="official-read-note">' + (official.length ?
+          'Publisher links open the licensed reading site. Local CBZ files never leave your device.' :
+          'No verified publisher chapter URL was listed by AniList; use a legitimate copy or open your own CBZ file.') +
+        '</p></div></div></div>';
+    } catch (error) {
+      if (token !== state.token) return;
+      $("#view").innerHTML = '<div class="empty-state"><h3>Manga details unavailable</h3><p>' +
+        escapeHtml(error.message) + '</p><button class="btn btn-secondary" data-route="/manga">Back</button></div>';
+    }
   }
 
   const BUILTIN_PROVIDERS = [
@@ -955,25 +1237,105 @@
     return null;
   }
 
+  function importCloudPosition(media, entry, source) {
+    if (!media?.id || !entry) return;
+    const key = String(media.id);
+    let episode, seconds, duration, updatedAt;
+    if (source === "ANILIST") {
+      const resumed = window.AniDashAccount?.resumeFromEntry(entry, Number(media.episodes || 0));
+      if (!resumed) return;
+      ({ episode, seconds, duration, updatedAt } = resumed);
+    } else {
+      const watched = Number(entry?.list_status?.num_episodes_watched || 0);
+      episode = Math.max(1, watched + 1);
+      seconds = 0;
+      duration = 0;
+      updatedAt = 0;
+    }
+    if (!Number.isSafeInteger(episode) || episode < 1) return;
+    const local = store.history[key];
+    // Avoid overwriting a newer partial locally with an older cloud update.
+    if (local && Number(local.episode) > Number(episode)) return;
+    if (local && Number(local.episode) === Number(episode) &&
+        Number(local.position || 0) > Number(seconds || 0) &&
+        Number(local.updatedAt || 0) > Number(updatedAt || 0)) return;
+    store.history[key] = {
+      media: {
+        id: media.id, idMal: media.idMal, title: media.title, coverImage: media.coverImage,
+        bannerImage: media.bannerImage, format: media.format, status: media.status,
+        episodes: media.episodes, averageScore: media.averageScore, seasonYear: media.seasonYear
+      },
+      episode, episodeTitle: "Episode " + episode,
+      position: seconds || 0, duration: duration || 0,
+      updatedAt: updatedAt || 0,
+      syncedFrom: source
+    };
+  }
   async function syncAniListLibrary() {
     const account = window.AniDashAccount;
-    if (!account || !account.authenticated()) return;
+    if (!account?.authenticated()) return null;
     try {
       const cloudEntries = await account.list();
-      let changed = false;
       for (const entry of cloudEntries) {
         const id = String(entry.mediaId);
-        if (store.hiddenCloudEntries[id] || !entry.media || store.watchlist[id]) continue;
-        store.watchlist[id] = entry.media;
-        changed = true;
+        if (!entry.media) continue;
+        store.libraryStatuses[id] = entry.status || "PLANNING";
+        if (!store.hiddenCloudEntries[id] && !store.watchlist[id]) store.watchlist[id] = entry.media;
+        if (entry.status === "CURRENT" || entry.status === "REPEATING") {
+          importCloudPosition(entry.media, entry, "ANILIST");
+        }
       }
-      // Guest data is never discarded on account sign-in.
-      if (changed) persist();
+      try {
+        const favorites = await account.favorites();
+        for (const id of favorites) store.localFavorites[String(id)] = true;
+      } catch (_) {} // Favourites are optional; other library sections still work.
+      persist();
       if (state.route === "/library") renderLibrary();
+      if (state.route === "/history") renderHistory();
       if (state.route === "/account") renderAccount();
+      if (state.route === "/home") renderHome();
       return cloudEntries;
     } catch (error) {
       toast("AniList sync unavailable: " + error.message);
+      return null;
+    }
+  }
+  async function syncMalLibrary() {
+    const mal = window.AniDashMal;
+    if (!mal?.authenticated()) return null;
+    try {
+      const remote = await mal.list();
+      const mapped = [];
+      const ids = [...new Set(remote.map(item => Number(item?.node?.id)).filter(Number.isSafeInteger))];
+      for (let i = 0; i < ids.length; i += 40) {
+        const data = await gql("query ($ids:[Int]) { Page(perPage:50) { media(type:ANIME,idMal_in:$ids) { " +
+          MEDIA_FIELDS + " } } }", { ids: ids.slice(i,i+40) });
+        mapped.push(...(data?.Page?.media || []));
+      }
+      const byMalId = new Map(mapped.map(media => [Number(media.idMal), media]));
+      state.malEntries = remote;
+      const statuses = { watching:"CURRENT",completed:"COMPLETED",on_hold:"PAUSED",
+        dropped:"DROPPED",plan_to_watch:"PLANNING" };
+      for (const entry of remote) {
+        const media = byMalId.get(Number(entry?.node?.id));
+        if (!media) continue; // Unmapped MAL entries remain accessible on MAL's own website.
+        const key = String(media.id);
+        const status = statuses[entry?.list_status?.status] || "PLANNING";
+        store.malStatuses[key] = status;
+        if (!window.AniDashAccount?.getEntry(media.id)) store.libraryStatuses[key] = status;
+        if (!store.hiddenCloudEntries[key] && !store.watchlist[key]) store.watchlist[key] = media;
+        if (status === "CURRENT" && !window.AniDashAccount?.getEntry(media.id)) {
+          importCloudPosition(media, entry, "MAL");
+        }
+      }
+      persist();
+      if (state.route === "/library") renderLibrary();
+      if (state.route === "/history") renderHistory();
+      if (state.route === "/account") renderAccount();
+      if (state.route === "/home") renderHome();
+      return remote;
+    } catch (error) {
+      toast("MyAnimeList sync unavailable: " + error.message);
       return null;
     }
   }
@@ -983,6 +1345,8 @@
     const account = window.AniDashAccount;
     if (store.watchlist[key]) {
       delete store.watchlist[key];
+      delete store.libraryStatuses[key];
+      delete store.localFavorites[key];
       store.hiddenCloudEntries[key] = true;
       persist();
       toast("Removed from this device's watchlist.");
@@ -1000,6 +1364,7 @@
         return;
       }
       store.watchlist[key] = media;
+      store.libraryStatuses[key] = "PLANNING";
       delete store.hiddenCloudEntries[key];
       persist();
       toast("Added to your watchlist and saved on this device.");
@@ -1667,10 +2032,13 @@
           }
         } else toast("Episode finished.");
       }
-      const account = window.AniDashAccount;
-      if (setting("trackProgress") && account?.authenticated()) {
-        account.saveToList(state.player.media.id, "CURRENT", Number(state.player.episode.number))
-          .catch(() => toast("Progress saved locally; AniList sync unavailable."));
+      // Exact AniList notes are queued by savePlaybackProgress().
+      const mal = window.AniDashMal;
+      const completed = Number(state.player.episode.number);
+      if (setting("trackProgress") && mal?.authenticated() && state.player.media.idMal) {
+        mal.updateProgress(state.player.media.idMal, completed,
+          state.player.media.episodes && completed >= Number(state.player.media.episodes) ? "completed" : "watching"
+        ).catch(() => toast("Saved locally; MAL episode sync unavailable."));
       }
     };
   }
@@ -1699,19 +2067,81 @@
       duration,
       updatedAt: now
     };
+    if (!store.libraryStatuses[String(media.id)] ||
+        store.libraryStatuses[String(media.id)] === "PLANNING") {
+      store.libraryStatuses[String(media.id)] = "CURRENT";
+    }
+    if (ended && media.episodes && Number(episode.number) >= Number(media.episodes)) {
+      store.libraryStatuses[String(media.id)] = "COMPLETED";
+    }
     persist();
+    const account = window.AniDashAccount;
+    if (account?.authenticated()) {
+      const key = String(media.id);
+      const previous = state.lastCloudProgressSync.get(key);
+      const position = Math.max(0,Math.floor(ended ? duration : currentTime));
+      const same = previous && previous.episode === Number(episode.number) &&
+        previous.position === position && now - previous.time < 10000;
+      if (!same && (force || ended || !previous || now - previous.time >= 10000)) {
+        state.lastCloudProgressSync.set(key,{episode:Number(episode.number),position,time:now});
+        account.syncPosition(media.id,Number(episode.number),position,Math.floor(duration),Boolean(ended))
+          .catch(error => {
+            if (state.route === "/watch") toast("Saved locally; AniList sync failed: " + error.message);
+          });
+      }
+    }
   }
 
 
+  const LIBRARY_TABS = [
+    ["CURRENT", "Watching"], ["COMPLETED", "Completed"], ["PAUSED", "On Hold"],
+    ["PLANNING", "Plan to Watch"], ["DROPPED", "Dropped"],
+    ["REPEATING", "Repeating"], ["FAVORITES", "Favorites"]
+  ];
+  function libraryStatus(media) {
+    const key = String(media.id);
+    return store.libraryStatuses[key] || (store.history[key] ? "CURRENT" : "PLANNING");
+  }
   function renderLibrary() {
-    const items = Object.values(store.watchlist).sort((a, b) => titleOf(a).localeCompare(titleOf(b)));
-    const online = window.AniDashAccount && window.AniDashAccount.authenticated();
+    const chosen = state.libraryTab || "CURRENT";
+    const items = Object.values(store.watchlist).filter(item => item?.id);
+    const counts = Object.fromEntries(LIBRARY_TABS.map(([id]) => [id, items.filter(item =>
+      id === "FAVORITES" ? store.localFavorites[String(item.id)] : libraryStatus(item) === id
+    ).length]));
+    const filtered = items.filter(item => chosen === "FAVORITES" ?
+      store.localFavorites[String(item.id)] : libraryStatus(item) === chosen)
+      .sort((a,b) => titleOf(a).localeCompare(titleOf(b)));
+    const online = window.AniDashAccount?.authenticated() || window.AniDashMal?.authenticated();
+    const statusOptions = item => LIBRARY_TABS.filter(([value]) => value !== "FAVORITES").map(([value,label]) =>
+      '<option value="' + value + '"' + (libraryStatus(item) === value ? " selected" : "") +
+      '>' + escapeHtml(label) + '</option>').join("");
+    const cells = filtered.length ? '<div class="anime-grid">' + filtered.map(item => {
+      const favorite = Boolean(store.localFavorites[String(item.id)]);
+      return '<div class="library-item">' + card(item) +
+        '<div class="library-action-row"><select class="select-control status-select" aria-label="Tracking status for ' +
+        escapeHtml(titleOf(item)) + '" data-library-status="' + item.id + '">' + statusOptions(item) +
+        '</select><button class="btn btn-quiet" aria-label="' + (favorite ? "Unfavorite" : "Favorite") +
+        ' ' + escapeHtml(titleOf(item)) + '" data-library-favorite="' + item.id + '">' +
+        uiIcon("heart") + (favorite ? ' Saved' : ' Favorite') + '</button></div></div>';
+    }).join("") + '</div>' :
+      '<div class="empty-state"><h3>No ' + escapeHtml(LIBRARY_TABS.find(([id]) => id === chosen)?.[1] || "anime") +
+      ' titles yet</h3><p>Add titles from discovery or import your AniList / MAL library.</p>' +
+      '<button class="btn btn-primary" data-route="/discover">Browse anime</button></div>';
     $("#view").innerHTML =
-      pageHead("", "Your Library", "Your saved anime watchlist") +
-      '<div class="library-save-status">' + (online
-        ? '✓ Saved on this device · AniList sync available'
-        : '✓ Saved on this device · <button class="text-button" data-route="/account">Sign in for cloud sync</button>') + '</div>' +
-      (items.length ? grid(items) : '<div class="empty-state"><div class="empty-icon">♡</div><h3>Your watchlist is empty</h3><p>Add an anime to save it here. You can export a backup from Settings.</p><button class="btn btn-primary" data-route="/discover">Explore anime</button></div>');
+      pageHead("", "Your Library", "Watching, completed, on hold, plan to watch, dropped and favorites") +
+      '<div class="library-toolbar"><div class="library-save-status">' +
+      (online ? uiIcon("cloud") + ' Connected to tracking services · synced to this browser'
+        : uiIcon("bookmark") + ' Saved locally · <button class="text-button" data-route="/account">Connect AniList or MAL</button>') +
+      '</div><div class="account-actions"><button class="btn btn-quiet" data-route="/history">' +
+      uiIcon("history") + ' Continue Watching</button>' +
+      (online ? '<button class="btn btn-quiet" data-sync-all>' + uiIcon("refresh") + ' Sync</button>' : '') +
+      '</div></div><div class="status-tabs" role="tablist" aria-label="Anime library statuses">' +
+      LIBRARY_TABS.map(([value,label]) =>
+        '<button role="tab" aria-selected="' + (chosen===value?"true":"false") +
+        '" data-library-tab="' + value + '" class="' + (chosen===value?"active":"") + '">' +
+        escapeHtml(label) + ' ' + counts[value] + '</button>').join("") +
+      '</div>' + cells +
+      '<p class="list-status-note">AniList sync saves list statuses and watch positions in tracker notes. MyAnimeList syncs watched episode counts. Exact playback positions from Android require AniList synchronization.</p>';
   }
 
   function renderHistory() {
@@ -1730,39 +2160,66 @@
   function refreshProfileChip(user) {
     const name = $(".profile-name");
     const avatar = $(".profile-avatar");
-    if (name) name.textContent = user?.name || "Sign in";
+    const malUser = window.AniDashMal?.currentUser();
+    const active = user || malUser;
+    if (name) name.textContent = active?.name || "Sign in";
     if (avatar) {
-      const source = user?.avatar?.medium || user?.avatar?.large;
+      const source = user?.avatar?.medium || user?.avatar?.large || malUser?.picture;
       if (source && /^https:\/\//.test(source)) {
         avatar.innerHTML = '<img src="' + escapeHtml(source) + '" alt="">';
       } else {
-        avatar.textContent = user?.name ? user.name.slice(0, 1).toUpperCase() : "◎";
+        avatar.textContent = active?.name ? active.name.slice(0, 1).toUpperCase() : "◎";
       }
     }
   }
 
   function renderAccount() {
-    const account = window.AniDashAccount;
-    const user = account?.currentUser();
-    const configured = account?.configured();
-    const avatarUrl = user?.avatar?.large || user?.avatar?.medium || "";
-    const avatar = avatarUrl && /^https:\/\//.test(avatarUrl)
+    const anilist = window.AniDashAccount;
+    const mal = window.AniDashMal;
+    const user = anilist?.currentUser();
+    const malUser = mal?.currentUser();
+    const avatarUrl = user?.avatar?.large || user?.avatar?.medium || malUser?.picture || "";
+    const avatar = avatarUrl.startsWith("https://")
       ? '<img src="' + escapeHtml(avatarUrl) + '" alt="">'
-      : escapeHtml(user?.name?.slice(0, 1) || "◎");
-    const header = '<section class="account-hero"><div class="account-avatar">' + avatar + '</div><div><h2>' +
-      escapeHtml(user?.name || "Your AniDash account") + '</h2><p>' +
-      (user ? 'Connected to AniList · Your lists can sync across devices' : 'Sign in to sync anime lists between devices') +
-      '</p></div></section>';
-    const guestActions = '<div class="account-actions"><button class="btn btn-primary" data-login-anilist' +
-      (configured ? "" : " disabled") + '>Continue with AniList</button><button class="btn btn-secondary" data-route="/library">Use guest watchlist</button></div>' +
-      (!configured ? '<div class="notice">AniList sign-in needs a one-time website OAuth client ID configured by the site owner. Guest watchlists still save locally.</div>' : '') +
-      '<div class="account-info"><strong>Why AniList?</strong><p>Official account authorization without sharing your password with AniDash. It lets AniDash read your anime lists and save tracking progress after supported episodes.</p><p>AniKoto and HiAnime website passwords are not accepted by AniDash. JustAnime does not require a separate account to watch.</p></div>';
-    const connectedActions = '<div class="account-actions"><button class="btn btn-primary" data-sync-library>Sync AniList now</button>' +
-      '<a class="btn btn-secondary" href="' + escapeHtml(user?.siteUrl || "https://anilist.co") + '" rel="noopener noreferrer" target="_blank">Open AniList profile</a>' +
-      '<button class="btn btn-quiet" data-logout-anilist>Sign out</button></div>' +
-      '<div class="account-info"><strong>Account & privacy</strong><p>Your browser saves a local backup. AniList can sync lists and completed-episode progress, not the precise second where a video paused. Your AniList login token is stored in this browser; sign out on a shared device.</p><p>Provider websites maintain their own accounts. AniDash never asks for their passwords.</p></div>';
-    $("#view").innerHTML = pageHead("ACCOUNT", "Profile", user ? "Manage your connected AniList account" : "Sign in or continue as guest") +
-      header + (user ? connectedActions : guestActions);
+      : escapeHtml((user?.name || malUser?.name || "A").slice(0,1).toUpperCase());
+    const display = user?.name || malUser?.name || "Your AniDash Account";
+    const anilistButton = user
+      ? '<div class="account-name"><span class="connected-label">' + uiIcon("check") +
+        ' Connected as ' + escapeHtml(user.name) + '</span></div>' +
+        '<button class="btn btn-secondary" data-sync-library>' + uiIcon("refresh") + ' Sync AniList</button>' +
+        '<button class="btn btn-quiet" data-logout-anilist>Sign out of AniList</button>'
+      : '<button class="btn btn-primary" data-login-anilist' +
+        (anilist?.configured() ? "" : " disabled") + '>Continue with AniList</button>';
+    const malButton = malUser
+      ? '<div class="account-name"><span class="connected-label">' + uiIcon("check") +
+        ' Connected as ' + escapeHtml(malUser.name) + '</span></div>' +
+        '<button class="btn btn-secondary" data-sync-mal>' + uiIcon("refresh") + ' Sync MAL</button>' +
+        '<button class="btn btn-quiet" data-logout-mal>Sign out of MAL</button>'
+      : '<button class="btn btn-primary" data-login-mal' +
+        (mal?.configured() ? "" : " disabled") + '>Continue with MyAnimeList</button>';
+    $("#view").innerHTML =
+      pageHead("", "Your Account", "Connect one or both tracking services, just like AniDash Android") +
+      '<section class="account-hero"><div class="account-avatar">' + avatar + '</div><div><h2>' +
+        escapeHtml(display) + '</h2><p>' +
+        (user || malUser ? "Your account connections and synced anime library" : "Sign in to bring your anime library to every device") +
+        '</p></div></section>' +
+      '<div class="account-providers">' +
+        '<section class="account-provider"><div class="account-icon">AL</div><strong>AniList</strong>' +
+        '<p>Sync watching lists, favourites and exact episode timestamps via Android-compatible progress notes.</p>' +
+        '<div class="account-actions">' + anilistButton + '</div>' +
+        (!user && !anilist?.configured()
+          ? '<span class="preference-help">Site owner must set ANILIST_WEB_CLIENT_ID on Vercel.</span>' : '') +
+        '</section>' +
+        '<section class="account-provider mal"><div class="account-icon">MAL</div><strong>MyAnimeList</strong>' +
+        '<p>Import your anime list and sync watched-episode counts using official MAL OAuth with PKCE.</p>' +
+        '<div class="account-actions">' + malButton + '</div>' +
+        (!malUser && !mal?.configured()
+          ? '<span class="preference-help">Site owner must configure MAL_WEB_CLIENT_ID (and MAL_WEB_CLIENT_SECRET if required).</span>' : '') +
+        '</section></div>' +
+      '<div class="account-info"><strong>One AniDash library</strong>' +
+      '<p>Connect AniList and/or MyAnimeList. AniDash merges their lists without deleting your local entries. Your passwords are entered only on the providers’ official sign-in pages.</p>' +
+      '<p>For an exact 5-minute handoff from your Android app to this website, enable AniList tracking in the app. Android writes a <code>shx:ep=…&sec=…</code> note; AniDash Watch reads it and seeks to that timestamp. MAL currently shares completed-episode counts, not precise seconds.</p>' +
+      '<button class="btn btn-quiet" data-route="/library">' + uiIcon("library") + ' Open Library</button></div>';
   }
 
   function prefSelect(key, options, help) {
@@ -1861,7 +2318,7 @@
   }
 
   function updateActiveNav(route) {
-    const active = route === "/watch" ? "/discover" : route;
+    const active = route === "/watch" || route === "/section" ? "/discover" : route;
     $$("[data-route]").forEach(item => {
       const value = item.getAttribute("data-route");
       item.classList.toggle("active", value === active || (route.startsWith("/anime") && value === "/discover"));
@@ -1870,6 +2327,10 @@
 
   async function route() {
     const hash = location.hash.replace(/^#/, "") || "/home";
+    if (state.route === "/home" && !hash.startsWith("/home") && state.spotlightTimer) {
+      window.clearTimeout(state.spotlightTimer);
+      state.spotlightTimer = null;
+    }
     const parts = hash.split("?")[0].split("/").filter(Boolean);
     const current = "/" + (parts[0] || "home");
     state.route = current;
@@ -1877,12 +2338,25 @@
     updateActiveNav(current);
     if (current === "/home") return renderHome();
     if (current === "/discover") return renderDiscover();
+    if (current === "/manga") {
+      const params = new URLSearchParams(hash.split("?")[1] || "");
+      return renderManga(params.get("q") || "");
+    }
+    if (current === "/manga-section" && parts[1]) {
+      const params = new URLSearchParams(hash.split("?")[1] || "");
+      return renderMangaSection(parts[1], Math.max(1, Number(params.get("page") || 1)));
+    }
+    if (current === "/manga-detail" && parts[1]) return renderMangaDetails(parts[1]);
+    if (current === "/section" && parts[1]) {
+      const params = new URLSearchParams(hash.split("?")[1] || "");
+      return renderSection(parts[1], Math.max(1, Math.min(250, Number(params.get("page") || 1))));
+    }
     if (current === "/search") {
       const params = new URLSearchParams(hash.split("?")[1] || "");
       return renderSearch(params.get("q") || "");
     }
     if (current === "/library") return renderLibrary();
-    if (current === "/history") { location.hash = "#/library"; return; }
+    if (current === "/history") return renderHistory();
     if (current === "/account") return renderAccount();
     if (current === "/settings") return renderSettings();
     if (current === "/anime" && parts[1]) return renderAnime(parts[1]);
@@ -1915,6 +2389,66 @@
       navigate("/anime/" + target.getAttribute("data-anime"));
       return;
     }
+    if (target.hasAttribute("data-manga")) {
+      navigate("/manga-detail/" + target.getAttribute("data-manga"));
+      return;
+    }
+    if (target.hasAttribute("data-manga-section-page")) {
+      navigate("/manga-section/" + encodeURIComponent(target.getAttribute("data-manga-section-page")) +
+        "?page=" + Math.max(1, Number(target.getAttribute("data-page") || 1)));
+      return;
+    }
+    if (target.hasAttribute("data-open-cbz")) {
+      const el = $("#cbz-file-input");
+      if (el) el.click();
+      return;
+    }
+    if (target.hasAttribute("data-save-manga")) {
+      const media = state.mangaDetail;
+      if (!media) return;
+      const key = String(media.id);
+      store.mangaList[key] = media;
+      persist();
+      toast("Manga saved to this device.");
+      if (window.AniDashAccount?.authenticated()) {
+        window.AniDashAccount.saveManga(media.id).then(() => toast("Manga synced to AniList."))
+          .catch(error => toast("Manga saved locally; AniList sync failed: " + error.message));
+      }
+      return;
+    }
+    if (target.hasAttribute("data-library-tab")) {
+      state.libraryTab = target.getAttribute("data-library-tab");
+      renderLibrary();
+      return;
+    }
+    if (target.hasAttribute("data-library-favorite")) {
+      const id = target.getAttribute("data-library-favorite");
+      const key = String(id);
+      const wasFavorite = Boolean(store.localFavorites[key]);
+      if (wasFavorite) delete store.localFavorites[key];
+      else store.localFavorites[key] = true;
+      persist();
+      renderLibrary();
+      if (window.AniDashAccount?.authenticated()) {
+        window.AniDashAccount.toggleFavorite(Number(id)).catch(error =>
+          toast("Favorite updated locally; AniList sync failed: " + error.message));
+      }
+      return;
+    }
+    if (target.hasAttribute("data-spotlight-next") || target.hasAttribute("data-spotlight-prev") ||
+        target.hasAttribute("data-spotlight-index")) {
+      const direction = target.hasAttribute("data-spotlight-next") ? 1 : -1;
+      showSpotlight(target.hasAttribute("data-spotlight-index")
+        ? Number(target.getAttribute("data-spotlight-index"))
+        : state.spotlightIndex + direction);
+      return;
+    }
+    if (target.hasAttribute("data-section-page")) {
+      const key = target.getAttribute("data-section-page");
+      const page = Math.max(1, Number(target.getAttribute("data-page") || 1));
+      navigate(sectionUrl(key) + "?page=" + page);
+      return;
+    }
     if (target.hasAttribute("data-watchlist")) {
       void toggleWatchlist(target.getAttribute("data-watchlist"));
       return;
@@ -1922,6 +2456,30 @@
     if (target.hasAttribute("data-login-anilist")) {
       try { await window.AniDashAccount.beginLogin(); }
       catch (error) { toast(error.message); }
+      return;
+    }
+    if (target.hasAttribute("data-login-mal")) {
+      try { await window.AniDashMal.beginLogin(); }
+      catch (error) { toast(error.message); }
+      return;
+    }
+    if (target.hasAttribute("data-logout-mal")) {
+      if (confirm("Sign out of MyAnimeList? Local lists will remain saved.")) {
+        window.AniDashMal?.logout();
+        refreshProfileChip(window.AniDashAccount?.currentUser());
+        renderAccount();
+      }
+      return;
+    }
+    if (target.hasAttribute("data-sync-mal")) {
+      toast("Importing MyAnimeList…");
+      const items = await syncMalLibrary();
+      if (items) toast("Imported " + items.length + " MyAnimeList entries.");
+      return;
+    }
+    if (target.hasAttribute("data-sync-all")) {
+      await Promise.all([syncAniListLibrary(), syncMalLibrary()]);
+      toast("Available tracking lists refreshed.");
       return;
     }
     if (target.hasAttribute("data-logout-anilist")) {
@@ -1943,8 +2501,10 @@
         const payload = {
           format: "anidash-watch-library",
           version: 2, exportedAt: new Date().toISOString(),
-          watchlist: store.watchlist, history: store.history,
-          preferences: store.preferences, hiddenCloudEntries: store.hiddenCloudEntries
+          watchlist: store.watchlist, history: store.history, mangaList: store.mangaList,
+          libraryStatuses: store.libraryStatuses, localFavorites: store.localFavorites,
+          malStatuses: store.malStatuses, preferences: store.preferences,
+          hiddenCloudEntries: store.hiddenCloudEntries
         };
         const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
         const url = URL.createObjectURL(blob);
@@ -2190,6 +2750,11 @@
   });
 
   document.addEventListener("submit", event => {
+    if (event.target.id === "manga-search-form") {
+      event.preventDefault();
+      navigate("/manga?q=" + encodeURIComponent($("#manga-search-input")?.value?.trim() || ""));
+      return;
+    }
     if (event.target.id === "search-form") {
       event.preventDefault();
       submitSearch($("#search-page-input").value);
@@ -2197,6 +2762,25 @@
   });
 
   document.addEventListener("change", async event => {
+    if (event.target.id === "cbz-file-input") {
+      const file = event.target.files?.[0];
+      if (file && window.AniDashCBZ) {
+        window.AniDashCBZ.open(file).catch(error => toast("Reader error: " + error.message));
+      }
+      return;
+    }
+    if (event.target.hasAttribute("data-library-status")) {
+      const id = String(event.target.getAttribute("data-library-status"));
+      const value = event.target.value;
+      if (!LIBRARY_TABS.some(([status]) => status === value) || value === "FAVORITES") return;
+      store.libraryStatuses[id] = value;
+      persist(); renderLibrary();
+      if (window.AniDashAccount?.authenticated()) {
+        window.AniDashAccount.setStatus(Number(id),value).catch(error =>
+          toast("Saved locally; AniList status update failed: " + error.message));
+      }
+      return;
+    }
     if (event.target.id === "backup-file") {
       const file = event.target.files?.[0];
       if (!file) return;
@@ -2213,6 +2797,10 @@
         );
         store.watchlist = { ...store.watchlist, ...safeEntries(payload.watchlist) };
         store.history = { ...store.history, ...safeEntries(payload.history) };
+        store.mangaList = { ...store.mangaList, ...safeEntries(payload.mangaList) };
+        store.libraryStatuses = { ...store.libraryStatuses, ...safeEntries(payload.libraryStatuses) };
+        store.localFavorites = { ...store.localFavorites, ...safeEntries(payload.localFavorites) };
+        store.malStatuses = { ...store.malStatuses, ...safeEntries(payload.malStatuses) };
         const allowed = Object.keys(DEFAULT_PREFERENCES);
         for (const key of allowed) {
           if (Object.prototype.hasOwnProperty.call(payload.preferences || {}, key)) {
@@ -2274,6 +2862,7 @@
 
   // Stop orphaned audio and destroy HLS when leaving playback.
   window.addEventListener("hashchange", () => {
+    if (typeof window.scrollTo === "function") window.scrollTo(0, 0);
     const nextRoute = location.hash.replace(/^#\//, "").split("/")[0];
     if (nextRoute !== "watch") {
       const video = $("#anime-video");
@@ -2319,10 +2908,17 @@
 
   loadProviders();
   const accountClient = window.AniDashAccount;
+  const malClient = window.AniDashMal;
   if (accountClient) accountClient.captureRedirect();
-  // Hydrate the backup before routing; this avoids briefly replacing an
-  // existing watchlist with an empty UI after reload.
-  Promise.resolve().then(restoreStorage).finally(() => {
+  // Complete the OAuth callback before drawing Account; query-string codes
+  // are cleared immediately by the MAL client.
+  Promise.resolve().then(async () => {
+    if (malClient) {
+      try { await malClient.captureRedirect(); }
+      catch (error) { toast("MyAnimeList login failed: " + error.message); }
+    }
+    await restoreStorage();
+  }).finally(() => {
     route();
     if (accountClient) {
       accountClient.setHandler(user => {
@@ -2333,6 +2929,20 @@
       accountClient.init().then(async user => {
         refreshProfileChip(user);
         if (user) await syncAniListLibrary();
+      }).catch(() => {});
+    }
+    if (malClient) {
+      malClient.setHandler(user => {
+        refreshProfileChip(accountClient?.currentUser());
+        if (state.route === "/account") renderAccount();
+        if (state.route === "/library") renderLibrary();
+      });
+      malClient.configuration().then(() => {
+        if (state.route === "/account") renderAccount();
+      }).catch(() => {});
+      malClient.init().then(async user => {
+        refreshProfileChip(accountClient?.currentUser());
+        if (user) await syncMalLibrary();
       }).catch(() => {});
     }
   });

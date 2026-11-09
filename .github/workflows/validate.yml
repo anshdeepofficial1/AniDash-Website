@@ -20,15 +20,20 @@ jobs:
         run: |
           node --check app.js
           node --check anilist-account.js
+          node --check mal-account.js
+          node --check cbz-reader.js
           node --check library-storage.js
           node --check api/auth-config.js
+          node --check api/mal-config.js
+          node --check api/mal-token.js
+          node --check api/mal-data.js
           node --check sw.js
           node --check api/justanime.js
           node --check api/hianime.js
           node --check api/anikoto.js
           node --check api/media.js
           node --check api/episode-map.js
-          node --test tests/provider-smoke.test.js tests/client-ui.test.js tests/account-auth.test.js
+          node --test tests/provider-smoke.test.js tests/client-ui.test.js tests/account-auth.test.js tests/cross-device-sync.test.js
 
   visual:
     name: Real-browser UI smoke

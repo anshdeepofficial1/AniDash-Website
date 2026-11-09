@@ -9,6 +9,9 @@
   let viewer = null;
   let config = null;
   let entries = new Map();
+  let mangaEntries = new Map();
+  let favoriteIds = new Set();
+  const pendingProgress = new Map();
   let changeHandler = () => {};
   const copy = x => x && typeof x === "object" ? JSON.parse(JSON.stringify(x)) : x;
 
@@ -19,7 +22,7 @@
   function clearToken() {
     token = null;
     viewer = null;
-    entries.clear();
+    entries.clear(); mangaEntries.clear(); favoriteIds.clear();
     try { localStorage.removeItem(TOKEN_KEY); } catch (_) {}
     inform();
   }
@@ -119,12 +122,45 @@
   function currentUser() { return copy(viewer); }
   function configured() { return config?.enabled === true; }
   function authenticated() { return !!viewer && !!token; }
-  function getEntry(mediaId) { return copy(entries.get(Number(mediaId)) || null); }
+  function getEntry(mediaId, type = "ANIME") {
+    return copy((type === "MANGA" ? mangaEntries : entries).get(Number(mediaId)) || null);
+  }
+  function parseWatchNotes(notes) {
+    const match = /shx:ep=(\d+)&sec=(\d+)(?:&dur=(\d+))?/.exec(String(notes || ""));
+    if (!match) return null;
+    const episode = Number(match[1]), seconds = Number(match[2]), duration = Number(match[3] || 1440);
+    if (!Number.isSafeInteger(episode) || episode < 1 || !Number.isFinite(seconds) || seconds < 0)
+      return null;
+    return { episode, seconds, duration };
+  }
+  function formatWatchNotes(existing, episode, seconds, duration) {
+    const tag = "shx:ep=" + episode + "&sec=" + Math.max(0, Math.floor(seconds)) +
+      (duration > 0 ? "&dur=" + Math.floor(duration) : "");
+    const current = String(existing || "");
+    const regex = /shx:ep=\d+&sec=\d+(?:&dur=\d+)?/;
+    return regex.test(current) ? current.replace(regex, tag) : current.trim() ? tag + "\n" + current : tag;
+  }
+  function resumeFromEntry(entry, totalEpisodes) {
+    if (!entry) return null;
+    const completed = Math.max(0, Number(entry.progress || 0));
+    const next = completed + 1;
+    const notes = parseWatchNotes(entry.notes);
+    const partial = notes && notes.episode >= next && notes.seconds > 0 &&
+      (notes.duration <= 0 || notes.seconds < notes.duration);
+    const ep = partial ? notes.episode : next;
+    return {
+      episode: totalEpisodes > 0 ? Math.min(ep, totalEpisodes) : ep,
+      seconds: partial ? notes.seconds : 0,
+      duration: notes?.duration || 1440,
+      updatedAt: Number(entry.updatedAt || 0) * 1000,
+      completedEpisodes: completed
+    };
+  }
 
   async function list() {
     if (!authenticated()) return [];
     const data = await request(
-      "query ($userId: Int!) { MediaListCollection(userId: $userId, type: ANIME) { lists { entries { id mediaId status progress media { id idMal title { english romaji native } coverImage { extraLarge large medium } bannerImage episodes status format averageScore seasonYear } } } } }",
+      "query ($userId: Int!) { MediaListCollection(userId: $userId, type: ANIME) { lists { entries { id mediaId status progress notes repeat updatedAt media { id idMal title { english romaji native } coverImage { extraLarge large medium } bannerImage episodes status format averageScore seasonYear nextAiringEpisode { episode } } } } } }",
       { userId: Number(viewer.id) }
     );
     const all = (data?.MediaListCollection?.lists || [])
@@ -133,6 +169,102 @@
     entries = new Map(all.map(entry => [Number(entry.mediaId), entry]));
     return copy(all);
   }
+
+  async function listManga() {
+    if (!authenticated()) return [];
+    const data = await request(
+      "query ($userId: Int!) { MediaListCollection(userId: $userId, type: MANGA) { lists { entries { id mediaId status progress notes updatedAt media { id title { english romaji native } coverImage { extraLarge large medium } bannerImage format status chapters volumes averageScore seasonYear } } } } }",
+      { userId: Number(viewer.id) }
+    );
+    const all = (data?.MediaListCollection?.lists || []).flatMap(group => group?.entries || []).filter(item => item.media);
+    mangaEntries = new Map(all.map(item => [Number(item.mediaId), item]));
+    return copy(all);
+  }
+  async function favorites() {
+    if (!authenticated()) return [];
+    const ids = [];
+    for (let page = 1; page <= 20; page++) {
+      const data = await request(
+        "query ($page: Int!) { Viewer { favourites { anime(page: $page, perPage: 25) { nodes { id } pageInfo { hasNextPage } } } } }",
+        { page }
+      );
+      const connection = data?.Viewer?.favourites?.anime;
+      ids.push(...(connection?.nodes || []).map(node => Number(node.id)));
+      if (!connection?.pageInfo?.hasNextPage) break;
+    }
+    favoriteIds = new Set(ids);
+    return [...favoriteIds];
+  }
+  function isFavorite(mediaId) { return favoriteIds.has(Number(mediaId)); }
+  async function toggleFavorite(mediaId) {
+    const id = Number(mediaId);
+    await request(
+      "mutation ($id: Int!) { ToggleFavourite(animeId: $id) { anime { nodes { id } } } }", { id }
+    );
+    if (favoriteIds.has(id)) favoriteIds.delete(id);
+    else favoriteIds.add(id);
+    return favoriteIds.has(id);
+  }
+  async function setStatus(mediaId, status) {
+    if (!["CURRENT", "COMPLETED", "PAUSED", "DROPPED", "PLANNING", "REPEATING"].includes(status))
+      throw new Error("Invalid AniList status");
+    const id = Number(mediaId);
+    const existing = entries.get(id);
+    const data = await request(
+      "mutation ($id:Int!,$status:MediaListStatus) { SaveMediaListEntry(mediaId:$id,status:$status) {id mediaId status progress notes updatedAt} }",
+      { id, status }
+    );
+    if (data?.SaveMediaListEntry) entries.set(id, { ...existing, ...data.SaveMediaListEntry });
+    return copy(data?.SaveMediaListEntry || null);
+  }
+  async function syncPosition(mediaId, episode, seconds, duration, ended = false) {
+    if (!authenticated()) return null;
+    const id = Number(mediaId);
+    const ep = Math.max(1, Math.floor(Number(episode) || 1));
+    const sec = Math.max(0, Math.floor(Number(seconds) || 0));
+    const dur = Math.max(0, Math.floor(Number(duration) || 0));
+    const previous = pendingProgress.get(id) || Promise.resolve();
+    const requestPromise = previous.catch(() => {}).then(async () => {
+      const entry = entries.get(id);
+      // Android uses the number of fully watched episodes, never increment on a partial episode.
+      const progress = Math.max(Number(entry?.progress || 0), ended ? ep : ep - 1);
+      const noteText = formatWatchNotes(entry?.notes, ep, ended && dur > 0 ? dur : sec, dur);
+      const status = entry?.status === "COMPLETED" ? "COMPLETED" :
+        (ended && entry?.media?.episodes && ep >= Number(entry.media.episodes) ? "COMPLETED" : "CURRENT");
+      const data = await request(
+        "mutation ($id:Int!,$status:MediaListStatus,$progress:Int,$notes:String) { SaveMediaListEntry(mediaId:$id,status:$status,progress:$progress,notes:$notes) {id mediaId status progress notes updatedAt} }",
+        { id, status, progress, notes: noteText }
+      );
+      if (data?.SaveMediaListEntry) {
+        entries.set(id, { ...entry, ...data.SaveMediaListEntry });
+        return copy(data.SaveMediaListEntry);
+      }
+      return null;
+    }).finally(() => {
+      if (pendingProgress.get(id) === requestPromise) pendingProgress.delete(id);
+    });
+    pendingProgress.set(id, requestPromise);
+    return requestPromise;
+  }
+
+
+  async function saveManga(mediaId, progress = 0) {
+    if (!authenticated()) return null;
+    const id = Number(mediaId);
+    const old = mangaEntries.get(id);
+    const status = old?.status || (progress > 0 ? "CURRENT" : "PLANNING");
+    const vars = { mediaId:id, status, progress:Math.max(Number(old?.progress || 0),Number(progress || 0)) };
+    const data = await request(
+      "mutation ($mediaId:Int!,$status:MediaListStatus,$progress:Int){SaveMediaListEntry(mediaId:$mediaId,status:$status,progress:$progress){id mediaId status progress}}",
+      vars
+    );
+    if (data?.SaveMediaListEntry) {
+      mangaEntries.set(id, { ...old, ...data.SaveMediaListEntry });
+      return copy(data.SaveMediaListEntry);
+    }
+    return null;
+  }
+
   async function saveToList(mediaId, status = "PLANNING", progress) {
     if (!authenticated()) return null;
     const id = Number(mediaId);
@@ -168,6 +300,8 @@
 
   window.AniDashAccount = {
     captureRedirect, setHandler, settings, init, beginLogin, logout,
-    currentUser, configured, authenticated, list, getEntry, saveToList, deletePlanning
+    currentUser, configured, authenticated, list, listManga, favorites, isFavorite, toggleFavorite,
+    parseWatchNotes, formatWatchNotes, resumeFromEntry, syncPosition, setStatus, saveManga,
+    getEntry, saveToList, deletePlanning
   };
 })();
