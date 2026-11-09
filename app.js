@@ -2068,15 +2068,55 @@
   }
 
 
+  const LIBRARY_TABS = [
+    ["CURRENT", "Watching"], ["COMPLETED", "Completed"], ["PAUSED", "On Hold"],
+    ["PLANNING", "Plan to Watch"], ["DROPPED", "Dropped"],
+    ["REPEATING", "Repeating"], ["FAVORITES", "Favorites"]
+  ];
+  function libraryStatus(media) {
+    const key = String(media.id);
+    return store.libraryStatuses[key] || (store.history[key] ? "CURRENT" : "PLANNING");
+  }
   function renderLibrary() {
-    const items = Object.values(store.watchlist).sort((a, b) => titleOf(a).localeCompare(titleOf(b)));
-    const online = window.AniDashAccount && window.AniDashAccount.authenticated();
+    const chosen = state.libraryTab || "CURRENT";
+    const items = Object.values(store.watchlist).filter(item => item?.id);
+    const counts = Object.fromEntries(LIBRARY_TABS.map(([id]) => [id, items.filter(item =>
+      id === "FAVORITES" ? store.localFavorites[String(item.id)] : libraryStatus(item) === id
+    ).length]));
+    const filtered = items.filter(item => chosen === "FAVORITES" ?
+      store.localFavorites[String(item.id)] : libraryStatus(item) === chosen)
+      .sort((a,b) => titleOf(a).localeCompare(titleOf(b)));
+    const online = window.AniDashAccount?.authenticated() || window.AniDashMal?.authenticated();
+    const statusOptions = item => LIBRARY_TABS.filter(([value]) => value !== "FAVORITES").map(([value,label]) =>
+      '<option value="' + value + '"' + (libraryStatus(item) === value ? " selected" : "") +
+      '>' + escapeHtml(label) + '</option>').join("");
+    const cells = filtered.length ? '<div class="anime-grid">' + filtered.map(item => {
+      const favorite = Boolean(store.localFavorites[String(item.id)]);
+      return '<div class="library-item">' + card(item) +
+        '<div class="library-action-row"><select class="select-control status-select" aria-label="Tracking status for ' +
+        escapeHtml(titleOf(item)) + '" data-library-status="' + item.id + '">' + statusOptions(item) +
+        '</select><button class="btn btn-quiet" aria-label="' + (favorite ? "Unfavorite" : "Favorite") +
+        ' ' + escapeHtml(titleOf(item)) + '" data-library-favorite="' + item.id + '">' +
+        uiIcon("heart") + (favorite ? ' Saved' : ' Favorite') + '</button></div></div>';
+    }).join("") + '</div>' :
+      '<div class="empty-state"><h3>No ' + escapeHtml(LIBRARY_TABS.find(([id]) => id === chosen)?.[1] || "anime") +
+      ' titles yet</h3><p>Add titles from discovery or import your AniList / MAL library.</p>' +
+      '<button class="btn btn-primary" data-route="/discover">Browse anime</button></div>';
     $("#view").innerHTML =
-      pageHead("", "Your Library", "Your saved anime watchlist") +
-      '<div class="library-save-status">' + (online
-        ? '✓ Saved on this device · AniList sync available'
-        : '✓ Saved on this device · <button class="text-button" data-route="/account">Sign in for cloud sync</button>') + '</div>' +
-      (items.length ? grid(items) : '<div class="empty-state"><div class="empty-icon">♡</div><h3>Your watchlist is empty</h3><p>Add an anime to save it here. You can export a backup from Settings.</p><button class="btn btn-primary" data-route="/discover">Explore anime</button></div>');
+      pageHead("", "Your Library", "Watching, completed, on hold, plan to watch, dropped and favorites") +
+      '<div class="library-toolbar"><div class="library-save-status">' +
+      (online ? uiIcon("cloud") + ' Connected to tracking services · synced to this browser'
+        : uiIcon("bookmark") + ' Saved locally · <button class="text-button" data-route="/account">Connect AniList or MAL</button>') +
+      '</div><div class="account-actions"><button class="btn btn-quiet" data-route="/history">' +
+      uiIcon("history") + ' Continue Watching</button>' +
+      (online ? '<button class="btn btn-quiet" data-sync-all>' + uiIcon("refresh") + ' Sync</button>' : '') +
+      '</div></div><div class="status-tabs" role="tablist" aria-label="Anime library statuses">' +
+      LIBRARY_TABS.map(([value,label]) =>
+        '<button role="tab" aria-selected="' + (chosen===value?"true":"false") +
+        '" data-library-tab="' + value + '" class="' + (chosen===value?"active":"") + '">' +
+        escapeHtml(label) + ' ' + counts[value] + '</button>').join("") +
+      '</div>' + cells +
+      '<p class="list-status-note">AniList sync saves list statuses and watch positions in tracker notes. MyAnimeList syncs watched episode counts. Exact playback positions from Android require AniList synchronization.</p>';
   }
 
   function renderHistory() {
