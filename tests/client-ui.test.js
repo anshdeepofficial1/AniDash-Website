@@ -45,8 +45,10 @@ function createBrowser(initialHash) {
     addEventListener: (name, handler) => listeners.set(name, handler)
   };
   const location = { hash: initialHash, protocol: "http:" };
+  const localData = new Map();
   const localStorage = {
-    getItem: () => null, setItem() {}
+    getItem: key => localData.get(key) || null,
+    setItem: (key, value) => localData.set(key, String(value))
   };
   const fetch = input => {
     const url = String(input);
@@ -69,7 +71,7 @@ function createBrowser(initialHash) {
     console
   };
   vm.runInNewContext(source, context, { filename: "app.js" });
-  return { elements, listeners, urls, getElement };
+  return { elements, listeners, urls, localData, getElement };
 }
 
 async function flushUI() {
@@ -103,6 +105,8 @@ test("player appears before stream resolution and DUB/SUB switching does not thr
   assert.match(html, /id="anime-video"/);
   assert.match(html, /DUB · ENGLISH/);
   assert.match(html, /Episode 2/);
+  const saved = JSON.parse(browser.localData.get("anidash.watch.web.v1"));
+  assert.equal(saved.history["21"].episode, 2, "episode should be saved before stream becomes playable");
   assert.doesNotMatch(html, /Checking JustAnime, HiAnime and AniKoto in parallel/);
   const click = browser.listeners.get("click");
   const target = {
