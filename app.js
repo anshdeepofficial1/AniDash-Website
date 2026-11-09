@@ -6,7 +6,7 @@
   const STORE_KEY = "anidash.watch.web.v1";
   const API = "https://graphql.anilist.co";
   const MEDIA_FIELDS = [
-    "id idMal",
+    "id idMal synonyms",
     "title { romaji english native }",
     "coverImage { extraLarge large medium }",
     "bannerImage format status episodes duration averageScore popularity",
@@ -85,6 +85,44 @@
   const mediaYear = media => media && (media.seasonYear || (media.startDate && media.startDate.year)) || "";
   const imageOf = media => media && media.coverImage && (media.coverImage.extraLarge || media.coverImage.large || media.coverImage.medium) || "";
   const slug = value => String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const UI_ICON_NAMES = new Set(["home","compass","search","manga","library","user","settings",
+    "download","play","bookmark","chevron-right","chevron-left","chevron-down","heart","star",
+    "refresh","sliders","calendar","filter","history","check","info","shield","eye","cloud"]);
+  function uiIcon(name) {
+    const safe = UI_ICON_NAMES.has(name) ? name : "info";
+    return '<svg class="ui-icon" aria-hidden="true"><use href="/icons/ui-sprite.svg#' + safe + '"></use></svg>';
+  }
+  // Faithful port of Android's animeSeasonBadge() in anime_card_components.dart.
+  function animeSeasonBadge(media) {
+    const format = String(media?.format || "").toUpperCase();
+    if (format === "MOVIE") return "M";
+    if (format === "MUSIC") return "";
+    const title = [media?.title?.english, media?.title?.romaji, media?.title?.native,
+      ...(Array.isArray(media?.synonyms) ? media.synonyms : [])].filter(Boolean).join(" ");
+    if (format === "OVA") return "OVA";
+    if (format === "SPECIAL" || /special|chibi/i.test(title)) return "SP";
+    const seasonMatch = /(?:season|series)\\s*(\\d+)|\\b(\\d+)(?:st|nd|rd|th)\\s+season\\b|第\\s*(\\d+)\\s*季/i.exec(title);
+    const partMatch = /(?:part|cour)\\s*(\\d+)/i.exec(title);
+    if (seasonMatch) {
+      const number = Number(seasonMatch[1] || seasonMatch[2] || seasonMatch[3] || 1);
+      const part = Number(partMatch?.[1] || 0);
+      return part > 1 ? "S" + number + "-" + part : "S" + number;
+    }
+    if (partMatch && Number(partMatch[1]) > 1) return "S1-" + Number(partMatch[1]);
+    if (/\\bii\\b|season\\s*2|2nd\\s*season|wu\\s*mian\\s*ren/i.test(title)) return "S2";
+    return "S1";
+  }
+  const SECTIONS = {
+    airing: { title: "Currently Airing", sort: "TRENDING_DESC", extra: ", status: RELEASING" },
+    trending: { title: "Trending Right Now", sort: "TRENDING_DESC", extra: "", ranked: true },
+    popular: { title: "All Time Popular", sort: "POPULARITY_DESC", extra: "" },
+    top: { title: "Top Rated", sort: "SCORE_DESC", extra: "" },
+    upcoming: { title: "Upcoming Series", sort: "POPULARITY_DESC", extra: ", status: NOT_YET_RELEASED" },
+    movies: { title: "Anime Movies", sort: "POPULARITY_DESC", extra: ", format: MOVIE" },
+    hidden: { title: "Hidden Gems", sort: "SCORE_DESC", extra: ", averageScore_greater: 75, popularity_lesser: 35000" }
+  };
+  const sectionUrl = key => "/section/" + encodeURIComponent(key);
+
 
   function persist() {
     store.updatedAt = Date.now();
@@ -186,20 +224,29 @@
     $("#view").innerHTML = '<section class="loading-state"><div class="loader"></div><p>' + escapeHtml(message || "Loading…") + '</p></section>';
   }
 
-  function card(media) {
-    const progress = store.history[String(media.id)];
+  function card(media, type = "ANIME") {
+    const isManga = type === "MANGA";
+    const progress = !isManga && store.history[String(media.id)];
     const poster = imageOf(media);
-    const pct = progress && progress.duration > 0 ? Math.max(0, Math.min(100, (progress.position / progress.duration) * 100)) : 0;
-    return '<article class="anime-card" data-anime="' + escapeHtml(media.id) + '" tabindex="0" role="button" aria-label="Open ' + escapeHtml(titleOf(media)) + '">' +
+    const pct = progress?.duration > 0 ? Math.max(0, Math.min(100, (progress.position / progress.duration) * 100)) : 0;
+    const tag = isManga ? "" : animeSeasonBadge(media);
+    const typeAttr = isManga ? "data-manga" : "data-anime";
+    const episodes = isManga ? (media.chapters ? media.chapters + " chapters" : media.format) :
+      (media.episodes ? media.episodes + " eps" : media.status);
+    return '<article class="anime-card" ' + typeAttr + '="' + escapeHtml(media.id) +
+      '" tabindex="0" role="button" aria-label="Open ' + escapeHtml(titleOf(media)) + '">' +
       '<div class="poster-wrap">' +
-        (poster ? '<img loading="lazy" src="' + escapeHtml(poster) + '" alt="' + escapeHtml(titleOf(media)) + '">' : '<div class="poster-fallback">' + escapeHtml(titleOf(media)) + '</div>') +
+        (poster ? '<img loading="lazy" src="' + escapeHtml(poster) + '" alt="' + escapeHtml(titleOf(media)) + '">' :
+        '<div class="poster-fallback">' + escapeHtml(titleOf(media)) + '</div>') +
         '<div class="poster-shade"></div>' +
-        (media.averageScore ? '<span class="poster-score">★ ' + formatScore(media.averageScore) + '</span>' : '') +
-        (media.format ? '<span class="poster-format">' + escapeHtml(media.format) + '</span>' : '') +
+        (tag ? '<span class="season-chip">' + escapeHtml(tag) + '</span>' : "") +
+        (media.averageScore ? '<span class="poster-score">' + uiIcon("star") + ' ' + formatScore(media.averageScore) + '</span>' : '') +
       '</div>' +
       '<div class="card-title">' + escapeHtml(titleOf(media)) + '</div>' +
-      '<p class="card-subtitle">' + escapeHtml([mediaYear(media), media.episodes ? media.episodes + " eps" : media.status].filter(Boolean).join(" · ")) + '</p>' +
-      (progress ? '<div class="card-progress"><span style="width:' + pct + '%"></span></div><div class="card-resume">Resume episode ' + escapeHtml(progress.episode || 1) + '</div>' : '') +
+      '<p class="card-subtitle">' + escapeHtml([mediaYear(media), episodes].filter(Boolean).join(" · ")) + '</p>' +
+      (progress ? '<div class="card-progress"><span style="width:' + pct + '%"></span></div><div class="card-resume">Episode ' +
+        escapeHtml(progress.episode || 1) + (progress.position > 0 ? " · " + Math.floor(progress.position / 60) + "m" : "") +
+        '</div>' : '') +
     '</article>';
   }
 
@@ -220,7 +267,7 @@
     if (!rows.length) return "";
     return '<section class="section shelf-section"><div class="section-heading"><div><h2 class="section-title">' + escapeHtml(title) + '</h2>' +
       (note ? '<p class="section-note">' + escapeHtml(note) + '</p>' : '') + '</div>' +
-      (route ? '<button class="section-link" data-route="' + route + '">View all ↗</button>' : '') +
+      (route ? '<button class="section-link" data-route="' + route + '">View all ' + uiIcon("chevron-right") + '</button>' : '') +
       '</div><div class="anime-shelf">' + rows.map(card).join("") + '</div></section>';
   }
 
