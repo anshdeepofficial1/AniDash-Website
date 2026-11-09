@@ -1359,6 +1359,10 @@
     const embed = $("#anime-embed");
     const overlay = $("#player-overlay");
     if (!video) return;
+    if (state.playbackWatchdog) {
+      window.clearTimeout(state.playbackWatchdog);
+      state.playbackWatchdog = null;
+    }
     if (state.hls) {
       try { state.hls.destroy(); } catch (_) {}
       state.hls = null;
@@ -1391,6 +1395,7 @@
       embed.src = "about:blank";
     }
     video.style.display = "block";
+    video.preload = "auto";
     video.pause();
     video.removeAttribute("src");
     while (video.firstChild) video.removeChild(video.firstChild);
@@ -1422,18 +1427,54 @@
       video.src = url;
     }
     state.currentVideo = url;
-    if (overlay) overlay.style.display = "none";
+    if (overlay) {
+      overlay.style.display = "grid";
+      overlay.classList.remove("has-error");
+      overlay.innerHTML = '<div class="player-mini-loader"></div><strong>Opening episode…</strong>';
+    }
+    state.playbackWatchdog = window.setTimeout(() => {
+      if (state.currentVideo === url && video.readyState < 2) {
+        fallbackToNextProvider("This server took too long to start playback.");
+      }
+    }, 12000);
     video.onloadedmetadata = () => {
       const key = String(state.player.media.id);
       const saved = store.history[key];
       if (saved && Number(saved.episode) === Number(state.player.episode.number) && saved.position > 15 && video.duration > saved.position + 15) {
         video.currentTime = saved.position;
       }
-      video.play().catch(() => {});
+      video.play().catch(error => {
+        if (state.currentVideo !== url) return;
+        if (error?.name === "NotAllowedError") {
+          if (overlay) {
+            overlay.style.display = "grid";
+            overlay.innerHTML = '<strong>Ready to watch</strong><button class="btn btn-primary" data-play-video>▶ Tap to play</button>';
+          }
+        } else if (error?.name !== "AbortError") {
+          fallbackToNextProvider("The selected source could not start.");
+        }
+      });
+    };
+    video.onplaying = () => {
+      if (state.currentVideo !== url) return;
+      if (state.playbackWatchdog) window.clearTimeout(state.playbackWatchdog);
+      state.playbackWatchdog = null;
+      if (overlay) overlay.style.display = "none";
+    };
+    video.onwaiting = () => {
+      if (state.currentVideo === url && !video.paused && overlay) {
+        overlay.style.display = "grid";
+        overlay.innerHTML = '<div class="player-mini-loader"></div><strong>Buffering…</strong>';
+      }
     };
     video.onerror = () => {
-      if (state.player && state.player.match && state.currentVideo === url) {
+      if (state.currentVideo !== url) return;
+      if (state.playbackWatchdog) window.clearTimeout(state.playbackWatchdog);
+      state.playbackWatchdog = null;
+      if (state.player && state.player.match) {
         fallbackToNextProvider("The browser could not play the returned video URL.");
+      } else {
+        showPlayerOverlay("Playback unavailable", "The selected link is not playable in this browser.", true);
       }
     };
     video.ontimeupdate = () => savePlaybackProgress(video);
@@ -1616,6 +1657,16 @@
         state.player.servers = [];
         state.player.selectedServer = ({ justanime: "auto", hianime: "hd-1", anikoto: "anikoto" }[state.player.match?.provider?.id] || "auto");
         loadPlayerStreams(state.token);
+      }
+      return;
+    }
+    if (target.hasAttribute("data-play-video")) {
+      const video = $("#anime-video");
+      if (video) {
+        video.play().then(() => {
+          const overlay = $("#player-overlay");
+          if (overlay) overlay.style.display = "none";
+        }).catch(() => toast("Unable to start this stream. Try another server."));
       }
       return;
     }
