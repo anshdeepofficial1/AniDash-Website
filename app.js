@@ -1098,6 +1098,25 @@
     const index = state.detailEpisodes.findIndex(item => Number(item.number) === Number(number));
     state.playerEpisodePage = index >= 0 ? Math.floor(index / PLAYER_EPISODES_PER_PAGE) + 1 : 1;
 
+    // Remember the selected episode immediately, even if the provider uses an
+    // iframe (where browsers cannot expose exact playback time to AniDash).
+    if (setting("trackProgress")) {
+      const historyKey = String(media.id);
+      const saved = store.history[historyKey];
+      if (!saved || Number(saved.episode) !== Number(episode.number)) {
+        store.history[historyKey] = {
+          media: {
+            id: media.id, idMal: media.idMal, title: media.title,
+            coverImage: media.coverImage, bannerImage: media.bannerImage,
+            format: media.format, status: media.status, episodes: media.episodes,
+            averageScore: media.averageScore, seasonYear: media.seasonYear
+          },
+          episode: episode.number, episodeTitle: episode.title,
+          position: 0, duration: 0, updatedAt: Date.now()
+        };
+        persist();
+      }
+    }
     // Paint the player before any provider call; discovery happens independently.
     paintPlayer();
     if (player.direct) {
