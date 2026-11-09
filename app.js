@@ -934,20 +934,80 @@
     }
   }
 
-  function toggleWatchlist(id) {
+  function findLocalMedia(id) {
     const key = String(id);
+    if (state.detail && String(state.detail.id) === key) return state.detail;
+    for (const collection of [
+      state.home && Object.values(state.home).flat(),
+      state.discover,
+      state.search,
+      Object.values(store.watchlist),
+      Object.values(store.history).map(entry => entry.media)
+    ]) {
+      const match = (collection || []).find(item => item && String(item.id) === key);
+      if (match) return match;
+    }
+    return null;
+  }
+
+  async function syncAniListLibrary() {
+    const account = window.AniDashAccount;
+    if (!account || !account.authenticated()) return;
+    try {
+      const cloudEntries = await account.list();
+      let changed = false;
+      for (const entry of cloudEntries) {
+        const id = String(entry.mediaId);
+        if (store.hiddenCloudEntries[id] || !entry.media || store.watchlist[id]) continue;
+        store.watchlist[id] = entry.media;
+        changed = true;
+      }
+      // Guest data is never discarded on account sign-in.
+      if (changed) persist();
+      if (state.route === "/library") renderLibrary();
+      if (state.route === "/account") renderAccount();
+      return cloudEntries;
+    } catch (error) {
+      toast("AniList sync unavailable: " + error.message);
+      return null;
+    }
+  }
+
+  async function toggleWatchlist(id) {
+    const key = String(id);
+    const account = window.AniDashAccount;
     if (store.watchlist[key]) {
       delete store.watchlist[key];
-      toast("Removed from your watchlist.");
+      store.hiddenCloudEntries[key] = true;
+      persist();
+      toast("Removed from this device's watchlist.");
+      if (account?.authenticated() && account.getEntry(id)?.status === "PLANNING") {
+        if (confirm("Also remove this title from your AniList Planning list?")) {
+          account.deletePlanning(id).then(ok => {
+            if (ok) toast("Removed from AniList as well.");
+          }).catch(error => toast("AniList removal failed: " + error.message));
+        }
+      }
     } else {
-      const media = state.detail && String(state.detail.id) === key ? state.detail :
-        state.home && [...state.home.trending, ...state.home.popular].find(item => String(item.id) === key);
-      if (media) store.watchlist[key] = media;
-      else store.watchlist[key] = { id: Number(key), title: { english: "Saved anime " + key }, coverImage: {} };
-      toast("Added to your watchlist.");
+      const media = findLocalMedia(id) || await getAnime(id).catch(() => null);
+      if (!media) {
+        toast("Could not save this title. Try again.");
+        return;
+      }
+      store.watchlist[key] = media;
+      delete store.hiddenCloudEntries[key];
+      persist();
+      toast("Added to your watchlist and saved on this device.");
+      if (account?.authenticated()) {
+        account.saveToList(Number(key), "PLANNING").then(() => {
+          toast("Watchlist synced to AniList.");
+        }).catch(error => {
+          toast("Saved locally; AniList sync failed: " + error.message);
+        });
+      }
     }
-    persist();
-    if (state.detail && String(state.detail.id) === key) paintAnimeDetails(state.detail);
+    if (state.detail && String(state.detail.id) === key && state.route === "/anime") paintAnimeDetails(state.detail);
+    if (state.route === "/library") renderLibrary();
   }
 
   async function startEpisode(number, episodeId) {
