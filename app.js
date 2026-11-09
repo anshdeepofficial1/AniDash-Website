@@ -114,11 +114,24 @@
     return data.Page;
   }
 
+
+  // AniList metadata is reused when a user opens an anime or returns from the player.
+  const animeMetadataCache = new Map();
+  const animeMetadataPending = new Map();
   async function getAnime(id) {
-    const query = "query ($id: Int) { Media(id: $id, type: ANIME) { " + MEDIA_FIELDS +
-      " description(asHtml: false) studios(isMain: true) { nodes { name } } relations { edges { relationType node { id type title { english romaji } coverImage { large } } } } recommendations(sort: RATING_DESC) { nodes { mediaRecommendation { id title { english romaji } coverImage { large } averageScore format } } } trailer { id site thumbnail } } }";
-    const data = await gql(query, { id: Number(id) });
-    return data.Media;
+    const key = String(id);
+    if (animeMetadataCache.has(key)) return animeMetadataCache.get(key);
+    if (animeMetadataPending.has(key)) return animeMetadataPending.get(key);
+    const request = (async () => {
+      const query = "query ($id: Int) { Media(id: $id, type: ANIME) { " + MEDIA_FIELDS +
+        " description(asHtml: false) studios(isMain: true) { nodes { name } } relations { edges { relationType node { id type title { english romaji } coverImage { large } } } } recommendations(sort: RATING_DESC) { nodes { mediaRecommendation { id title { english romaji } coverImage { large } averageScore format } } } trailer { id site thumbnail } } }";
+      const data = await gql(query, { id: Number(id) });
+      if (!data || !data.Media) throw new Error("This anime was not found in AniList.");
+      animeMetadataCache.set(key, data.Media);
+      return data.Media;
+    })().finally(() => animeMetadataPending.delete(key));
+    animeMetadataPending.set(key, request);
+    return request;
   }
 
   async function searchAniList(term, page) {
@@ -656,6 +669,60 @@
     return { matches: checked, selected, episodes: selected ? selected.episodes : [] };
   }
 
+
+  const preparedSourceCache = new Map();
+  const preparedSourcePending = new Map();
+
+  // Show real AniList episode numbers immediately, and resolve provider-specific
+  // IDs in the background. These numbers are NOT a claim that a stream exists.
+  function instantMediaSources(media, requestedEpisode) {
+    const episodes = generatedEpisodes(media);
+    const requested = Number(requestedEpisode);
+    if (!episodes.length && Number.isInteger(requested) && requested > 0) {
+      episodes.push({
+        id: String(requested), number: requested, title: "Episode " + requested,
+        thumbnail: "", generated: true
+      });
+    }
+    if (!episodes.length || media.id == null) {
+      return { matches: [], selected: null, episodes };
+    }
+    const matches = BUILTIN_PROVIDERS.map(provider => ({
+      provider,
+      animeId: String(media.id),
+      item: { id: String(media.id), title: titleOf(media) },
+      mapped: true,
+      mappingOnly: true,
+      embedOnly: provider.id === "anikoto",
+      provisional: true,
+      episodes: episodes.map(item => ({ ...item, id: String(item.number) })),
+      episodesReady: true
+    }));
+    return { matches, selected: matches[0], episodes };
+  }
+
+  async function getPreparedMediaSources(media, force) {
+    const key = String(media.id);
+    if (!force && preparedSourceCache.has(key)) return preparedSourceCache.get(key);
+    if (preparedSourcePending.has(key)) return preparedSourcePending.get(key);
+    const request = prepareMediaSources(media).then(prepared => {
+      if (prepared.selected && prepared.episodes.length) preparedSourceCache.set(key, prepared);
+      return prepared;
+    }).finally(() => preparedSourcePending.delete(key));
+    preparedSourcePending.set(key, request);
+    return request;
+  }
+
+  function applyPreparedSources(prepared, preferredProviderId) {
+    state.detailMatches = prepared.matches;
+    state.selectedMatch = prepared.matches.find(match =>
+      match && match.episodesReady && match.provider.id === preferredProviderId
+    ) || prepared.selected;
+    state.detailEpisodes = (state.selectedMatch && state.selectedMatch.episodes && state.selectedMatch.episodes.length
+      ? state.selectedMatch.episodes : prepared.episodes);
+    if (!state.detailEpisodes.length && state.detail) state.detailEpisodes = generatedEpisodes(state.detail);
+  }
+
   async function renderAnime(id) {
     const token = ++state.token;
     state.detail = null;
@@ -664,18 +731,29 @@
     state.selectedMatch = null;
     state.episodePage = 1;
     state.episodeFilter = "";
-    showLoading("Loading anime details…");
+    showLoading("Opening anime…");
     try {
       const media = await getAnime(id);
-      if (token !== state.token) return;
+      if (token !== state.token || state.route !== "/anime") return;
       state.detail = media;
-      $("#view").innerHTML = '<div class="loading-state"><div class="loader"></div><p>Checking JustAnime, HiAnime and AniKoto…</p></div>';
-      const prepared = await prepareMediaSources(media);
-      if (token !== state.token) return;
-      state.detailMatches = prepared.matches;
-      state.selectedMatch = prepared.selected;
-      state.detailEpisodes = prepared.episodes.length ? prepared.episodes : generatedEpisodes(media);
+
+      // Do not block the entire screen with a provider search spinner.
+      const ready = preparedSourceCache.get(String(media.id)) || instantMediaSources(media);
+      applyPreparedSources(ready);
       paintAnimeDetails(media);
+
+      if (!preparedSourceCache.has(String(media.id))) {
+        getPreparedMediaSources(media).then(prepared => {
+          if (token !== state.token || state.route !== "/anime" || state.detail?.id !== media.id) return;
+          const preferred = state.selectedMatch?.provider?.id;
+          applyPreparedSources(prepared, preferred);
+          paintAnimeDetails(media);
+        }).catch(error => {
+          if (token === state.token && state.route === "/anime") {
+            toast("Some streaming sources are unavailable. You can still try an episode.");
+          }
+        });
+      }
     } catch (error) {
       if (token !== state.token) return;
       $("#view").innerHTML = '<div class="empty-state"><h3>Anime details unavailable</h3><p>' + escapeHtml(error.message) + '</p><button class="btn btn-primary" data-route="/home">Back home</button></div>';
@@ -812,21 +890,22 @@
       '<div id="player-episode-items"></div><div id="player-episode-pagination"></div>';
   }
 
+
   async function renderWatch(id, number) {
     const token = ++state.token;
-    const media = state.detail && String(state.detail.id) === String(id) ? state.detail : await getAnime(id).catch(() => null);
-    if (!media) {
-      $("#view").innerHTML = '<div class="empty-state"><h3>Anime not found</h3><p>Return to the catalogue and open the title again.</p><button class="btn btn-primary" data-route="/home">Home</button></div>';
+    const media = state.detail && String(state.detail.id) === String(id)
+      ? state.detail : await getAnime(id).catch(() => null);
+    if (!media || token !== state.token) {
+      if (token === state.token) {
+        $("#view").innerHTML = '<div class="empty-state"><h3>Anime not found</h3><p>Return to the catalogue and try this title again.</p><button class="btn btn-primary" data-route="/home">Home</button></div>';
+      }
       return;
     }
-    const hasPreparedSources = (state.detailMatches || []).some(match => match && match.episodesReady && Array.isArray(match.episodes));
-    if (!state.detail || String(state.detail.id) !== String(id) || !hasPreparedSources) {
+
+    if (!state.detail || String(state.detail.id) !== String(id) || !state.detailMatches.some(match => match?.episodesReady)) {
       state.detail = media;
-      const prepared = await prepareMediaSources(media);
-      if (token !== state.token) return;
-      state.detailMatches = prepared.matches;
-      state.selectedMatch = prepared.selected;
-      state.detailEpisodes = prepared.episodes.length ? prepared.episodes : generatedEpisodes(media);
+      const cached = preparedSourceCache.get(String(media.id));
+      applyPreparedSources(cached || instantMediaSources(media, number));
       state.episodePage = 1;
       state.episodeFilter = "";
       state.playerEpisodeFilter = "";
@@ -835,54 +914,60 @@
     const episode = state.detailEpisodes.find(item => Number(item.number) === Number(number)) || {
       id: String(number), number: Number(number), title: "Episode " + number, generated: true
     };
-    const currentMatchStillValid = state.player && state.player.match &&
-      state.detailMatches.some(match => match.provider.id === state.player.match.provider.id && match.episodesReady);
-    state.player = state.player && state.player.media && String(state.player.media.id) === String(id)
-      ? state.player
-      : {
-          media: media,
-          episode: episode,
-          match: state.selectedMatch,
-          streams: [],
-          embeds: [],
-          availableProviders: [],
-          servers: [],
-          tracks: [],
-          selectedServer: "default",
-          category: "dub",
-          intro: null,
-          outro: null,
-          direct: store.manualStreams[String(id) + ":" + String(number)] || ""
-        };
-    const changedEpisode = Number(state.player.episode && state.player.episode.number) !== Number(episode.number);
-    state.player.media = media;
-    state.player.episode = episode;
+    const existingPlayer = state.player && String(state.player.media?.id) === String(id) ? state.player : null;
+    const player = existingPlayer || {
+      media, episode, match: state.selectedMatch, streams: [], embeds: [],
+      availableProviders: [], servers: [], tracks: [], selectedServer: "auto",
+      category: "dub", intro: null, outro: null, requestId: 0,
+      direct: store.manualStreams[String(id) + ":" + String(number)] || ""
+    };
+    const changedEpisode = Number(player.episode?.number) !== Number(episode.number);
+    state.player = player;
+    player.media = media;
+    player.episode = episode;
+    player.direct = store.manualStreams[String(id) + ":" + String(number)] || "";
+    player.needsProviderRetry = false;
     if (changedEpisode) {
-      state.player.failedProviders = [];
-      state.player.streams = [];
-      state.player.embeds = [];
-      state.player.candidates = [];
-      state.player.candidateIndex = 0;
-      state.player.tracks = [];
-      state.player.servers = [];
-      state.player.selectedServer = "default";
+      player.failedProviders = [];
+      player.streams = [];
+      player.embeds = [];
+      player.candidates = [];
+      player.candidateIndex = 0;
+      player.tracks = [];
+      player.servers = [];
+      player.selectedServer = "auto";
     }
-    if (!currentMatchStillValid || !state.player.match) state.player.match = state.selectedMatch;
-    const activeEpisodeIndex = state.detailEpisodes.findIndex(item => Number(item.number) === Number(number));
-    state.playerEpisodePage = activeEpisodeIndex >= 0 ? Math.floor(activeEpisodeIndex / PLAYER_EPISODES_PER_PAGE) + 1 : 1;
+    if (!player.match || !state.detailMatches.some(match => match.provider.id === player.match.provider.id)) {
+      player.match = state.selectedMatch;
+    }
+    if (!player.selectedServer || player.selectedServer === "default") {
+      player.selectedServer = ({ justanime: "auto", hianime: "hd-1", anikoto: "anikoto" }[player.match?.provider?.id] || "auto");
+    }
+    const index = state.detailEpisodes.findIndex(item => Number(item.number) === Number(number));
+    state.playerEpisodePage = index >= 0 ? Math.floor(index / PLAYER_EPISODES_PER_PAGE) + 1 : 1;
 
-    const defaultServer = state.player.match && state.player.match.provider
-      ? ({ justanime: "auto", hianime: "hd-1", anikoto: "anikoto" }[state.player.match.provider.id] || "auto")
-      : "auto";
-    if (!state.player.selectedServer || state.player.selectedServer === "default") {
-      state.player.selectedServer = defaultServer;
-    }
-    if (token !== state.token) return;
+    // Paint the player before any provider call; discovery happens independently.
     paintPlayer();
-    if (state.player.direct) {
-      attachStream(state.player.direct, { quality: "Direct link", type: /\.m3u8(\?|$)/i.test(state.player.direct) ? "hls" : "mp4" }, []);
+    if (player.direct) {
+      attachStream(player.direct, { quality: "Direct link", type: /\.m3u8(\?|$)/i.test(player.direct) ? "hls" : "mp4" }, []);
     } else {
-      await loadPlayerStreams(token);
+      void loadPlayerStreams(token);
+    }
+
+    if (!preparedSourceCache.has(String(media.id))) {
+      getPreparedMediaSources(media).then(prepared => {
+        if (token !== state.token || state.route !== "/watch" || state.player !== player) return;
+        const preferredId = player.match?.provider?.id;
+        applyPreparedSources(prepared, preferredId);
+        const refreshed = state.detailMatches.find(match => match?.provider?.id === preferredId && match.episodesReady);
+        if (refreshed) player.match = refreshed;
+        renderPlayerEpisodeBrowser();
+        if (player.needsProviderRetry) {
+          player.needsProviderRetry = false;
+          player.failedProviders = [];
+          void loadPlayerStreams(token);
+        }
+      }).catch(() => {});
     }
   }
 
@@ -894,7 +979,7 @@
     const hasPrev = episodeIndex > 0;
     const hasNext = episodeIndex >= 0 && episodeIndex < state.detailEpisodes.length - 1;
     $("#view").innerHTML = '<div class="player-page"><div class="player-topline"><button class="back-button" data-anime="' + media.id + '" aria-label="Back to anime">←</button><div><h1>' + escapeHtml(titleOf(media)) + '</h1><p>Episode ' + escapeHtml(episode.number) + ' · ' + escapeHtml(episode.title) + '</p></div></div>' +
-      '<div class="player-layout"><section><div class="video-frame"><video id="anime-video" controls playsinline webkit-playsinline preload="metadata"></video><iframe id="anime-embed" title="Episode stream" allow="autoplay; fullscreen; picture-in-picture; encrypted-media" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen hidden></iframe><div class="player-overlay" id="player-overlay"><div class="loader"></div><strong>Preparing your player</strong><p>Checking the connected source and browser playback support…</p></div></div>' +
+      '<div class="player-layout"><section><div class="video-frame"><video id="anime-video" controls playsinline webkit-playsinline preload="metadata"></video><iframe id="anime-embed" title="Episode stream" allow="autoplay; fullscreen; picture-in-picture; encrypted-media" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen hidden></iframe><div class="player-overlay" id="player-overlay" role="status"><div class="player-mini-loader"></div><strong>Opening episode…</strong></div></div>' +
       '<div class="player-under"><div><h2>' + escapeHtml(episode.title) + '</h2><p>' + escapeHtml(titleOf(media)) + ' · Episode ' + escapeHtml(episode.number) + '</p></div><div class="player-controls"><button class="btn btn-quiet" data-prev ' + (hasPrev ? "" : "disabled") + '>← Previous</button><button class="btn btn-quiet" data-next ' + (hasNext ? "" : "disabled") + '>Next →</button><button class="btn btn-secondary" data-open-direct>Paste stream link</button></div></div>' +
       '<div class="button-row" style="margin-top:14px" id="skip-buttons"></div></section>' +
       '<aside class="player-sidebar"><div class="player-panel"><h3>Streaming source</h3><div class="source-row" id="provider-pills"></div><div style="height:12px"></div><h3>Audio & server</h3><div class="source-row" id="category-pills"><button class="source-pill' + (player.category === "sub" ? " active" : "") + '" data-category="sub">SUB</button><button class="source-pill' + (player.category !== "sub" ? " active" : "") + '" data-category="dub">DUB · ENGLISH</button></div><div style="height:9px"></div><div class="source-row" id="server-pills"><span class="form-help">Loading built-in source servers…</span></div><div style="height:12px"></div><div class="source-row" id="quality-pills"></div></div>' +
@@ -907,6 +992,10 @@
   async function loadPlayerStreams(token) {
     const player = state.player;
     if (!player) return;
+    const requestId = player.requestId = (player.requestId || 0) + 1;
+    const requestedEpisode = Number(player.episode.number);
+    const stillCurrent = () => token === state.token && state.player === player &&
+      player.requestId === requestId && Number(player.episode.number) === requestedEpisode;
 
     const defaults = { justanime: "auto", hianime: "hd-1", anikoto: "anikoto" };
     const category = player.category === "sub" ? "sub" : "dub";
@@ -928,6 +1017,7 @@
     );
 
     if (!orderedMatches.length) {
+      player.needsProviderRetry = !preparedSourceCache.has(String(player.media.id));
       showPlayerOverlay(
         "No episode source is ready",
         "AniDash could not load an episode list from JustAnime, HiAnime or AniKoto. Return to the anime page and retry the built-in sources.",
@@ -944,11 +1034,7 @@
     player.candidateIndex = 0;
     renderPlayerOptions();
 
-    showPlayerOverlay(
-      "Finding an English " + category.toUpperCase() + " stream",
-      "Checking JustAnime, HiAnime and AniKoto in parallel…",
-      false
-    );
+    showPlayerOverlay("Opening episode…", "", false);
 
     async function resolveProvider(match) {
       const provider = match.provider;
@@ -1081,7 +1167,7 @@
       if (!fallback) return null;
       const preferredDirect = await Promise.race([
         directReady,
-        new Promise(resolve => window.setTimeout(() => resolve(null), 1200))
+        new Promise(resolve => window.setTimeout(() => resolve(null), 180))
       ]);
       return preferredDirect || fallback;
     });
@@ -1096,8 +1182,9 @@
       )
     ]);
 
-    if (token !== state.token) return;
+    if (!stillCurrent()) return;
     if (!winner) {
+      player.needsProviderRetry = !preparedSourceCache.has(String(player.media.id));
       const failures = results.filter(item => item && item.error)
         .map(item => item.error).slice(0, 3);
       player.streams = [];
@@ -1117,6 +1204,7 @@
       return;
     }
 
+    player.needsProviderRetry = false;
     player.match = winner.match;
     player.episode = winner.episode;
     player.servers = winner.servers;
@@ -1135,11 +1223,15 @@
     toast("English " + category.toUpperCase() + " ready: " + winner.match.provider.name + ".");
   }
 
+
   function showPlayerOverlay(title, description, showAction) {
     const overlay = $("#player-overlay");
     if (!overlay) return;
-    overlay.innerHTML = '<div style="font-size:28px;color:#b99aff">◈</div><strong>' + escapeHtml(title) + '</strong><p>' + escapeHtml(description) + '</p>' +
-      (showAction ? '<div class="player-error-actions"><button class="btn btn-primary" data-retry-sources>Retry all built-in sources</button><button class="btn btn-secondary" data-open-direct>Paste stream link</button></div>' : '');
+    overlay.style.display = "grid";
+    overlay.classList.toggle("has-error", Boolean(showAction));
+    overlay.innerHTML = showAction
+      ? '<div class="player-error-symbol">!</div><strong>' + escapeHtml(title) + '</strong><p>' + escapeHtml(description) + '</p><div class="player-error-actions"><button class="btn btn-primary" data-retry-sources>Retry sources</button><button class="btn btn-secondary" data-open-direct>Paste stream link</button></div>'
+      : '<div class="player-mini-loader"></div><strong>Opening episode…</strong>';
   }
 
   function renderPlayerOptions() {
@@ -1717,7 +1809,20 @@
     if (button) button.style.color = "var(--accent)";
   });
 
-  window.addEventListener("hashchange", route);
+
+  // Stop orphaned audio and destroy HLS when leaving playback.
+  window.addEventListener("hashchange", () => {
+    const nextRoute = location.hash.replace(/^#\//, "").split("/")[0];
+    if (nextRoute !== "watch") {
+      const video = $("#anime-video");
+      const embed = $("#anime-embed");
+      if (video) { video.pause(); video.removeAttribute("src"); video.load(); }
+      if (embed) embed.src = "about:blank";
+      if (state.hls) { try { state.hls.destroy(); } catch (_) {} state.hls = null; }
+      if (state.player) state.player.requestId = (state.player.requestId || 0) + 1;
+    }
+    route();
+  });
   window.addEventListener("online", () => toast("You are back online."));
   window.addEventListener("offline", () => toast("You are offline. The app shell is still available."));
 
