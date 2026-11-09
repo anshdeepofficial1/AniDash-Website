@@ -2313,6 +2313,15 @@
     updateActiveNav(current);
     if (current === "/home") return renderHome();
     if (current === "/discover") return renderDiscover();
+    if (current === "/manga") {
+      const params = new URLSearchParams(hash.split("?")[1] || "");
+      return renderManga(params.get("q") || "");
+    }
+    if (current === "/manga-section" && parts[1]) {
+      const params = new URLSearchParams(hash.split("?")[1] || "");
+      return renderMangaSection(parts[1], Math.max(1, Number(params.get("page") || 1)));
+    }
+    if (current === "/manga-detail" && parts[1]) return renderMangaDetails(parts[1]);
     if (current === "/section" && parts[1]) {
       const params = new URLSearchParams(hash.split("?")[1] || "");
       return renderSection(parts[1], Math.max(1, Math.min(250, Number(params.get("page") || 1))));
@@ -2355,6 +2364,52 @@
       navigate("/anime/" + target.getAttribute("data-anime"));
       return;
     }
+    if (target.hasAttribute("data-manga")) {
+      navigate("/manga-detail/" + target.getAttribute("data-manga"));
+      return;
+    }
+    if (target.hasAttribute("data-manga-section-page")) {
+      navigate("/manga-section/" + encodeURIComponent(target.getAttribute("data-manga-section-page")) +
+        "?page=" + Math.max(1, Number(target.getAttribute("data-page") || 1)));
+      return;
+    }
+    if (target.hasAttribute("data-open-cbz")) {
+      const el = $("#cbz-file-input");
+      if (el) el.click();
+      return;
+    }
+    if (target.hasAttribute("data-save-manga")) {
+      const media = state.mangaDetail;
+      if (!media) return;
+      const key = String(media.id);
+      store.mangaList[key] = media;
+      persist();
+      toast("Manga saved to this device.");
+      if (window.AniDashAccount?.authenticated()) {
+        window.AniDashAccount.saveManga(media.id).then(() => toast("Manga synced to AniList."))
+          .catch(error => toast("Manga saved locally; AniList sync failed: " + error.message));
+      }
+      return;
+    }
+    if (target.hasAttribute("data-library-tab")) {
+      state.libraryTab = target.getAttribute("data-library-tab");
+      renderLibrary();
+      return;
+    }
+    if (target.hasAttribute("data-library-favorite")) {
+      const id = target.getAttribute("data-library-favorite");
+      const key = String(id);
+      const wasFavorite = Boolean(store.localFavorites[key]);
+      if (wasFavorite) delete store.localFavorites[key];
+      else store.localFavorites[key] = true;
+      persist();
+      renderLibrary();
+      if (window.AniDashAccount?.authenticated()) {
+        window.AniDashAccount.toggleFavorite(Number(id)).catch(error =>
+          toast("Favorite updated locally; AniList sync failed: " + error.message));
+      }
+      return;
+    }
     if (target.hasAttribute("data-spotlight-next") || target.hasAttribute("data-spotlight-prev") ||
         target.hasAttribute("data-spotlight-index")) {
       const direction = target.hasAttribute("data-spotlight-next") ? 1 : -1;
@@ -2376,6 +2431,30 @@
     if (target.hasAttribute("data-login-anilist")) {
       try { await window.AniDashAccount.beginLogin(); }
       catch (error) { toast(error.message); }
+      return;
+    }
+    if (target.hasAttribute("data-login-mal")) {
+      try { await window.AniDashMal.beginLogin(); }
+      catch (error) { toast(error.message); }
+      return;
+    }
+    if (target.hasAttribute("data-logout-mal")) {
+      if (confirm("Sign out of MyAnimeList? Local lists will remain saved.")) {
+        window.AniDashMal?.logout();
+        refreshProfileChip(window.AniDashAccount?.currentUser());
+        renderAccount();
+      }
+      return;
+    }
+    if (target.hasAttribute("data-sync-mal")) {
+      toast("Importing MyAnimeList…");
+      const items = await syncMalLibrary();
+      if (items) toast("Imported " + items.length + " MyAnimeList entries.");
+      return;
+    }
+    if (target.hasAttribute("data-sync-all")) {
+      await Promise.all([syncAniListLibrary(), syncMalLibrary()]);
+      toast("Available tracking lists refreshed.");
       return;
     }
     if (target.hasAttribute("data-logout-anilist")) {
@@ -2646,6 +2725,11 @@
   });
 
   document.addEventListener("submit", event => {
+    if (event.target.id === "manga-search-form") {
+      event.preventDefault();
+      navigate("/manga?q=" + encodeURIComponent($("#manga-search-input")?.value?.trim() || ""));
+      return;
+    }
     if (event.target.id === "search-form") {
       event.preventDefault();
       submitSearch($("#search-page-input").value);
@@ -2653,6 +2737,25 @@
   });
 
   document.addEventListener("change", async event => {
+    if (event.target.id === "cbz-file-input") {
+      const file = event.target.files?.[0];
+      if (file && window.AniDashCBZ) {
+        window.AniDashCBZ.open(file).catch(error => toast("Reader error: " + error.message));
+      }
+      return;
+    }
+    if (event.target.hasAttribute("data-library-status")) {
+      const id = String(event.target.getAttribute("data-library-status"));
+      const value = event.target.value;
+      if (!LIBRARY_TABS.some(([status]) => status === value) || value === "FAVORITES") return;
+      store.libraryStatuses[id] = value;
+      persist(); renderLibrary();
+      if (window.AniDashAccount?.authenticated()) {
+        window.AniDashAccount.setStatus(Number(id),value).catch(error =>
+          toast("Saved locally; AniList status update failed: " + error.message));
+      }
+      return;
+    }
     if (event.target.id === "backup-file") {
       const file = event.target.files?.[0];
       if (!file) return;
