@@ -83,6 +83,29 @@ try {
   await page.goto(address + "/#/home", { waitUntil: "domcontentloaded" });
   await page.locator(".home-hero").waitFor({ timeout: 15000 });
   await page.screenshot({ path: path.join(artifacts, "mobile-home.png") });
+  // Save a guest watchlist entry, reload and verify durable browser storage.
+  assert.equal(await page.locator('.sidebar-promo').count(), 0, "Provider promo should not appear in sidebar");
+  assert.equal(await page.locator('.mobile-dock [data-route="/history"]').count(), 0, "Continue Watching nav is removed");
+  await page.locator('.home-hero [data-watchlist]').first().click();
+  await page.goto(address + "/#/library", { waitUntil: "domcontentloaded" });
+  await page.locator('.anime-card[data-anime="21"]').waitFor({ timeout: 15000 });
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.locator('.anime-card[data-anime="21"]').waitFor({ timeout: 15000 });
+  assert.ok((await page.evaluate(() => localStorage.getItem("anidash.watch.web.v1")) || "").includes("21"));
+  await page.goto(address + "/#/account", { waitUntil: "domcontentloaded" });
+  await page.getByText("Your AniDash account").waitFor({ timeout: 15000 });
+  assert.equal(await page.locator('input[type="password"]').count(), 0, "No provider password field");
+  await page.goto(address + "/#/settings", { waitUntil: "domcontentloaded" });
+  await page.locator('[data-setting="preferredAudio"]').selectOption("sub");
+  await page.locator('[data-setting="themeMode"]').selectOption("dark");
+  assert.equal(await page.locator('body').getAttribute("data-theme"), "dark");
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.locator('[data-setting="preferredAudio"]').waitFor({ timeout: 15000 });
+  assert.equal(await page.locator('[data-setting="preferredAudio"]').inputValue(), "sub");
+  assert.equal(await page.locator('body').getAttribute("data-theme"), "dark");
+  await page.locator('[data-setting="themeMode"]').selectOption("light");
+  await page.goto(address + "/#/home", { waitUntil: "domcontentloaded" });
+  await page.locator(".home-hero").waitFor({ timeout: 15000 });
 
   const dock = await page.locator(".mobile-dock").boundingBox();
   assert.ok(dock && dock.x >= 0 && dock.x + dock.width <= 391, "Floating dock must fit mobile viewport");
