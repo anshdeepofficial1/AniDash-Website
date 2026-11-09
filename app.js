@@ -189,7 +189,7 @@
       '<div class="anime-shelf">' + rows.map(item => {
         const media = item.media;
         const pct = item.duration > 0 ? Math.min(100, Math.max(0, item.position / item.duration * 100)) : 0;
-        const poster = imageOf(media);
+        const poster = media.bannerImage || imageOf(media);
         return '<article class="anime-card resume-card" data-resume="' + escapeHtml(media.id) + '" tabindex="0" role="button" aria-label="Resume ' + escapeHtml(titleOf(media)) + ' episode ' + escapeHtml(item.episode) + '">' +
           '<div class="poster-wrap">' + (poster ? '<img loading="lazy" src="' + escapeHtml(poster) + '" alt="">' : '<div class="poster-fallback">' + escapeHtml(titleOf(media)) + '</div>') +
           '<span class="poster-score">EP ' + escapeHtml(item.episode || 1) + '</span><span class="resume-play">▶</span></div>' +
@@ -237,7 +237,11 @@
         '<button data-route="/history"><span>◷</span> History</button>' +
       '</div>';
 
+      const hour = new Date().getHours();
+      const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
       $("#view").innerHTML =
+        '<section class="home-welcome"><div><span class="welcome-eyebrow">' + greeting + '</span><h1 class="welcome-title">AniDash</h1></div><div class="welcome-actions"><button data-route="/library" aria-label="Your library">▤</button><button data-route="/settings" aria-label="Settings">⚙</button></div></section>' +
+        '<div class="trending-label">★ &nbsp;Trending anime</div>' +
         (hero ? '<section class="hero-stage home-hero"><div class="hero-bg" style="background-image:url(&quot;' + escapeHtml(heroImage) + '&quot;)"></div><div class="hero-content">' +
           '<div class="hero-kicker">Your next anime obsession</div><h1 class="hero-title">' + escapeHtml(titleOf(hero)) + '</h1>' +
           '<div class="hero-meta"><span>★ ' + formatScore(hero.averageScore) + '</span><span>' + escapeHtml(hero.format || "Anime") + '</span><span>' + escapeHtml(mediaYear(hero)) + '</span><span>' + escapeHtml(hero.status || "") + '</span></div>' +
@@ -260,20 +264,44 @@
     }
   }
 
+
   async function renderDiscover() {
     const token = ++state.token;
-    showLoading("Loading the catalogue…");
+    showLoading("Opening discovery…");
     try {
       const sort = state.discoverSort || "TRENDING_DESC";
       const data = await getCollection(sort, 1, 30);
-      if (token !== state.token) return;
-      state.discover = data.media;
+      if (token !== state.token || state.route !== "/discover") return;
+      state.discover = data.media || [];
       const options = [
         ["TRENDING_DESC", "Trending"], ["POPULARITY_DESC", "Most popular"], ["SCORE_DESC", "Top rated"]
       ];
-      $("#view").innerHTML = pageHead("THE ANIME INDEX", "Find your next story", "Explore AniList metadata, ratings, seasons and series information.") +
-        '<div class="toolbar"><select class="select-control" id="discover-sort">' + options.map(o => '<option value="' + o[0] + '"' + (sort === o[0] ? " selected" : "") + '>' + o[1] + '</option>').join("") + '</select><span class="form-help">Adult catalogue entries are hidden by default.</span></div>' +
-        '<div style="height:18px"></div><div id="discover-grid">' + grid(data.media) + '</div>';
+      const home = state.home;
+      const extraRows = (popular, upcoming) =>
+        shelf("All Time Popular", "", popular, "/discover") +
+        shelf("Upcoming Anime", "", upcoming, "/discover");
+      $("#view").innerHTML =
+        pageHead("", "Discover Anime", "Find your next favorite series") +
+        '<button class="discover-search-launch" data-route="/search"><span>⌕</span>Search anime titles…</button>' +
+        shelf(sort === "TRENDING_DESC" ? "Trending Now" : sort === "POPULARITY_DESC" ? "Most Popular" : "Top Rated", "", (data.media || []).slice(0, 14), "/discover") +
+        '<div id="discover-extras">' + (home ? extraRows(home.popular.slice(0, 12), home.upcoming.slice(0, 12)) : '') + '</div>' +
+        '<section class="section"><div class="section-heading"><h2 class="section-title">Explore anime</h2></div>' +
+        '<div class="toolbar"><select class="select-control" id="discover-sort">' + options.map(o =>
+          '<option value="' + o[0] + '"' + (sort === o[0] ? " selected" : "") + '>' + o[1] + '</option>'
+        ).join("") + '</select></div><div style="height:15px"></div>' +
+        '<div id="discover-grid">' + grid(data.media || []) + '</div></section>';
+      if (!home) {
+        Promise.allSettled([
+          getCollection("POPULARITY_DESC", 1, 14),
+          getCollection("POPULARITY_DESC", 1, 14, ", status: NOT_YET_RELEASED")
+        ]).then(rows => {
+          if (token !== state.token || state.route !== "/discover") return;
+          const popular = rows[0].status === "fulfilled" ? rows[0].value.media || [] : [];
+          const upcoming = rows[1].status === "fulfilled" ? rows[1].value.media || [] : [];
+          const container = $("#discover-extras");
+          if (container) container.innerHTML = extraRows(popular, upcoming);
+        }).catch(() => {});
+      }
     } catch (error) {
       if (token !== state.token) return;
       $("#view").innerHTML = '<div class="empty-state"><h3>Catalogue unavailable</h3><p>' + escapeHtml(error.message) + '</p><button class="btn btn-primary" data-route="/discover">Retry</button></div>';
@@ -769,17 +797,19 @@
     const genres = (media.genres || []).slice(0, 10);
     const watched = isInWatchlist(media.id);
     const matches = state.detailMatches.filter(match => !match.error);
-    const sourceInfo = matches.length ? matches.map(match => match.provider.name + (match.mapped ? " (episode map)" : "")).join(", ") : "Built-in sources checked";
+    const sourceInfo = matches.some(match => match.provisional)
+      ? "Episode numbers from AniList · Streaming availability checked when you play"
+      : matches.length ? matches.map(match => match.provider.name + (match.mapped ? " (episode map)" : "")).join(", ") : "Built-in sources checked";
     const episodes = state.detailEpisodes || [];
     const providerRows = BUILTIN_PROVIDERS.map(provider => {
       const result = state.detailMatches.find(match =>
         match && match.provider && match.provider.id === provider.id && match.episodesReady && Array.isArray(match.episodes)
       ) || state.detailMatches.find(match => match && match.provider && match.provider.id === provider.id);
       const available = result && !result.error && result.episodesReady === true;
-      const status = available ? (result.mapped ? "Episode map ready" : "Title matched") :
+      const status = available ? (result.provisional ? "Ready to try" : result.mapped ? "Episode map ready" : "Title matched") :
         result && result.error && result.error.toLowerCase().includes("no confident title match") ? "No title match" :
         result && result.error ? "Temporarily unavailable" : "Checking";
-      const detail = available ? (result.mapped ? "AniList episode mapping fallback" : "Episode source found") :
+      const detail = available ? (result.provisional ? "Streaming is checked when you press Play" : result.mapped ? "AniList episode mapping fallback" : "Episode source found") :
         result && result.error ? result.error : "Source check has not completed";
       return '<div class="builtin-source-row"><div><strong>' + escapeHtml(provider.name) + '</strong><span>' + escapeHtml(provider.description) + '</span></div><div class="builtin-source-status ' + (available ? "is-ready" : "is-muted") + '"><b>' + escapeHtml(status) + '</b><small>' + escapeHtml(detail) + '</small></div></div>';
     }).join("");
@@ -1434,16 +1464,20 @@
     persist();
   }
 
+
   function renderLibrary() {
     const items = Object.values(store.watchlist).sort((a, b) => titleOf(a).localeCompare(titleOf(b)));
-    $("#view").innerHTML = pageHead("YOUR COLLECTION", "My watchlist", "Anime you have saved on this device.") +
+    $("#view").innerHTML =
+      pageHead("", "Your Library", "Your locally saved anime collection") +
+      '<nav class="library-tabs" aria-label="Library sections"><button class="active" data-route="/library">Watchlist</button><button data-route="/history">Continue Watching</button></nav>' +
       (items.length ? grid(items) : '<div class="empty-state"><div class="empty-icon">♡</div><h3>Your list is waiting</h3><p>Open any anime and tap Add to watchlist to keep it here.</p><button class="btn btn-primary" data-route="/discover">Explore anime</button></div>');
   }
 
   function renderHistory() {
     const items = Object.values(store.history).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
     const media = items.map(item => item.media).filter(Boolean);
-    $("#view").innerHTML = pageHead("RECENT ACTIVITY", "Continue watching", "Your playback progress is stored locally in this browser.") +
+    $("#view").innerHTML = pageHead("", "Your Library", "Your playback progress on this device") +
+      '<nav class="library-tabs" aria-label="Library sections"><button data-route="/library">Watchlist</button><button class="active" data-route="/history">Continue Watching</button></nav>' +
       (items.length ? '<div class="anime-grid">' + items.map(item => {
         const pct = item.duration ? Math.min(100, Math.max(0, item.position / item.duration * 100)) : 0;
         const poster = imageOf(item.media);
