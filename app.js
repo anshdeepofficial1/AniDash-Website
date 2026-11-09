@@ -23,14 +23,35 @@
         history: raw.history || {},
         manualStreams: raw.manualStreams || {},
         providerManifest: raw.providerManifest || null,
-        adultContent: raw.adultContent === true
+        adultContent: raw.adultContent === true,
+        preferences: raw.preferences && typeof raw.preferences === "object" ? raw.preferences : {},
+        hiddenCloudEntries: raw.hiddenCloudEntries || {},
+        updatedAt: Number(raw.updatedAt || 0)
       };
     } catch (_) {
-      return { watchlist: {}, history: {}, manualStreams: {}, providerManifest: null, adultContent: false };
+      return { watchlist: {}, history: {}, manualStreams: {}, providerManifest: null, adultContent: false,
+        preferences: {}, hiddenCloudEntries: {}, updatedAt: 0 };
     }
   }
 
   const store = readStore();
+  const DEFAULT_PREFERENCES = {
+    themeMode: "light", preferredAudio: "dub", defaultQuality: "Auto",
+    autoEnableSubtitles: true, autoSkipIntro: false, showNextEpisodePrompt: true,
+    episodeViewMode: "list", preferredSource: "auto",
+    trackProgress: true
+  };
+  store.preferences = { ...DEFAULT_PREFERENCES, ...store.preferences };
+  const setting = key => store.preferences[key];
+  function applyPreferences() {
+    if (!document.body || !document.body.dataset) return;
+    const themeMode = setting("themeMode");
+    const systemDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+    document.body.dataset.theme = themeMode === "dark" || (themeMode === "system" && systemDark)
+      ? "dark" : "light";
+    document.body.dataset.episodeLayout = setting("episodeViewMode") || "list";
+  }
+  applyPreferences();
   const state = {
     route: "/home",
     token: 0,
@@ -66,8 +87,24 @@
   const slug = value => String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 
   function persist() {
+    store.updatedAt = Date.now();
     try { localStorage.setItem(STORE_KEY, JSON.stringify(store)); }
-    catch (_) { toast("This browser storage is full. Some history may not save."); }
+    catch (_) { toast("Browser storage is unavailable. Export your library as backup."); }
+    if (window.AniDashStorage) {
+      window.AniDashStorage.save(store).catch(() => {});
+    }
+  }
+  async function restoreStorage() {
+    if (!window.AniDashStorage) return;
+    try {
+      const backup = await window.AniDashStorage.load();
+      if (backup && Number(backup.updatedAt || 0) > Number(store.updatedAt || 0)) {
+        Object.assign(store, backup);
+        store.preferences = { ...DEFAULT_PREFERENCES, ...store.preferences };
+        persist();
+      }
+    } catch (_) {}
+    applyPreferences();
   }
 
   function toast(message) {
@@ -226,21 +263,20 @@
       state.home = { trending, popular, top, airing, upcoming, movies, hidden };
       const hero = trending[0] || popular[0] || top[0];
       const heroImage = hero && (hero.bannerImage || imageOf(hero));
-      const continueItems = Object.values(store.history)
-        .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)).slice(0, 10);
+      // Playback progress remains saved, but the user opted to hide the Continue Watching shelf.
       const watchlistItems = Object.values(store.watchlist).slice(0, 12);
 
       const quickLinks = '<div class="home-shortcuts">' +
         '<button data-route="/discover"><span>◈</span> Discover</button>' +
         '<button data-route="/search"><span>⌕</span> Search anime</button>' +
         '<button data-route="/library"><span>♡</span> My watchlist</button>' +
-        '<button data-route="/history"><span>◷</span> History</button>' +
+        '<button data-route="/account"><span>◎</span> Account</button>' +
       '</div>';
 
       const hour = new Date().getHours();
       const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
       $("#view").innerHTML =
-        '<section class="home-welcome"><div><span class="welcome-eyebrow">' + greeting + '</span><h1 class="welcome-title">AniDash</h1></div><div class="welcome-actions"><button data-route="/library" aria-label="Your library">▤</button><button data-route="/settings" aria-label="Settings">⚙</button></div></section>' +
+        '<section class="home-welcome"><div><span class="welcome-eyebrow">' + greeting + '</span><h1 class="welcome-title">AniDash</h1></div><div class="welcome-actions"><button data-route="/account" aria-label="Your profile">◎</button><button data-route="/settings" aria-label="Settings">⚙</button></div></section>' +
         '<div class="trending-label">★ &nbsp;Trending anime</div>' +
         (hero ? '<section class="hero-stage home-hero"><div class="hero-bg" style="background-image:url(&quot;' + escapeHtml(heroImage) + '&quot;)"></div><div class="hero-content">' +
           '<div class="hero-kicker">Your next anime obsession</div><h1 class="hero-title">' + escapeHtml(titleOf(hero)) + '</h1>' +
@@ -249,7 +285,6 @@
           '<div class="hero-actions"><button class="btn btn-primary" data-anime="' + hero.id + '">Explore anime <span>→</span></button><button class="btn btn-secondary" data-watchlist="' + hero.id + '">♡ Add to list</button></div>' +
           '</div></section>' : '') +
         quickLinks +
-        resumeShelf(continueItems) +
         shelf("Currently airing", "Fresh episodes from currently releasing series.", airing.slice(0, 14), "/discover") +
         shelf("Trending right now", "The series viewers are talking about.", trending.slice(0, 14), "/discover") +
         shelf("Popular with fans", "Big adventures, favourites and crowd-pleasers.", popular.slice(0, 14), "/discover") +
@@ -1530,10 +1565,13 @@
 
   function renderLibrary() {
     const items = Object.values(store.watchlist).sort((a, b) => titleOf(a).localeCompare(titleOf(b)));
+    const online = window.AniDashAccount && window.AniDashAccount.authenticated();
     $("#view").innerHTML =
-      pageHead("", "Your Library", "Your locally saved anime collection") +
-      '<nav class="library-tabs" aria-label="Library sections"><button class="active" data-route="/library">Watchlist</button><button data-route="/history">Continue Watching</button></nav>' +
-      (items.length ? grid(items) : '<div class="empty-state"><div class="empty-icon">♡</div><h3>Your list is waiting</h3><p>Open any anime and tap Add to watchlist to keep it here.</p><button class="btn btn-primary" data-route="/discover">Explore anime</button></div>');
+      pageHead("", "Your Library", "Your saved anime watchlist") +
+      '<div class="library-save-status">' + (online
+        ? '✓ Saved on this device · AniList sync available'
+        : '✓ Saved on this device · <button class="text-button" data-route="/account">Sign in for cloud sync</button>') + '</div>' +
+      (items.length ? grid(items) : '<div class="empty-state"><div class="empty-icon">♡</div><h3>Your watchlist is empty</h3><p>Add an anime to save it here. You can export a backup from Settings.</p><button class="btn btn-primary" data-route="/discover">Explore anime</button></div>');
   }
 
   function renderHistory() {
@@ -1610,7 +1648,7 @@
   }
 
   function updateActiveNav(route) {
-    const active = route === "/watch" ? "/history" : route;
+    const active = route === "/watch" ? "/discover" : route;
     $$("[data-route]").forEach(item => {
       const value = item.getAttribute("data-route");
       item.classList.toggle("active", value === active || (route.startsWith("/anime") && value === "/discover"));
@@ -1631,7 +1669,8 @@
       return renderSearch(params.get("q") || "");
     }
     if (current === "/library") return renderLibrary();
-    if (current === "/history") return renderHistory();
+    if (current === "/history") { location.hash = "#/library"; return; }
+    if (current === "/account") return renderAccount();
     if (current === "/settings") return renderSettings();
     if (current === "/anime" && parts[1]) return renderAnime(parts[1]);
     if (current === "/watch" && parts[1]) return renderWatch(parts[1], parts[2] || "1");
@@ -1940,5 +1979,22 @@
   }
 
   loadProviders();
-  route();
+  const accountClient = window.AniDashAccount;
+  if (accountClient) accountClient.captureRedirect();
+  // Hydrate the backup before routing; this avoids briefly replacing an
+  // existing watchlist with an empty UI after reload.
+  Promise.resolve().then(restoreStorage).finally(() => {
+    route();
+    if (accountClient) {
+      accountClient.setHandler(user => {
+        refreshProfileChip(user);
+        if (state.route === "/account") renderAccount();
+        if (state.route === "/library") renderLibrary();
+      });
+      accountClient.init().then(async user => {
+        refreshProfileChip(user);
+        if (user) await syncAniListLibrary();
+      }).catch(() => {});
+    }
+  });
 })();
