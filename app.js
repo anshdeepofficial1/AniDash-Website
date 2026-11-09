@@ -423,7 +423,7 @@
         '<button data-route="/discover"><span>◈</span> Discover</button>' +
         '<button data-route="/search"><span>⌕</span> Search anime</button>' +
         '<button data-route="/library"><span>♡</span> My watchlist</button>' +
-        '<button data-route="/account"><span>◎</span> Account</button>' +
+        '<button data-route="/account">' + uiIcon("user") + ' Account</button>' +
       '</div>';
 
       const hour = new Date().getHours();
@@ -2376,7 +2376,8 @@
   }
 
   function updateActiveNav(route) {
-    const active = route === "/watch" || route === "/section" ? "/discover" : route;
+    const active = route === "/watch" || route === "/section" ? "/discover" :
+      route === "/manga-library" ? "/manga" : route;
     $$("[data-route]").forEach(item => {
       const value = item.getAttribute("data-route");
       item.classList.toggle("active", value === active || (route.startsWith("/anime") && value === "/discover"));
