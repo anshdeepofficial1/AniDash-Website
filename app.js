@@ -1023,7 +1023,7 @@
       servers: [],
       tracks: [],
       selectedServer: state.selectedMatch && state.selectedMatch.provider ? ({ justanime: "auto", hianime: "hd-1", anikoto: "anikoto" }[state.selectedMatch.provider.id] || "auto") : "auto",
-      category: "dub",
+      category: setting("preferredAudio") === "sub" ? "sub" : "dub",
       intro: null,
       outro: null,
       direct: store.manualStreams[String(state.detail.id) + ":" + String(number)] || ""
@@ -1064,7 +1064,7 @@
     const player = existingPlayer || {
       media, episode, match: state.selectedMatch, streams: [], embeds: [],
       availableProviders: [], servers: [], tracks: [], selectedServer: "auto",
-      category: "dub", intro: null, outro: null, requestId: 0,
+      category: setting("preferredAudio") === "sub" ? "sub" : "dub", intro: null, outro: null, requestId: 0,
       direct: store.manualStreams[String(id) + ":" + String(number)] || ""
     };
     const changedEpisode = Number(player.lastRenderedEpisode) !== Number(episode.number);
@@ -1153,9 +1153,11 @@
       match && match.provider && match.episodesReady &&
       Array.isArray(match.episodes) && match.episodes.length
     );
+    const preferred = allMatches.find(match => match.provider.id === setting("preferredSource"));
+    const firstMatch = player.manualProvider ? player.match : (preferred || player.match);
     const orderedMatches = [
-      player.match,
-      ...allMatches.filter(match => match !== player.match)
+      firstMatch,
+      ...allMatches.filter(match => match !== firstMatch)
     ].filter((match, index, rows) =>
       match && match.provider && match.episodesReady &&
       Array.isArray(match.episodes) &&
@@ -1358,7 +1360,26 @@
     player.selectedServer = winner.selectedServer;
     player.streams = winner.streams;
     player.embeds = winner.embeds;
-    player.candidates = [...winner.streams, ...winner.embeds];
+    const targetQuality = setting("defaultQuality");
+    const targetPixels = Number.parseInt(String(targetQuality), 10);
+    const qualityPixels = stream => {
+      const found = /(?:^|[^\d])(2160|1440|1080|720|480|360)(?:p|[^\d]|$)/i.exec(
+        String(stream.quality || stream.label || stream.name || "")
+      );
+      return found ? Number(found[1]) : 0;
+    };
+    const rankedStreams = [...winner.streams].sort((a, b) => {
+      const qa = qualityPixels(a);
+      const qb = qualityPixels(b);
+      if (Number.isFinite(targetPixels)) {
+        if (!qa && !qb) return 0;
+        if (!qa) return 1;
+        if (!qb) return -1;
+        return Math.abs(qa - targetPixels) - Math.abs(qb - targetPixels);
+      }
+      return qb - qa;
+    });
+    player.candidates = [...rankedStreams, ...winner.embeds];
     player.candidateIndex = 0;
     player.tracks = winner.tracks;
     player.intro = winner.intro;
@@ -1559,6 +1580,13 @@
       if (saved && Number(saved.episode) === Number(state.player.episode.number) && saved.position > 15 && video.duration > saved.position + 15) {
         video.currentTime = saved.position;
       }
+      if (video.textTracks && video.textTracks.length) {
+        try {
+          [...video.textTracks].forEach(track => {
+            track.mode = setting("autoEnableSubtitles") ? "showing" : "disabled";
+          });
+        } catch (_) {}
+      }
       video.play().catch(error => {
         if (state.currentVideo !== url) return;
         if (error?.name === "NotAllowedError") {
@@ -1593,17 +1621,45 @@
         showPlayerOverlay("Playback unavailable", "The selected link is not playable in this browser.", true);
       }
     };
-    video.ontimeupdate = () => savePlaybackProgress(video);
+    video.ontimeupdate = () => {
+      savePlaybackProgress(video);
+      const intro = state.player?.intro;
+      if (setting("autoSkipIntro") && intro && Number.isFinite(Number(intro.start)) &&
+          Number.isFinite(Number(intro.end)) && Number(intro.end) > Number(intro.start) &&
+          video.currentTime >= Number(intro.start) && video.currentTime < Number(intro.end)) {
+        video.currentTime = Number(intro.end);
+      }
+    };
+    video.onpause = () => savePlaybackProgress(video, false, true);
     video.onended = () => {
-      savePlaybackProgress(video, true);
-      toast("Episode finished. Choose Next to continue.");
+      savePlaybackProgress(video, true, true);
+      if (setting("showNextEpisodePrompt")) {
+        const next = state.detailEpisodes.find(ep => Number(ep.number) === Number(state.player.episode.number) + 1);
+        if (next) {
+          const over = $("#player-overlay");
+          if (over) {
+            over.style.display = "grid";
+            over.innerHTML = '<strong>Episode finished</strong><button class="btn btn-primary" data-next>▶ Next episode</button>';
+          }
+        } else toast("Episode finished.");
+      }
+      const account = window.AniDashAccount;
+      if (setting("trackProgress") && account?.authenticated()) {
+        account.saveToList(state.player.media.id, "CURRENT", Number(state.player.episode.number))
+          .catch(() => toast("Progress saved locally; AniList sync unavailable."));
+      }
     };
   }
 
-  function savePlaybackProgress(video, ended) {
-    if (!state.player || !video.duration || !Number.isFinite(video.duration)) return;
+  function savePlaybackProgress(video, ended, force = false) {
+    if (!setting("trackProgress") || !state.player) return;
+    const currentTime = Number(video?.currentTime || 0);
+    if (!Number.isFinite(currentTime) || currentTime < 0) return;
+    const duration = Number.isFinite(Number(video.duration)) && Number(video.duration) > 0
+      ? Number(video.duration) : 0;
+    if (!currentTime && !duration) return;
     const now = Date.now();
-    if (!ended && now - state.progressTimer < 7000) return;
+    if (!force && !ended && now - state.progressTimer < 3000) return;
     state.progressTimer = now;
     const media = state.player.media;
     const episode = state.player.episode;
@@ -1615,8 +1671,8 @@
       },
       episode: episode.number,
       episodeTitle: episode.title,
-      position: ended ? video.duration : video.currentTime,
-      duration: video.duration,
+      position: ended ? duration : currentTime,
+      duration,
       updatedAt: now
     };
     persist();
@@ -1920,7 +1976,10 @@
     if (target.hasAttribute("data-install")) { openInstallGuide(); return; }
     if (target.hasAttribute("data-close")) { closeModal(); return; }
     if (target.hasAttribute("data-play-first")) {
-      const first = state.detailEpisodes[0];
+      const saved = setting("trackProgress") ? store.history[String(state.detail?.id)] : null;
+      const first = saved
+        ? state.detailEpisodes.find(ep => Number(ep.number) === Number(saved.episode)) || state.detailEpisodes[0]
+        : state.detailEpisodes[0];
       if (first) startEpisode(first.number, first.id);
       return;
     }
@@ -2000,6 +2059,7 @@
       const match = (state.detailMatches || []).find(item => item && item.episodesReady && item.provider.id === providerId);
       if (match) {
         state.player.match = match;
+        state.player.manualProvider = true;
         state.player.failedProviders = [];
         state.player.candidates = [];
         state.player.candidateIndex = 0;
@@ -2190,13 +2250,37 @@
     if (nextRoute !== "watch") {
       const video = $("#anime-video");
       const embed = $("#anime-embed");
-      if (video) { video.pause(); video.removeAttribute("src"); video.load(); }
+      if (video) { savePlaybackProgress(video, false, true); video.pause(); video.removeAttribute("src"); video.load(); }
       if (embed) embed.src = "about:blank";
       if (state.hls) { try { state.hls.destroy(); } catch (_) {} state.hls = null; }
       if (state.playbackWatchdog) { window.clearTimeout(state.playbackWatchdog); state.playbackWatchdog = null; }
       if (state.player) state.player.requestId = (state.player.requestId || 0) + 1;
     }
     route();
+  });
+  window.addEventListener("pagehide", () => {
+    const video = $("#anime-video");
+    if (video) savePlaybackProgress(video, false, true);
+    persist();
+  });
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") {
+      const video = $("#anime-video");
+      if (video) savePlaybackProgress(video, false, true);
+    }
+  });
+  window.addEventListener("storage", event => {
+    if (event.key !== STORE_KEY || !event.newValue) return;
+    try {
+      const data = JSON.parse(event.newValue);
+      if (Number(data.updatedAt || 0) > Number(store.updatedAt || 0)) {
+        Object.assign(store, data);
+        store.preferences = { ...DEFAULT_PREFERENCES, ...store.preferences };
+        applyPreferences();
+        if (state.route === "/library") renderLibrary();
+        if (state.route === "/settings") renderSettings();
+      }
+    } catch (_) {}
   });
   window.addEventListener("online", () => toast("You are back online."));
   window.addEventListener("offline", () => toast("You are offline. The app shell is still available."));
