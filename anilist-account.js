@@ -247,6 +247,24 @@
     return requestPromise;
   }
 
+
+  async function saveManga(mediaId, progress = 0) {
+    if (!authenticated()) return null;
+    const id = Number(mediaId);
+    const old = mangaEntries.get(id);
+    const status = old?.status || (progress > 0 ? "CURRENT" : "PLANNING");
+    const vars = { mediaId:id, status, progress:Math.max(Number(old?.progress || 0),Number(progress || 0)) };
+    const data = await request(
+      "mutation ($mediaId:Int!,$status:MediaListStatus,$progress:Int){SaveMediaListEntry(mediaId:$mediaId,status:$status,progress:$progress){id mediaId status progress}}",
+      vars
+    );
+    if (data?.SaveMediaListEntry) {
+      mangaEntries.set(id, { ...old, ...data.SaveMediaListEntry });
+      return copy(data.SaveMediaListEntry);
+    }
+    return null;
+  }
+
   async function saveToList(mediaId, status = "PLANNING", progress) {
     if (!authenticated()) return null;
     const id = Number(mediaId);
@@ -283,7 +301,7 @@
   window.AniDashAccount = {
     captureRedirect, setHandler, settings, init, beginLogin, logout,
     currentUser, configured, authenticated, list, listManga, favorites, isFavorite, toggleFavorite,
-    parseWatchNotes, formatWatchNotes, resumeFromEntry, syncPosition, setStatus,
+    parseWatchNotes, formatWatchNotes, resumeFromEntry, syncPosition, setStatus, saveManga,
     getEntry, saveToList, deletePlanning
   };
 })();
