@@ -2882,10 +2882,17 @@
 
   loadProviders();
   const accountClient = window.AniDashAccount;
+  const malClient = window.AniDashMal;
   if (accountClient) accountClient.captureRedirect();
-  // Hydrate the backup before routing; this avoids briefly replacing an
-  // existing watchlist with an empty UI after reload.
-  Promise.resolve().then(restoreStorage).finally(() => {
+  // Complete the OAuth callback before drawing Account; query-string codes
+  // are cleared immediately by the MAL client.
+  Promise.resolve().then(async () => {
+    if (malClient) {
+      try { await malClient.captureRedirect(); }
+      catch (error) { toast("MyAnimeList login failed: " + error.message); }
+    }
+    await restoreStorage();
+  }).finally(() => {
     route();
     if (accountClient) {
       accountClient.setHandler(user => {
@@ -2896,6 +2903,20 @@
       accountClient.init().then(async user => {
         refreshProfileChip(user);
         if (user) await syncAniListLibrary();
+      }).catch(() => {});
+    }
+    if (malClient) {
+      malClient.setHandler(user => {
+        refreshProfileChip(accountClient?.currentUser());
+        if (state.route === "/account") renderAccount();
+        if (state.route === "/library") renderLibrary();
+      });
+      malClient.configuration().then(() => {
+        if (state.route === "/account") renderAccount();
+      }).catch(() => {});
+      malClient.init().then(async user => {
+        refreshProfileChip(accountClient?.currentUser());
+        if (user) await syncMalLibrary();
       }).catch(() => {});
     }
   });
