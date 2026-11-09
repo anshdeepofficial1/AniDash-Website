@@ -126,7 +126,7 @@
     return copy((type === "MANGA" ? mangaEntries : entries).get(Number(mediaId)) || null);
   }
   function parseWatchNotes(notes) {
-    const match = /shx:ep=(\\d+)&sec=(\\d+)(?:&dur=(\\d+))?/.exec(String(notes || ""));
+    const match = /shx:ep=(\d+)&sec=(\d+)(?:&dur=(\d+))?/.exec(String(notes || ""));
     if (!match) return null;
     const episode = Number(match[1]), seconds = Number(match[2]), duration = Number(match[3] || 1440);
     if (!Number.isSafeInteger(episode) || episode < 1 || !Number.isFinite(seconds) || seconds < 0)
@@ -137,8 +137,8 @@
     const tag = "shx:ep=" + episode + "&sec=" + Math.max(0, Math.floor(seconds)) +
       (duration > 0 ? "&dur=" + Math.floor(duration) : "");
     const current = String(existing || "");
-    const regex = /shx:ep=\\d+&sec=\\d+(?:&dur=\\d+)?/;
-    return regex.test(current) ? current.replace(regex, tag) : current.trim() ? tag + "\\n" + current : tag;
+    const regex = /shx:ep=\d+&sec=\d+(?:&dur=\d+)?/;
+    return regex.test(current) ? current.replace(regex, tag) : current.trim() ? tag + "\n" + current : tag;
   }
   function resumeFromEntry(entry, totalEpisodes) {
     if (!entry) return null;
