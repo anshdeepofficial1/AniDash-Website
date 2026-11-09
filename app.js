@@ -1237,25 +1237,105 @@
     return null;
   }
 
+  function importCloudPosition(media, entry, source) {
+    if (!media?.id || !entry) return;
+    const key = String(media.id);
+    let episode, seconds, duration, updatedAt;
+    if (source === "ANILIST") {
+      const resumed = window.AniDashAccount?.resumeFromEntry(entry, Number(media.episodes || 0));
+      if (!resumed) return;
+      ({ episode, seconds, duration, updatedAt } = resumed);
+    } else {
+      const watched = Number(entry?.list_status?.num_episodes_watched || 0);
+      episode = Math.max(1, watched + 1);
+      seconds = 0;
+      duration = 0;
+      updatedAt = 0;
+    }
+    if (!Number.isSafeInteger(episode) || episode < 1) return;
+    const local = store.history[key];
+    // Avoid overwriting a newer partial locally with an older cloud update.
+    if (local && Number(local.episode) > Number(episode)) return;
+    if (local && Number(local.episode) === Number(episode) &&
+        Number(local.position || 0) > Number(seconds || 0) &&
+        Number(local.updatedAt || 0) > Number(updatedAt || 0)) return;
+    store.history[key] = {
+      media: {
+        id: media.id, idMal: media.idMal, title: media.title, coverImage: media.coverImage,
+        bannerImage: media.bannerImage, format: media.format, status: media.status,
+        episodes: media.episodes, averageScore: media.averageScore, seasonYear: media.seasonYear
+      },
+      episode, episodeTitle: "Episode " + episode,
+      position: seconds || 0, duration: duration || 0,
+      updatedAt: updatedAt || 0,
+      syncedFrom: source
+    };
+  }
   async function syncAniListLibrary() {
     const account = window.AniDashAccount;
-    if (!account || !account.authenticated()) return;
+    if (!account?.authenticated()) return null;
     try {
       const cloudEntries = await account.list();
-      let changed = false;
       for (const entry of cloudEntries) {
         const id = String(entry.mediaId);
-        if (store.hiddenCloudEntries[id] || !entry.media || store.watchlist[id]) continue;
-        store.watchlist[id] = entry.media;
-        changed = true;
+        if (!entry.media) continue;
+        store.libraryStatuses[id] = entry.status || "PLANNING";
+        if (!store.hiddenCloudEntries[id] && !store.watchlist[id]) store.watchlist[id] = entry.media;
+        if (entry.status === "CURRENT" || entry.status === "REPEATING") {
+          importCloudPosition(entry.media, entry, "ANILIST");
+        }
       }
-      // Guest data is never discarded on account sign-in.
-      if (changed) persist();
+      try {
+        const favorites = await account.favorites();
+        for (const id of favorites) store.localFavorites[String(id)] = true;
+      } catch (_) {} // Favourites are optional; other library sections still work.
+      persist();
       if (state.route === "/library") renderLibrary();
+      if (state.route === "/history") renderHistory();
       if (state.route === "/account") renderAccount();
+      if (state.route === "/home") renderHome();
       return cloudEntries;
     } catch (error) {
       toast("AniList sync unavailable: " + error.message);
+      return null;
+    }
+  }
+  async function syncMalLibrary() {
+    const mal = window.AniDashMal;
+    if (!mal?.authenticated()) return null;
+    try {
+      const remote = await mal.list();
+      const mapped = [];
+      const ids = [...new Set(remote.map(item => Number(item?.node?.id)).filter(Number.isSafeInteger))];
+      for (let i = 0; i < ids.length; i += 40) {
+        const data = await gql("query ($ids:[Int]) { Page(perPage:50) { media(type:ANIME,idMal_in:$ids) { " +
+          MEDIA_FIELDS + " } } }", { ids: ids.slice(i,i+40) });
+        mapped.push(...(data?.Page?.media || []));
+      }
+      const byMalId = new Map(mapped.map(media => [Number(media.idMal), media]));
+      state.malEntries = remote;
+      const statuses = { watching:"CURRENT",completed:"COMPLETED",on_hold:"PAUSED",
+        dropped:"DROPPED",plan_to_watch:"PLANNING" };
+      for (const entry of remote) {
+        const media = byMalId.get(Number(entry?.node?.id));
+        if (!media) continue; // Unmapped MAL entries remain accessible on MAL's own website.
+        const key = String(media.id);
+        const status = statuses[entry?.list_status?.status] || "PLANNING";
+        store.malStatuses[key] = status;
+        if (!window.AniDashAccount?.getEntry(media.id)) store.libraryStatuses[key] = status;
+        if (!store.hiddenCloudEntries[key] && !store.watchlist[key]) store.watchlist[key] = media;
+        if (status === "CURRENT" && !window.AniDashAccount?.getEntry(media.id)) {
+          importCloudPosition(media, entry, "MAL");
+        }
+      }
+      persist();
+      if (state.route === "/library") renderLibrary();
+      if (state.route === "/history") renderHistory();
+      if (state.route === "/account") renderAccount();
+      if (state.route === "/home") renderHome();
+      return remote;
+    } catch (error) {
+      toast("MyAnimeList sync unavailable: " + error.message);
       return null;
     }
   }
