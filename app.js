@@ -505,6 +505,143 @@
     if (input) input.focus({ preventScroll: true });
   }
 
+
+  const MANGA_FIELDS = [
+    "id title { romaji english native } synonyms",
+    "coverImage { extraLarge large medium } bannerImage format status chapters volumes",
+    "genres averageScore popularity siteUrl isAdult",
+    "description(asHtml: false) externalLinks { url site type language }"
+  ].join(" ");
+  const MANGA_SECTIONS = {
+    trending: { title:"Trending Manga", sort:"TRENDING_DESC", extra:"" },
+    popular: { title:"Popular Manga", sort:"POPULARITY_DESC", extra:"" },
+    upcoming: { title:"Upcoming Manga", sort:"POPULARITY_DESC", extra:", status: NOT_YET_RELEASED" },
+    top: { title:"Top Rated Manga", sort:"SCORE_DESC", extra:"" }
+  };
+  async function getMangaCollection(sort, page = 1, perPage = 20, extra = "", searchTerm = "") {
+    if (searchTerm) {
+      const query = "query ($search:String!,$page:Int!,$perPage:Int!){ Page(page:$page,perPage:$perPage){pageInfo{hasNextPage currentPage} media(type:MANGA,search:$search,sort:SEARCH_MATCH,isAdult:false){" + MANGA_FIELDS + "}}}";
+      const data = await gql(query, { search:searchTerm, page, perPage });
+      return data.Page;
+    }
+    const query = "query ($page:Int!,$perPage:Int!){ Page(page:$page,perPage:$perPage){pageInfo{hasNextPage currentPage} media(type:MANGA,sort:" +
+      sort + ",isAdult:false" + extra + "){" + MANGA_FIELDS + "}}}";
+    const data = await gql(query, { page, perPage });
+    return data.Page;
+  }
+  function mangaGrid(items) {
+    if (!items?.length) return '<div class="empty-state"><h3>No manga found</h3><p>Try a different category or search term.</p></div>';
+    return '<div class="anime-grid">' + items.map(item => card(item, "MANGA")).join("") + '</div>';
+  }
+  function mangaShelf(title, rows, sectionKey) {
+    if (!rows?.length) return "";
+    return '<section class="section shelf-section"><div class="section-heading"><h2 class="section-title">' +
+      escapeHtml(title) + '</h2><button class="section-link" data-route="/manga-section/' + sectionKey +
+      '">View all ' + uiIcon("chevron-right") + '</button></div><div class="anime-shelf">' +
+      rows.map(item => card(item, "MANGA")).join("") + '</div></section>';
+  }
+  async function renderManga(term = "") {
+    const token = ++state.token;
+    showLoading("Opening Manga Library…");
+    const query = String(term || "").trim();
+    try {
+      const results = query
+        ? await Promise.all([getMangaCollection("SEARCH_MATCH",1,24,"",query)])
+        : await Promise.all([
+          getMangaCollection("TRENDING_DESC",1,15),
+          getMangaCollection("POPULARITY_DESC",1,15),
+          getMangaCollection("POPULARITY_DESC",1,15,", status: NOT_YET_RELEASED")
+        ]);
+      if (token !== state.token || state.route !== "/manga") return;
+      const rows = results.map(item => item?.media || []);
+      $("#view").innerHTML = pageHead("", "Manga", "Discover manga, save reading lists and read CBZ files locally") +
+        '<form id="manga-search-form" class="search-box-large">' + uiIcon("search") +
+        '<input id="manga-search-input" autocomplete="off" aria-label="Search manga" placeholder="Search manga titles…" value="' +
+        escapeHtml(query) + '"><button class="btn btn-primary" type="submit">Search</button></form>' +
+        '<div class="manga-topline"><div class="feature-chip">' + uiIcon("manga") +
+        ' AniList manga catalogue</div><button class="btn btn-secondary" data-open-cbz>' +
+        uiIcon("manga") + ' Read CBZ file</button></div>' +
+        '<input id="cbz-file-input" type="file" accept=".cbz,application/zip" style="display:none">' +
+        (query ? '<section class="section"><h2 class="section-title">Search results</h2>' + mangaGrid(rows[0]) + '</section>'
+         : mangaShelf("Trending Manga",rows[0],"trending") +
+           mangaShelf("All Time Popular",rows[1],"popular") +
+           mangaShelf("Upcoming Manga",rows[2],"upcoming")) +
+        '<p class="official-read-note">Read chapters through official publisher links when available. Local CBZ reading is supported for files you own.</p>';
+    } catch (error) {
+      if (token !== state.token) return;
+      $("#view").innerHTML = '<div class="empty-state"><h3>Could not load manga</h3><p>' +
+        escapeHtml(error.message) + '</p><button class="btn btn-primary" data-route="/manga">Retry</button></div>';
+    }
+  }
+  async function renderMangaSection(sectionKey, page = 1) {
+    const section = MANGA_SECTIONS[sectionKey];
+    if (!section) { navigate("/manga"); return; }
+    const token = ++state.token;
+    showLoading("Loading " + section.title + "…");
+    try {
+      const result = await getMangaCollection(section.sort,page,24,section.extra);
+      if (token !== state.token || state.route !== "/manga-section") return;
+      $("#view").innerHTML = pageHead("MANGA",section.title,"Browse all titles in this collection",
+        '<button class="btn btn-secondary" data-route="/manga">' + uiIcon("chevron-left") + ' Back to Manga</button>') +
+        mangaGrid(result?.media || []) +
+        '<div class="section-pager"><button class="btn btn-secondary" data-manga-section-page="' + sectionKey +
+        '" data-page="' + (page-1) + '"' + (page<=1?" disabled":"") + '>Previous</button>' +
+        '<span>Page ' + page + '</span><button class="btn btn-primary" data-manga-section-page="' +
+        sectionKey + '" data-page="' + (page+1) + '"' +
+        (!result.pageInfo?.hasNextPage?" disabled":"") + '>Next</button></div>';
+    } catch (error) {
+      if (token !== state.token) return;
+      $("#view").innerHTML = '<div class="empty-state"><h3>Manga unavailable</h3><p>' +
+      escapeHtml(error.message) + '</p></div>';
+    }
+  }
+  async function renderMangaDetails(id) {
+    const token = ++state.token;
+    showLoading("Loading manga details…");
+    try {
+      const data = await gql("query ($id:Int!){Media(id:$id,type:MANGA){" + MANGA_FIELDS + "}}",{id:Number(id)});
+      if (token !== state.token || state.route !== "/manga-detail") return;
+      const media = data?.Media;
+      if (!media) throw new Error("Manga not found");
+      state.mangaDetail = media;
+      const allowedDomains = ["mangaplus.shueisha.co.jp","viz.com","kodansha.us",
+        "bookwalker.jp","global.bookwalker.jp","webtoons.com","mangaupdates.com",
+        "comic-walker.com","yenpress.com","tapas.io","manga-up.com"];
+      const official = (media.externalLinks || []).filter(link => {
+        try {
+          const url = new URL(link.url);
+          return url.protocol === "https:" && allowedDomains.some(host => url.hostname === host || url.hostname.endsWith("." + host));
+        } catch (_) {return false;}
+      });
+      const cover = imageOf(media);
+      $("#view").innerHTML = '<div class="details-hero"><div class="details-banner" style="background-image:url(&quot;' +
+        escapeHtml(media.bannerImage || cover) + '&quot;)"></div><div class="details-content">' +
+        '<img class="details-poster" src="' + escapeHtml(cover) + '" alt="">' +
+        '<div class="details-copy"><div class="eyebrow">MANGA DETAILS</div><h1 class="details-title">' +
+        escapeHtml(titleOf(media)) + '</h1><div class="details-meta"><span class="meta-chip">' +
+        escapeHtml(media.format || "Manga") + '</span><span class="meta-chip">' +
+        escapeHtml(media.chapters ? media.chapters + " Chapters" : "Ongoing chapters") +
+        '</span><span class="meta-chip">' + escapeHtml(media.status || "") +
+        '</span></div><p class="manga-detail-description">' + escapeHtml(cleanText(media.description) || "No description available.") +
+        '</p><div class="account-actions">' +
+        (official.length ? official.slice(0,3).map(link =>
+          '<a class="btn btn-primary" rel="noopener noreferrer" target="_blank" href="' + escapeHtml(link.url) +
+          '">' + uiIcon("manga") + ' Read at ' + escapeHtml(link.site || "Publisher") + '</a>').join("") : '') +
+        '<button class="btn btn-secondary" data-save-manga="' + media.id + '">' +
+          uiIcon("bookmark") + ' Save to reading list</button>' +
+        '<button class="btn btn-quiet" data-open-cbz>' + uiIcon("manga") + ' Open local CBZ</button>' +
+        '<input id="cbz-file-input" type="file" accept=".cbz,application/zip" style="display:none"></div>' +
+        '<p class="official-read-note">' + (official.length ?
+          'Publisher links open the licensed reading site. Local CBZ files never leave your device.' :
+          'No verified publisher chapter URL was listed by AniList; use a legitimate copy or open your own CBZ file.') +
+        '</p></div></div></div>';
+    } catch (error) {
+      if (token !== state.token) return;
+      $("#view").innerHTML = '<div class="empty-state"><h3>Manga details unavailable</h3><p>' +
+        escapeHtml(error.message) + '</p><button class="btn btn-secondary" data-route="/manga">Back</button></div>';
+    }
+  }
+
   const BUILTIN_PROVIDERS = [
     { id: "justanime", name: "JustAnime", language: "SUB / DUB", description: "Momo, Zoko, Gigi and Neko servers" },
     { id: "hianime", name: "HiAnime", language: "SUB / DUB", description: "HiAnime API and AniList-mapped episode fallback" },
