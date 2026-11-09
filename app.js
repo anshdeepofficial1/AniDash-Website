@@ -1646,17 +1646,90 @@
       }).join("") + '</div>' : '<div class="empty-state"><div class="empty-icon">◷</div><h3>No episodes watched yet</h3><p>When you start watching, AniDash will remember your episode and playback position on this device.</p><button class="btn btn-primary" data-route="/discover">Find anime</button></div>');
   }
 
+
+  function refreshProfileChip(user) {
+    const name = $(".profile-name");
+    const avatar = $(".profile-avatar");
+    if (name) name.textContent = user?.name || "Sign in";
+    if (avatar) {
+      const source = user?.avatar?.medium || user?.avatar?.large;
+      if (source && /^https:\/\//.test(source)) {
+        avatar.innerHTML = '<img src="' + escapeHtml(source) + '" alt="">';
+      } else {
+        avatar.textContent = user?.name ? user.name.slice(0, 1).toUpperCase() : "◎";
+      }
+    }
+  }
+
+  function renderAccount() {
+    const account = window.AniDashAccount;
+    const user = account?.currentUser();
+    const configured = account?.configured();
+    const avatarUrl = user?.avatar?.large || user?.avatar?.medium || "";
+    const avatar = avatarUrl && /^https:\/\//.test(avatarUrl)
+      ? '<img src="' + escapeHtml(avatarUrl) + '" alt="">'
+      : escapeHtml(user?.name?.slice(0, 1) || "◎");
+    const header = '<section class="account-hero"><div class="account-avatar">' + avatar + '</div><div><h2>' +
+      escapeHtml(user?.name || "Your AniDash account") + '</h2><p>' +
+      (user ? 'Connected to AniList · Your lists can sync across devices' : 'Sign in to sync anime lists between devices') +
+      '</p></div></section>';
+    const guestActions = '<div class="account-actions"><button class="btn btn-primary" data-login-anilist' +
+      (configured ? "" : " disabled") + '>Continue with AniList</button><button class="btn btn-secondary" data-route="/library">Use guest watchlist</button></div>' +
+      (!configured ? '<div class="notice">AniList sign-in needs a one-time website OAuth client ID configured by the site owner. Guest watchlists still save locally.</div>' : '') +
+      '<div class="account-info"><strong>Why AniList?</strong><p>Official account authorization without sharing your password with AniDash. It lets AniDash read your anime lists and save tracking progress after supported episodes.</p><p>AniKoto and HiAnime website passwords are not accepted by AniDash. JustAnime does not require a separate account to watch.</p></div>';
+    const connectedActions = '<div class="account-actions"><button class="btn btn-primary" data-sync-library>Sync AniList now</button>' +
+      '<a class="btn btn-secondary" href="' + escapeHtml(user?.siteUrl || "https://anilist.co") + '" rel="noopener noreferrer" target="_blank">Open AniList profile</a>' +
+      '<button class="btn btn-quiet" data-logout-anilist>Sign out</button></div>' +
+      '<div class="account-info"><strong>Account & privacy</strong><p>Your browser saves a local backup. AniList can sync lists and completed-episode progress, not the precise second where a video paused. Your AniList login token is stored in this browser; sign out on a shared device.</p><p>Provider websites maintain their own accounts. AniDash never asks for their passwords.</p></div>';
+    $("#view").innerHTML = pageHead("ACCOUNT", "Profile", user ? "Manage your connected AniList account" : "Sign in or continue as guest") +
+      header + (user ? connectedActions : guestActions);
+  }
+
+  function prefSelect(key, options, help) {
+    return '<div class="preference-row"><div><h3 class="preference-title">' + escapeHtml(options.label) +
+      '</h3><p class="preference-help">' + escapeHtml(help) + '</p></div><select class="select-control" data-setting="' +
+      escapeHtml(key) + '">' + options.values.map(pair => '<option value="' + escapeHtml(pair[0]) +
+      '"' + (String(setting(key)) === String(pair[0]) ? " selected" : "") + '>' + escapeHtml(pair[1]) + '</option>').join("") +
+      '</select></div>';
+  }
+  function prefToggle(key, title, help) {
+    return '<label class="preference-row"><div><h3 class="preference-title">' + escapeHtml(title) +
+      '</h3><p class="preference-help">' + escapeHtml(help) + '</p></div><input class="preference-toggle" type="checkbox" data-setting="' +
+      escapeHtml(key) + '"' + (setting(key) ? " checked" : "") + '></label>';
+  }
+  function settingsGroup(title, html) {
+    return '<h2 class="settings-section-label">' + escapeHtml(title) + '</h2><div class="settings-group">' + html + '</div>';
+  }
+
   function renderSettings() {
-    loadProviders().then(providers => {
-      if (state.route !== "/settings") return;
-      const count = $("#provider-count");
-      if (count) count.textContent = providers.map(provider => provider.name).join(" · ");
-    });
-    $("#view").innerHTML = pageHead("PREFERENCES", "Settings", "Manage built-in sources, playback defaults and the app experience.") +
-      '<div class="settings-grid"><section class="settings-card"><div class="eyebrow">STREAMING</div><h3>Built-in sources</h3><p id="provider-count">JustAnime · HiAnime · AniKoto</p><p>AniDash ships with three native source providers. Their search, episode lists, SUB/DUB server choices and stream resolvers are maintained with the website. No extensions or user source manifests are required.</p><button class="btn btn-primary" data-open-sources>View built-in sources</button></section>' +
-      '<section class="settings-card"><div class="eyebrow">LOCAL DATA</div><h3>Your watch activity</h3><p>Watchlist and playback progress are stored on this device. Clearing browser storage will remove this local data.</p><button class="btn btn-quiet" data-clear-history>Clear watch history</button><button class="btn btn-quiet" data-clear-watchlist style="margin-left:6px">Clear watchlist</button></section>' +
-      '<section class="settings-card"><div class="eyebrow">INSTALLATION</div><h3>Install AniDash</h3><p>Add the website to your device home screen or desktop app launcher for an app-like experience.</p><button class="btn btn-secondary" data-install>Installation guide</button></section>' +
-      '<section class="settings-card"><div class="eyebrow">CATALOGUE</div><h3>AniList + MAL metadata</h3><p>Anime details, artwork, ratings and MyAnimeList IDs are read from the AniList public catalogue. No account sign-in is required for discovery.</p><a class="btn btn-quiet" href="https://docs.anilist.co/guide/graphql/" target="_blank" rel="noopener">API information ↗</a></section></div>';
+    const connected = window.AniDashAccount?.authenticated();
+    $("#view").innerHTML = '<div class="settings-screen">' +
+      pageHead("", "Settings", "AniDash Android-inspired preferences for the web") +
+      settingsGroup("Account & sync", '<div class="preference-row"><div><h3 class="preference-title">AniList account</h3><p class="preference-help">' +
+        (connected ? 'Connected · Watchlist sync available' : 'Guest mode · local data only until you sign in') +
+        '</p></div><button class="btn btn-secondary" data-route="/account">' + (connected ? "Manage" : "Sign in") + '</button></div>' +
+        prefToggle("trackProgress", "Save playback progress", "Store the last watched episode and playback time on this device. No Continue Watching shelf is displayed.")) +
+      settingsGroup("Video Player", 
+        prefSelect("preferredAudio", { label:"Preferred audio", values:[["dub","English DUB"],["sub","Original SUB"]] }, "Default audio language when a source supports it.") +
+        prefSelect("defaultQuality", { label:"Preferred quality", values:[["Auto","Auto (recommended)"],["1080p","1080p"],["720p","720p"],["480p","480p"],["360p","360p"]] }, "Choose the closest stream quality actually offered by a source.") +
+        prefSelect("preferredSource", { label:"Priority source", values:[["auto","Automatic"],["justanime","JustAnime"],["hianime","HiAnime (legacy)"],["anikoto","AniKoto"]] }, "Sets which provider to try first; fallback providers remain available.") +
+        prefToggle("autoEnableSubtitles", "Auto-enable subtitles", "Enable available subtitle tracks when playback begins.") +
+        prefToggle("autoSkipIntro", "Auto-skip intros", "Skip verified intro time ranges when providers supply AniSkip timing.") +
+        prefToggle("showNextEpisodePrompt", "Next episode prompt", "Offer the next episode when the current video finishes.")) +
+      settingsGroup("Appearance & layout",
+        prefSelect("themeMode", { label:"Theme mode", values:[["light","Light"],["dark","Dark"],["system","Follow device"]] }, "Choose a light, dark or system-matched design.") +
+        prefSelect("episodeViewMode", { label:"Episode layout", values:[["list","List"],["grid","Grid"]] }, "How episodes appear on the anime details screen.")) +
+      settingsGroup("Data & storage",
+        '<div class="preference-row"><div><h3 class="preference-title">Local library backup</h3><p class="preference-help">Your watchlist, playback progress and settings are saved in browser storage with an IndexedDB recovery copy. Keep a JSON backup when changing browsers.</p></div><button class="btn btn-quiet" data-export-backup>Export JSON</button></div>' +
+        '<div class="preference-row"><div><h3 class="preference-title">Restore your library</h3><p class="preference-help">Import an AniDash Watch JSON backup. Existing entries are merged, not replaced.</p></div><button class="btn btn-quiet" data-import-backup>Import JSON</button><input class="backup-import" type="file" id="backup-file" accept=".json,application/json"></div>' +
+        '<div class="preference-row"><div><h3 class="preference-title">Protect offline storage</h3><p class="preference-help">Ask this browser to retain AniDash data when it supports persistent storage.</p></div><button class="btn btn-quiet" data-persist-storage>Request storage</button></div>' +
+        '<div class="preference-row"><div><h3 class="preference-title">Clear saved playback progress</h3><p class="preference-help">Remove playback history from this device without deleting your watchlist.</p></div><button class="btn btn-quiet" data-clear-history>Clear</button></div>' +
+        '<div class="preference-row"><div><h3 class="preference-title">Clear local watchlist</h3><p class="preference-help">Removes local titles only; AniList data will not be deleted.</p></div><button class="btn btn-quiet" data-clear-watchlist>Clear</button></div>') +
+      settingsGroup("App & support",
+        '<div class="preference-row"><div><h3 class="preference-title">Install AniDash</h3><p class="preference-help">Use the web app on an iPhone, Android phone or desktop.</p></div><button class="btn btn-quiet" data-install>Install guide</button></div>' +
+        '<div class="preference-row"><div><h3 class="preference-title">Sources & troubleshooting</h3><p class="preference-help">View JustAnime, HiAnime and AniKoto playback availability information.</p></div><button class="btn btn-quiet" data-open-sources>View sources</button></div>' +
+        '<div class="preference-row"><div><h3 class="preference-title">About</h3><p class="preference-help">AniDash Watch PWA · Android-inspired UI. Native downloads, OS permissions, Android notifications and AniCORE are not implemented on the website.</p></div><a class="btn btn-quiet" href="https://github.com/anshdeepofficial1/AniDash-Website" target="_blank" rel="noopener">GitHub</a></div>') +
+      '<p class="settings-footnote">Preferences are saved on this device. Logging into AniList syncs anime lists and optional watched-episode progress, but cannot transfer settings or exact video timestamps between browsers.</p></div>';
   }
 
   function openModal(content) {
