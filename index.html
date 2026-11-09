@@ -9,7 +9,7 @@
   <link rel="manifest" href="/manifest.webmanifest"><link rel="icon" type="image/png" href="/icons/anidash-icon.png"><link rel="apple-touch-icon" href="/icons/anidash-icon.png">
   <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/styles.css?v=7"><title>AniDash — Anime, without the noise</title>
+  <link rel="stylesheet" href="/styles.css?v=11"><link rel="stylesheet" href="/android-ui.css?v=1"><title>AniDash — Anime, without the noise</title>
 </head>
 <body>
   <div class="ambient ambient-one"></div><div class="ambient ambient-two"></div>
@@ -44,8 +44,12 @@
     </main>
   </div>
   <nav class="mobile-dock" aria-label="Mobile navigation">
-    <a href="#/home" data-route="/home"><span>⌂</span>Home</a><a href="#/discover" data-route="/discover"><span>◈</span>Discover</a><a href="#/search" data-route="/search"><span>⌕</span>Search</a><a href="#/library" data-route="/library"><span>♡</span>Library</a><a href="#/history" data-route="/history"><span>◷</span>History</a>
+    <a href="#/home" data-route="/home" aria-label="Home"><span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1z"/></svg></span>Home</a>
+    <a href="#/discover" data-route="/discover" aria-label="Discover"><span><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m17 17 4 4"/></svg></span>Discover</a>
+    <a href="#/search" data-route="/search" aria-label="Search"><span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/><path d="M8 4v6M16 14v6"/></svg></span>Search</a>
+    <a href="#/library" data-route="/library" aria-label="Library"><span><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="3" width="14" height="18" rx="3"/><path d="M9 8h6M9 12h6M9 16h4"/></svg></span>Library</a>
+    <a href="#/history" data-route="/history" aria-label="Continue watching"><span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h14a1 1 0 0 1 1 1v17l-8-5-8 5V4a1 1 0 0 1 1-1z"/></svg></span>History</a>
   </nav>
   <div id="modal-root"></div><div id="toast-root" class="toast-root"></div>
-  <script src="https://cdn.jsdelivr.net/npm/hls.js@1.6.13/dist/hls.min.js"></script><script src="/app.js?v=9" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@1.6.13/dist/hls.min.js"></script><script src="/app.js?v=12" defer></script>
 </body></html>

@@ -25,4 +25,30 @@ jobs:
           node --check api/anikoto.js
           node --check api/media.js
           node --check api/episode-map.js
-          node --test tests/provider-smoke.test.js
+          node --test tests/provider-smoke.test.js tests/client-ui.test.js
+
+  visual:
+    name: Real-browser UI smoke
+    if: github.event_name == 'pull_request'
+    needs: syntax
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install browser dependencies
+        run: |
+          npm install --no-save playwright@1.55.1
+          npx playwright install --with-deps chromium
+      - name: Check responsive pages and player controls
+        run: node tests/visual-smoke.mjs
+      - name: Upload visual screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: anidash-ui-smoke
+          path: test-artifacts/*.png
+          if-no-files-found: ignore
