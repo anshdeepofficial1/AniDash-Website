@@ -21,6 +21,10 @@
       return {
         watchlist: raw.watchlist || {},
         history: raw.history || {},
+        mangaList: raw.mangaList || {},
+        libraryStatuses: raw.libraryStatuses || {},
+        localFavorites: raw.localFavorites || {},
+        malStatuses: raw.malStatuses || {},
         manualStreams: raw.manualStreams || {},
         providerManifest: raw.providerManifest || null,
         adultContent: raw.adultContent === true,
@@ -29,7 +33,8 @@
         updatedAt: Number(raw.updatedAt || 0)
       };
     } catch (_) {
-      return { watchlist: {}, history: {}, manualStreams: {}, providerManifest: null, adultContent: false,
+      return { watchlist: {}, history: {}, mangaList: {}, libraryStatuses: {},
+        localFavorites: {}, malStatuses: {}, manualStreams: {}, providerManifest: null, adultContent: false,
         preferences: {}, hiddenCloudEntries: {}, updatedAt: 0 };
     }
   }
@@ -73,7 +78,10 @@
     currentVideo: null,
     hls: null,
     installEvent: null,
-    progressTimer: 0
+    progressTimer: 0,
+    spotlight: [], spotlightIndex: 0, spotlightTimer: null,
+    malEntries: [], libraryTab: "CURRENT", cloudSyncing: false,
+    mangaDetail: null, lastCloudProgressSync: new Map()
   };
 
   const escapeHtml = value => String(value == null ? "" : value).replace(/[&<>"']/g, char => ({
@@ -1257,6 +1265,8 @@
     const account = window.AniDashAccount;
     if (store.watchlist[key]) {
       delete store.watchlist[key];
+      delete store.libraryStatuses[key];
+      delete store.localFavorites[key];
       store.hiddenCloudEntries[key] = true;
       persist();
       toast("Removed from this device's watchlist.");
@@ -1274,6 +1284,7 @@
         return;
       }
       store.watchlist[key] = media;
+      store.libraryStatuses[key] = "PLANNING";
       delete store.hiddenCloudEntries[key];
       persist();
       toast("Added to your watchlist and saved on this device.");
@@ -2239,8 +2250,10 @@
         const payload = {
           format: "anidash-watch-library",
           version: 2, exportedAt: new Date().toISOString(),
-          watchlist: store.watchlist, history: store.history,
-          preferences: store.preferences, hiddenCloudEntries: store.hiddenCloudEntries
+          watchlist: store.watchlist, history: store.history, mangaList: store.mangaList,
+          libraryStatuses: store.libraryStatuses, localFavorites: store.localFavorites,
+          malStatuses: store.malStatuses, preferences: store.preferences,
+          hiddenCloudEntries: store.hiddenCloudEntries
         };
         const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
         const url = URL.createObjectURL(blob);
@@ -2509,6 +2522,10 @@
         );
         store.watchlist = { ...store.watchlist, ...safeEntries(payload.watchlist) };
         store.history = { ...store.history, ...safeEntries(payload.history) };
+        store.mangaList = { ...store.mangaList, ...safeEntries(payload.mangaList) };
+        store.libraryStatuses = { ...store.libraryStatuses, ...safeEntries(payload.libraryStatuses) };
+        store.localFavorites = { ...store.localFavorites, ...safeEntries(payload.localFavorites) };
+        store.malStatuses = { ...store.malStatuses, ...safeEntries(payload.malStatuses) };
         const allowed = Object.keys(DEFAULT_PREFERENCES);
         for (const key of allowed) {
           if (Object.prototype.hasOwnProperty.call(payload.preferences || {}, key)) {
