@@ -321,7 +321,7 @@
     state.spotlightIndex = (index + items.length) % items.length;
     const panel = $("#spotlight-content");
     if (panel) panel.innerHTML = spotlightMarkup(items[state.spotlightIndex]);
-    $("[data-spotlight-index]").forEach(el => {
+    $$("[data-spotlight-index]").forEach(el => {
       el.classList.toggle("active", Number(el.getAttribute("data-spotlight-index")) === state.spotlightIndex);
     });
     const count = $("#spotlight-count");
