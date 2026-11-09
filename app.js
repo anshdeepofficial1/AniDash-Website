@@ -343,23 +343,36 @@
     return state.providers;
   }
 
+
   async function providerGet(provider, action, values) {
     const params = new URLSearchParams({ action: action });
     Object.entries(values || {}).forEach(([key, value]) => {
       if (value !== undefined && value !== null && value !== "") params.set(key, String(value));
     });
-    const response = await fetch("/api/" + encodeURIComponent(provider.id) + "?" + params.toString(), {
-      method: "GET",
-      headers: { "Accept": "application/json" },
-      cache: action === "streams" ? "no-store" : "default"
-    });
-    let payload;
-    try { payload = await response.json(); }
-    catch (_) { throw new Error(provider.name + " returned an invalid response."); }
-    if (!response.ok || payload?.error) {
-      throw new Error(payload?.error || (provider.name + " returned HTTP " + response.status));
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), action === "streams" ? 9500 : 8000);
+    // Node's test runner should not be held open by an intentionally stalled upstream.
+    if (timeout && typeof timeout.unref === "function") timeout.unref();
+    try {
+      const response = await fetch("/api/" + encodeURIComponent(provider.id) + "?" + params.toString(), {
+        method: "GET",
+        headers: { "Accept": "application/json" },
+        cache: action === "streams" ? "no-store" : "default",
+        signal: controller.signal
+      });
+      let payload;
+      try { payload = await response.json(); }
+      catch (_) { throw new Error(provider.name + " returned an invalid response."); }
+      if (!response.ok || payload?.error) {
+        throw new Error(payload?.error || (provider.name + " returned HTTP " + response.status));
+      }
+      return payload;
+    } catch (error) {
+      if (error?.name === "AbortError") throw new Error(provider.name + " did not respond in time.");
+      throw error;
+    } finally {
+      window.clearTimeout(timeout);
     }
-    return payload;
   }
 
   function extractArray(payload, names) {
@@ -1905,6 +1918,7 @@
       if (video) { video.pause(); video.removeAttribute("src"); video.load(); }
       if (embed) embed.src = "about:blank";
       if (state.hls) { try { state.hls.destroy(); } catch (_) {} state.hls = null; }
+      if (state.playbackWatchdog) { window.clearTimeout(state.playbackWatchdog); state.playbackWatchdog = null; }
       if (state.player) state.player.requestId = (state.player.requestId || 0) + 1;
     }
     route();
