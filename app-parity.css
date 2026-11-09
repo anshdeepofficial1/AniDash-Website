@@ -1,0 +1,104 @@
+/* AniDash Android visual parity: Montserrat / consistent iconography / sections / manga */
+:root {font-family:"Montserrat",system-ui,sans-serif}
+html,body,button,input,select,textarea,.btn {
+  font-family:"Montserrat",system-ui,sans-serif!important
+}
+.ui-icon {width:21px;height:21px;display:inline-block;flex-shrink:0;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round;vertical-align:middle}
+.nav-icon .ui-icon,.mobile-dock .ui-icon {width:23px;height:23px}
+.topbar-search .ui-icon,.icon-button .ui-icon {width:19px;height:19px}
+.btn .ui-icon,.section-link .ui-icon {width:16px;height:16px;margin-right:5px}
+.side-nav a {gap:14px}
+.sidebar .side-label {letter-spacing:.65px;font-size:10px}
+.page-title,.section-title,.hero-title,.welcome-title {font-weight:700;letter-spacing:-.65px}
+.anime-card .season-chip{
+ position:absolute;left:8px;top:8px;z-index:3;border-radius:8px;
+ padding:5px 8px;background:rgba(218,245,225,.95);color:#22603b;
+ font-size:10px;font-weight:800;border:1px solid rgba(47,131,76,.27);
+ box-shadow:0 3px 9px rgba(15,35,24,.11)
+}
+.anime-card .poster-format {display:none}
+.anime-card .poster-score {z-index:3;font-weight:700}
+.anime-card .poster-info{position:absolute;bottom:8px;left:8px;z-index:3;color:white;font-size:10px;
+ font-weight:600;text-shadow:0 2px 5px #000}
+.spotlight-shell {position:relative;border-radius:28px;overflow:hidden;margin-bottom:30px;touch-action:pan-y}
+.spotlight-shell .home-hero {margin:0!important;border-radius:26px}
+.spotlight-shell .hero-content {max-width:850px}
+.spotlight-control{
+ display:grid;place-items:center;position:absolute;top:50%;z-index:4;
+ width:42px;height:42px;border:1px solid rgba(255,255,255,.3);
+ border-radius:14px;background:rgba(8,22,12,.46);
+ backdrop-filter:blur(15px);color:#fff;cursor:pointer;transform:translateY(-50%)
+}
+.spotlight-control.prev{left:13px}.spotlight-control.next{right:13px}
+.spotlight-dots {position:absolute;z-index:4;bottom:14px;right:20px;display:flex;align-items:center;gap:7px}
+.spotlight-dots button{cursor:pointer;border:none;background:rgba(255,255,255,.45);width:7px;height:7px;padding:0;border-radius:50%}
+.spotlight-dots button.active{background:#e4fff0;width:23px;border-radius:5px}
+.spotlight-control .ui-icon {width:20px;height:20px}
+.spotlight-count {position:absolute;z-index:4;top:17px;right:20px;color:white;background:rgba(0,0,0,.35);
+ border-radius:10px;font-size:10px;padding:7px 10px;font-weight:700;backdrop-filter:blur(8px)}
+.status-tabs {display:flex;align-items:center;gap:6px;overflow-x:auto;scrollbar-width:none;white-space:nowrap;
+ margin:5px 0 22px;padding:4px 0 12px}
+.status-tabs::-webkit-scrollbar{display:none}
+.status-tabs button {border:1px solid var(--line-strong);padding:11px 15px;border-radius:999px;background:var(--surface);
+ color:var(--soft);font-size:11px;font-weight:700;cursor:pointer;flex-shrink:0}
+.status-tabs button.active {background:#2f8a50;border-color:#2f8a50;color:white}
+.library-action-row {display:flex;gap:8px;align-items:center;margin:10px 0 18px;flex-wrap:wrap}
+.library-action-row .status-select {min-width:145px;max-width:180px}
+.library-item {position:relative}
+.library-item .library-status-control {position:absolute;bottom:2px;left:2px;right:2px}
+.list-status-note {font-size:11px;color:var(--muted);margin:10px 0 14px}
+.section-rank-list {display:grid;gap:13px}
+.section-rank-item {width:100%;display:grid;align-items:center;gap:14px;grid-template-columns:46px 75px minmax(0,1fr) 21px;
+ background:var(--surface);padding:10px;border:1px solid var(--line);border-radius:20px;cursor:pointer;text-align:left;color:var(--text)}
+.section-rank-num {font-size:27px;font-weight:800;color:var(--muted);text-align:center}
+.section-rank-item:nth-child(1) .section-rank-num {color:#d4a640}
+.section-rank-item:nth-child(2) .section-rank-num {color:#8b9a9b}
+.section-rank-item:nth-child(3) .section-rank-num {color:#b67848}
+.section-rank-item img {width:75px;height:100px;object-fit:cover;border-radius:13px}
+.section-rank-item strong {font-size:14px}
+.section-rank-item p{font-size:11px;color:var(--muted);margin:8px 0}
+.section-rank-item .ui-icon{color:var(--accent);width:16px}
+.section-pager{display:flex;justify-content:center;align-items:center;gap:12px;margin:23px 0}
+.section-pager .btn{min-width:125px}
+.manga-layout {display:grid;grid-template-columns:1fr;gap:16px}
+.manga-topline{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.manga-tabs {margin:12px 0 17px}
+.manga-detail-description {white-space:pre-wrap;line-height:1.7;color:var(--soft);font-size:13px;max-width:70ch}
+.official-read-note {font-size:11px;color:var(--muted);margin-top:13px}
+.account-providers {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:13px;margin:16px 0}
+.account-provider{border:1px solid var(--line);border-radius:22px;padding:20px;background:var(--surface)}
+.account-provider strong{font-size:16px}
+.account-provider p{font-size:11px;color:var(--soft);margin:7px 0 18px;min-height:38px;line-height:1.6}
+.account-provider .btn{width:100%}
+.account-provider .account-icon {background:#e4f3e9;border-radius:12px;width:46px;height:46px;
+ display:grid;place-items:center;margin-bottom:12px;font-size:15px;font-weight:800;color:#237a43}
+.account-provider.mal .account-icon{background:#dceaff;color:#2767a5}
+.account-provider .account-name{display:flex;align-items:center;gap:7px;min-height:26px}
+.account-provider .connected-label {font-size:10px;color:#219060;font-weight:700}
+.data-sync-hint {margin-top:14px;background:var(--surface-2);border:1px solid var(--line);padding:15px;border-radius:15px;
+ font-size:11px;color:var(--soft);line-height:1.65}
+.library-toolbar{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+.continue-item .card-title{font-weight:700}
+.preview-stat {color:var(--accent);font-weight:700}
+.feature-chip{display:inline-flex;gap:5px;align-items:center;white-space:nowrap;background:var(--surface-2);border:1px solid var(--line);
+ font-size:10px;font-weight:700;padding:8px 11px;border-radius:12px;color:var(--soft)}
+.section-link .ui-icon{margin-left:4px}
+.mobile-dock .ui-icon{display:block}
+@media(max-width:760px){
+ .spotlight-shell{border-radius:22px;margin-bottom:27px}
+ .spotlight-control{width:31px;height:31px;border-radius:11px}
+ .spotlight-control.prev{left:5px}.spotlight-control.next{right:5px}
+ .spotlight-control .ui-icon{width:17px;height:17px}
+ .spotlight-dots{bottom:12px;right:14px}
+ .spotlight-count{top:10px;right:10px}
+ .spotlight-shell .home-hero{min-height:340px!important;border-radius:22px!important}
+ .spotlight-shell .home-hero .hero-content{padding:16px 16px 26px}
+ .section-rank-item{grid-template-columns:29px 66px minmax(0,1fr) 15px;gap:9px;padding:7px}
+ .section-rank-num{font-size:20px}
+ .section-rank-item img{height:88px;width:66px}
+ .section-rank-item strong{font-size:12px}
+ .section-rank-item p{font-size:10px}
+ .account-providers{grid-template-columns:1fr}
+ .account-provider p{min-height:auto}
+ .status-tabs button{font-size:11px;padding:10px 12px}
+}
