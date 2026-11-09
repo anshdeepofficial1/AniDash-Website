@@ -1998,7 +1998,7 @@
   }
 
   function updateActiveNav(route) {
-    const active = route === "/watch" ? "/discover" : route;
+    const active = route === "/watch" || route === "/section" ? "/discover" : route;
     $$("[data-route]").forEach(item => {
       const value = item.getAttribute("data-route");
       item.classList.toggle("active", value === active || (route.startsWith("/anime") && value === "/discover"));
@@ -2007,6 +2007,10 @@
 
   async function route() {
     const hash = location.hash.replace(/^#/, "") || "/home";
+    if (state.route === "/home" && !hash.startsWith("/home") && state.spotlightTimer) {
+      window.clearTimeout(state.spotlightTimer);
+      state.spotlightTimer = null;
+    }
     const parts = hash.split("?")[0].split("/").filter(Boolean);
     const current = "/" + (parts[0] || "home");
     state.route = current;
@@ -2014,12 +2018,16 @@
     updateActiveNav(current);
     if (current === "/home") return renderHome();
     if (current === "/discover") return renderDiscover();
+    if (current === "/section" && parts[1]) {
+      const params = new URLSearchParams(hash.split("?")[1] || "");
+      return renderSection(parts[1], Math.max(1, Math.min(250, Number(params.get("page") || 1))));
+    }
     if (current === "/search") {
       const params = new URLSearchParams(hash.split("?")[1] || "");
       return renderSearch(params.get("q") || "");
     }
     if (current === "/library") return renderLibrary();
-    if (current === "/history") { location.hash = "#/library"; return; }
+    if (current === "/history") return renderHistory();
     if (current === "/account") return renderAccount();
     if (current === "/settings") return renderSettings();
     if (current === "/anime" && parts[1]) return renderAnime(parts[1]);
@@ -2050,6 +2058,20 @@
     }
     if (target.hasAttribute("data-anime")) {
       navigate("/anime/" + target.getAttribute("data-anime"));
+      return;
+    }
+    if (target.hasAttribute("data-spotlight-next") || target.hasAttribute("data-spotlight-prev") ||
+        target.hasAttribute("data-spotlight-index")) {
+      const direction = target.hasAttribute("data-spotlight-next") ? 1 : -1;
+      showSpotlight(target.hasAttribute("data-spotlight-index")
+        ? Number(target.getAttribute("data-spotlight-index"))
+        : state.spotlightIndex + direction);
+      return;
+    }
+    if (target.hasAttribute("data-section-page")) {
+      const key = target.getAttribute("data-section-page");
+      const page = Math.max(1, Number(target.getAttribute("data-page") || 1));
+      navigate(sectionUrl(key) + "?page=" + page);
       return;
     }
     if (target.hasAttribute("data-watchlist")) {
