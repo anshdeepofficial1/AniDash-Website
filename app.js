@@ -2135,39 +2135,66 @@
   function refreshProfileChip(user) {
     const name = $(".profile-name");
     const avatar = $(".profile-avatar");
-    if (name) name.textContent = user?.name || "Sign in";
+    const malUser = window.AniDashMal?.currentUser();
+    const active = user || malUser;
+    if (name) name.textContent = active?.name || "Sign in";
     if (avatar) {
-      const source = user?.avatar?.medium || user?.avatar?.large;
+      const source = user?.avatar?.medium || user?.avatar?.large || malUser?.picture;
       if (source && /^https:\/\//.test(source)) {
         avatar.innerHTML = '<img src="' + escapeHtml(source) + '" alt="">';
       } else {
-        avatar.textContent = user?.name ? user.name.slice(0, 1).toUpperCase() : "◎";
+        avatar.textContent = active?.name ? active.name.slice(0, 1).toUpperCase() : "◎";
       }
     }
   }
 
   function renderAccount() {
-    const account = window.AniDashAccount;
-    const user = account?.currentUser();
-    const configured = account?.configured();
-    const avatarUrl = user?.avatar?.large || user?.avatar?.medium || "";
-    const avatar = avatarUrl && /^https:\/\//.test(avatarUrl)
+    const anilist = window.AniDashAccount;
+    const mal = window.AniDashMal;
+    const user = anilist?.currentUser();
+    const malUser = mal?.currentUser();
+    const avatarUrl = user?.avatar?.large || user?.avatar?.medium || malUser?.picture || "";
+    const avatar = avatarUrl.startsWith("https://")
       ? '<img src="' + escapeHtml(avatarUrl) + '" alt="">'
-      : escapeHtml(user?.name?.slice(0, 1) || "◎");
-    const header = '<section class="account-hero"><div class="account-avatar">' + avatar + '</div><div><h2>' +
-      escapeHtml(user?.name || "Your AniDash account") + '</h2><p>' +
-      (user ? 'Connected to AniList · Your lists can sync across devices' : 'Sign in to sync anime lists between devices') +
-      '</p></div></section>';
-    const guestActions = '<div class="account-actions"><button class="btn btn-primary" data-login-anilist' +
-      (configured ? "" : " disabled") + '>Continue with AniList</button><button class="btn btn-secondary" data-route="/library">Use guest watchlist</button></div>' +
-      (!configured ? '<div class="notice">AniList sign-in needs a one-time website OAuth client ID configured by the site owner. Guest watchlists still save locally.</div>' : '') +
-      '<div class="account-info"><strong>Why AniList?</strong><p>Official account authorization without sharing your password with AniDash. It lets AniDash read your anime lists and save tracking progress after supported episodes.</p><p>AniKoto and HiAnime website passwords are not accepted by AniDash. JustAnime does not require a separate account to watch.</p></div>';
-    const connectedActions = '<div class="account-actions"><button class="btn btn-primary" data-sync-library>Sync AniList now</button>' +
-      '<a class="btn btn-secondary" href="' + escapeHtml(user?.siteUrl || "https://anilist.co") + '" rel="noopener noreferrer" target="_blank">Open AniList profile</a>' +
-      '<button class="btn btn-quiet" data-logout-anilist>Sign out</button></div>' +
-      '<div class="account-info"><strong>Account & privacy</strong><p>Your browser saves a local backup. AniList can sync lists and completed-episode progress, not the precise second where a video paused. Your AniList login token is stored in this browser; sign out on a shared device.</p><p>Provider websites maintain their own accounts. AniDash never asks for their passwords.</p></div>';
-    $("#view").innerHTML = pageHead("ACCOUNT", "Profile", user ? "Manage your connected AniList account" : "Sign in or continue as guest") +
-      header + (user ? connectedActions : guestActions);
+      : escapeHtml((user?.name || malUser?.name || "A").slice(0,1).toUpperCase());
+    const display = user?.name || malUser?.name || "Your AniDash Account";
+    const anilistButton = user
+      ? '<div class="account-name"><span class="connected-label">' + uiIcon("check") +
+        ' Connected as ' + escapeHtml(user.name) + '</span></div>' +
+        '<button class="btn btn-secondary" data-sync-library>' + uiIcon("refresh") + ' Sync AniList</button>' +
+        '<button class="btn btn-quiet" data-logout-anilist>Sign out of AniList</button>'
+      : '<button class="btn btn-primary" data-login-anilist' +
+        (anilist?.configured() ? "" : " disabled") + '>Continue with AniList</button>';
+    const malButton = malUser
+      ? '<div class="account-name"><span class="connected-label">' + uiIcon("check") +
+        ' Connected as ' + escapeHtml(malUser.name) + '</span></div>' +
+        '<button class="btn btn-secondary" data-sync-mal>' + uiIcon("refresh") + ' Sync MAL</button>' +
+        '<button class="btn btn-quiet" data-logout-mal>Sign out of MAL</button>'
+      : '<button class="btn btn-primary" data-login-mal' +
+        (mal?.configured() ? "" : " disabled") + '>Continue with MyAnimeList</button>';
+    $("#view").innerHTML =
+      pageHead("", "Your Account", "Connect one or both tracking services, just like AniDash Android") +
+      '<section class="account-hero"><div class="account-avatar">' + avatar + '</div><div><h2>' +
+        escapeHtml(display) + '</h2><p>' +
+        (user || malUser ? "Your account connections and synced anime library" : "Sign in to bring your anime library to every device") +
+        '</p></div></section>' +
+      '<div class="account-providers">' +
+        '<section class="account-provider"><div class="account-icon">AL</div><strong>AniList</strong>' +
+        '<p>Sync watching lists, favourites and exact episode timestamps via Android-compatible progress notes.</p>' +
+        '<div class="account-actions">' + anilistButton + '</div>' +
+        (!user && !anilist?.configured()
+          ? '<span class="preference-help">Site owner must set ANILIST_WEB_CLIENT_ID on Vercel.</span>' : '') +
+        '</section>' +
+        '<section class="account-provider mal"><div class="account-icon">MAL</div><strong>MyAnimeList</strong>' +
+        '<p>Import your anime list and sync watched-episode counts using official MAL OAuth with PKCE.</p>' +
+        '<div class="account-actions">' + malButton + '</div>' +
+        (!malUser && !mal?.configured()
+          ? '<span class="preference-help">Site owner must configure MAL_WEB_CLIENT_ID (and MAL_WEB_CLIENT_SECRET if required).</span>' : '') +
+        '</section></div>' +
+      '<div class="account-info"><strong>One AniDash library</strong>' +
+      '<p>Connect AniList and/or MyAnimeList. AniDash merges their lists without deleting your local entries. Your passwords are entered only on the providers’ official sign-in pages.</p>' +
+      '<p>For an exact 5-minute handoff from your Android app to this website, enable AniList tracking in the app. Android writes a <code>shx:ep=…&sec=…</code> note; AniDash Watch reads it and seeks to that timestamp. MAL currently shares completed-episode counts, not precise seconds.</p>' +
+      '<button class="btn btn-quiet" data-route="/library">' + uiIcon("library") + ' Open Library</button></div>';
   }
 
   function prefSelect(key, options, help) {
