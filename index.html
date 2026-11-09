@@ -2,14 +2,14 @@
 <html lang="en">
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#090a10"><meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#f4f8f5"><meta name="color-scheme" content="light dark">
   <meta name="description" content="AniDash — discover anime, save your watchlist and continue watching on phone, tablet and desktop.">
   <meta name="application-name" content="AniDash"><meta name="apple-mobile-web-app-title" content="AniDash">
   <meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <link rel="manifest" href="/manifest.webmanifest"><link rel="icon" type="image/png" href="/icons/anidash-icon.png"><link rel="apple-touch-icon" href="/icons/anidash-icon.png">
   <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/styles.css?v=11"><link rel="stylesheet" href="/android-ui.css?v=1"><title>AniDash — Anime, without the noise</title>
+  <link rel="stylesheet" href="/styles.css?v=11"><link rel="stylesheet" href="/android-ui.css?v=3"><link rel="stylesheet" href="/preferences.css?v=1"><title>AniDash — Anime, without the noise</title>
 </head>
 <body>
   <div class="ambient ambient-one"></div><div class="ambient ambient-two"></div>
@@ -25,10 +25,10 @@
       <div class="side-label side-label-spaced">YOUR SPACE</div>
       <nav class="side-nav" aria-label="Your library">
         <a href="#/library" data-route="/library"><span class="nav-icon">♡</span><span>My watchlist</span></a>
-        <a href="#/history" data-route="/history"><span class="nav-icon">◷</span><span>Continue watching</span></a>
+        <a href="#/account" data-route="/account"><span class="nav-icon">◎</span><span>My account</span></a>
       </nav>
       <div class="sidebar-bottom">
-        <div class="sidebar-promo"><div class="promo-orbit">✦</div><strong>Your anime corner.</strong><p>One place for discovery, watch progress and three built-in streaming providers.</p><button class="text-button" data-open-sources>Built-in sources <span>↗</span></button></div>
+        
         <a href="#/settings" class="settings-link" data-route="/settings"><span class="nav-icon">⚙</span> Settings</a>
         <div class="sidebar-foot">ANIDASH WEB <span>•</span> BETA</div>
       </div>
@@ -37,7 +37,7 @@
       <header class="topbar">
         <button class="mobile-brand" data-route="/home" aria-label="AniDash home"><span class="brand-mark"><img src="/icons/anidash-icon.png" alt=""></span><b>Ani<span>Dash</span></b></button>
         <div class="topbar-search" role="search"><span class="search-glyph">⌕</span><input id="global-search" type="search" placeholder="Search anime, characters, genres..." autocomplete="off" aria-label="Search anime"><kbd>ENTER</kbd></div>
-        <div class="topbar-actions"><button class="icon-button install-button" data-install title="Install AniDash" aria-label="Install AniDash">⇩</button><button class="profile-chip" data-route="/settings" title="Settings"><span class="profile-avatar">A</span><span class="profile-name">Guest</span><span class="chevron">⌄</span></button></div>
+        <div class="topbar-actions"><button class="icon-button install-button" data-install title="Install AniDash" aria-label="Install AniDash">⇩</button><button class="profile-chip" data-route="/account" title="Sign in or view profile"><span class="profile-avatar">A</span><span class="profile-name">Guest</span><span class="chevron">⌄</span></button></div>
       </header>
       <div id="view" class="view-content" aria-live="polite"><section class="loading-state"><div class="loader"></div><p>Opening your anime universe…</p></section></div>
       <footer class="desktop-footer"><span>AniDash Web</span><span>Anime metadata powered by AniList</span><a href="https://anilist.co" target="_blank" rel="noopener">AniList ↗</a></footer>
@@ -48,8 +48,8 @@
     <a href="#/discover" data-route="/discover" aria-label="Discover"><span><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m17 17 4 4"/></svg></span>Discover</a>
     <a href="#/search" data-route="/search" aria-label="Search"><span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/><path d="M8 4v6M16 14v6"/></svg></span>Search</a>
     <a href="#/library" data-route="/library" aria-label="Library"><span><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="3" width="14" height="18" rx="3"/><path d="M9 8h6M9 12h6M9 16h4"/></svg></span>Library</a>
-    <a href="#/history" data-route="/history" aria-label="Continue watching"><span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h14a1 1 0 0 1 1 1v17l-8-5-8 5V4a1 1 0 0 1 1-1z"/></svg></span>History</a>
+    <a href="#/account" data-route="/account" aria-label="Account"><span><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4.5 21a7.5 7.5 0 0 1 15 0"/></svg></span>Account</a>
   </nav>
   <div id="modal-root"></div><div id="toast-root" class="toast-root"></div>
-  <script src="https://cdn.jsdelivr.net/npm/hls.js@1.6.13/dist/hls.min.js"></script><script src="/app.js?v=12" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@1.6.13/dist/hls.min.js"></script><script src="/library-storage.js?v=1" defer></script><script src="/anilist-account.js?v=1" defer></script><script src="/app.js?v=15" defer></script>
 </body></html>
