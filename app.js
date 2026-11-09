@@ -292,6 +292,96 @@
       (subtitle ? '<p class="page-subtitle">' + escapeHtml(subtitle) + '</p>' : '') + '</div>' + (extra || '') + '</div>';
   }
 
+
+  function spotlightMarkup(media) {
+    const image = media?.bannerImage || imageOf(media);
+    return '<section class="hero-stage home-hero"><div class="hero-bg" style="background-image:url(&quot;' +
+      escapeHtml(image) + '&quot;)"></div><div class="hero-content">' +
+      '<div class="hero-kicker">Trending on AniDash</div>' +
+      '<h1 class="hero-title">' + escapeHtml(titleOf(media)) + '</h1>' +
+      '<div class="hero-meta"><span>' + uiIcon("star") + ' ' + formatScore(media?.averageScore) + '</span>' +
+      '<span>' + escapeHtml(animeSeasonBadge(media)) + '</span>' +
+      '<span>' + escapeHtml(media?.format || "Anime") + '</span>' +
+      '<span>' + escapeHtml(mediaYear(media)) + '</span></div>' +
+      '<div class="hero-actions"><button class="btn btn-primary" data-anime="' + media.id + '">' +
+        uiIcon("play") + ' Explore Anime</button><button class="btn btn-secondary" data-watchlist="' + media.id + '">' +
+        uiIcon("bookmark") + ' Save</button></div></div></section>';
+  }
+  function showSpotlight(index) {
+    if (state.route !== "/home" || !state.spotlight?.length) return;
+    const items = state.spotlight;
+    state.spotlightIndex = (index + items.length) % items.length;
+    const panel = $("#spotlight-content");
+    if (panel) panel.innerHTML = spotlightMarkup(items[state.spotlightIndex]);
+    $("[data-spotlight-index]").forEach(el => {
+      el.classList.toggle("active", Number(el.getAttribute("data-spotlight-index")) === state.spotlightIndex);
+    });
+    const count = $("#spotlight-count");
+    if (count) count.textContent = (state.spotlightIndex + 1) + " / " + items.length;
+    scheduleSpotlight();
+  }
+  function scheduleSpotlight() {
+    if (state.spotlightTimer) window.clearTimeout(state.spotlightTimer);
+    if (state.route !== "/home" || !state.spotlight || state.spotlight.length < 2) return;
+    state.spotlightTimer = window.setTimeout(() => {
+      if (state.route !== "/home") return;
+      if (document.visibilityState === "hidden") { scheduleSpotlight(); return; }
+      showSpotlight(state.spotlightIndex + 1);
+    }, 2000);
+    if (state.spotlightTimer?.unref) state.spotlightTimer.unref();
+  }
+  function spotlightPanel(items) {
+    const first = items[0];
+    if (!first) return "";
+    return '<div class="spotlight-shell" aria-label="Trending anime carousel">' +
+      '<div id="spotlight-content">' + spotlightMarkup(first) + '</div>' +
+      '<button class="spotlight-control prev" data-spotlight-prev title="Previous trending anime" aria-label="Previous trending anime">' +
+        uiIcon("chevron-left") + '</button>' +
+      '<button class="spotlight-control next" data-spotlight-next title="Next trending anime" aria-label="Next trending anime">' +
+        uiIcon("chevron-right") + '</button>' +
+      '<div class="spotlight-count" id="spotlight-count">1 / ' + items.length + '</div>' +
+      '<div class="spotlight-dots">' + items.map((_,i) =>
+        '<button data-spotlight-index="' + i + '" class="' + (i===0 ? "active" : "") +
+        '" aria-label="Go to trending anime ' + (i+1) + '"></button>').join("") + '</div></div>';
+  }
+  async function renderSection(key, page = 1) {
+    const config = SECTIONS[key];
+    if (!config) { navigate("/discover"); return; }
+    const token = ++state.token;
+    showLoading("Loading " + config.title + "…");
+    try {
+      const result = await getCollection(config.sort, page, config.ranked ? 25 : 24, config.extra);
+      if (token !== state.token || state.route !== "/section") return;
+      const items = result.media || [];
+      const ranked = config.ranked;
+      const listHtml = ranked
+        ? '<div class="section-rank-list">' + items.map((media, index) =>
+            '<button class="section-rank-item" data-anime="' + media.id + '">' +
+            '<span class="section-rank-num">' + ((page - 1) * 25 + index + 1) + '</span>' +
+            '<img src="' + escapeHtml(imageOf(media)) + '" loading="lazy" alt="">' +
+            '<div><strong>' + escapeHtml(titleOf(media)) + '</strong><p>' +
+              escapeHtml([animeSeasonBadge(media), media.format, mediaYear(media),
+                media.episodes ? media.episodes + " episodes" : ""].filter(Boolean).join(" · ")) +
+            '</p><span class="preview-stat">' + (media.averageScore ? "★ " + formatScore(media.averageScore) : "") +
+            '</span></div>' + uiIcon("chevron-right") + '</button>'
+          ).join("") + '</div>'
+        : grid(items);
+      $("#view").innerHTML =
+        pageHead("EXPLORE ANIME", config.title, "A dedicated collection like the Android app",
+          '<button class="btn btn-quiet" data-route="/home">' + uiIcon("chevron-left") + ' Back</button>') +
+        listHtml + '<div class="section-pager">' +
+        '<button class="btn btn-secondary" data-section-page="' + key + '" data-page="' + (page-1) +
+          '"' + (page <= 1 ? " disabled" : "") + '>Previous</button>' +
+        '<span>Page ' + page + '</span>' +
+        '<button class="btn btn-primary" data-section-page="' + key + '" data-page="' + (page+1) +
+          '"' + (!result.pageInfo?.hasNextPage ? " disabled" : "") + '>Show More</button></div>';
+    } catch (error) {
+      if (token !== state.token) return;
+      $("#view").innerHTML = '<div class="empty-state"><h3>Could not load this section</h3><p>' +
+        escapeHtml(error.message) + '</p><button class="btn btn-primary" data-route="/discover">Browse other sections</button></div>';
+    }
+  }
+
   async function renderHome() {
     const token = ++state.token;
     showLoading("Building your anime home…");
@@ -313,9 +403,12 @@
       if (![...rows].some(list => list.length)) throw new Error("AniList did not return any anime sections. Please retry.");
 
       state.home = { trending, popular, top, airing, upcoming, movies, hidden };
-      const hero = trending[0] || popular[0] || top[0];
-      const heroImage = hero && (hero.bannerImage || imageOf(hero));
-      // Playback progress remains saved, but the user opted to hide the Continue Watching shelf.
+      const spotlightItems = (trending.length ? trending : popular.length ? popular : top).slice(0, 10);
+      state.spotlight = spotlightItems;
+      state.spotlightIndex = 0;
+      const continueItems = Object.values(store.history)
+        .filter(item => item && item.media && item.episode)
+        .sort((a,b) => (b.updatedAt || 0) - (a.updatedAt || 0)).slice(0, 12);
       const watchlistItems = Object.values(store.watchlist).slice(0, 12);
 
       const quickLinks = '<div class="home-shortcuts">' +
@@ -329,22 +422,19 @@
       const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
       $("#view").innerHTML =
         '<section class="home-welcome"><div><span class="welcome-eyebrow">' + greeting + '</span><h1 class="welcome-title">AniDash</h1></div><div class="welcome-actions"><button data-route="/account" aria-label="Your profile">◎</button><button data-route="/settings" aria-label="Settings">⚙</button></div></section>' +
-        '<div class="trending-label">★ &nbsp;Trending anime</div>' +
-        (hero ? '<section class="hero-stage home-hero"><div class="hero-bg" style="background-image:url(&quot;' + escapeHtml(heroImage) + '&quot;)"></div><div class="hero-content">' +
-          '<div class="hero-kicker">Your next anime obsession</div><h1 class="hero-title">' + escapeHtml(titleOf(hero)) + '</h1>' +
-          '<div class="hero-meta"><span>★ ' + formatScore(hero.averageScore) + '</span><span>' + escapeHtml(hero.format || "Anime") + '</span><span>' + escapeHtml(mediaYear(hero)) + '</span><span>' + escapeHtml(hero.status || "") + '</span></div>' +
-          '<p class="hero-description">' + escapeHtml(cleanText(hero.description) || "Explore the story, browse episodes and discover more anime.") + '</p>' +
-          '<div class="hero-actions"><button class="btn btn-primary" data-anime="' + hero.id + '">Explore anime <span>→</span></button><button class="btn btn-secondary" data-watchlist="' + hero.id + '">♡ Add to list</button></div>' +
-          '</div></section>' : '') +
+        '<div class="trending-label">' + uiIcon("star") + ' Trending anime</div>' +
+        spotlightPanel(spotlightItems) +
         quickLinks +
-        shelf("Currently airing", "Fresh episodes from currently releasing series.", airing.slice(0, 14), "/discover") +
-        shelf("Trending right now", "The series viewers are talking about.", trending.slice(0, 14), "/discover") +
-        shelf("Popular with fans", "Big adventures, favourites and crowd-pleasers.", popular.slice(0, 14), "/discover") +
+        resumeShelf(continueItems) +
+        shelf("Currently airing", "Fresh episodes from currently releasing series.", airing.slice(0, 14), sectionUrl("airing")) +
+        shelf("Trending right now", "The series viewers are talking about.", trending.slice(0, 14), sectionUrl("trending")) +
+        shelf("Popular with fans", "Big adventures, favourites and crowd-pleasers.", popular.slice(0, 14), sectionUrl("popular")) +
         (watchlistItems.length ? shelf("From your watchlist", "Saved anime, ready when you are.", watchlistItems, "/library") : '') +
-        shelf("Coming soon", "Upcoming anime to add to your list.", upcoming.slice(0, 14), "/discover") +
-        shelf("Anime movies", "Feature-length stories for your next movie night.", movies.slice(0, 14), "/discover") +
-        shelf("Top rated", "Highly rated titles from the AniList catalogue.", top.slice(0, 14), "/discover") +
-        shelf("Hidden gems", "Well-rated series beyond the most popular charts.", hidden.slice(0, 14), "/discover");
+        shelf("Coming soon", "Upcoming anime to add to your list.", upcoming.slice(0, 14), sectionUrl("upcoming")) +
+        shelf("Anime movies", "Feature-length stories for your next movie night.", movies.slice(0, 14), sectionUrl("movies")) +
+        shelf("Top rated", "Highly rated titles from the AniList catalogue.", top.slice(0, 14), sectionUrl("top")) +
+        shelf("Hidden gems", "Well-rated series beyond the most popular charts.", hidden.slice(0, 14), sectionUrl("hidden"));
+      scheduleSpotlight();
     } catch (error) {
       if (token !== state.token) return;
       $("#view").innerHTML = '<div class="empty-state"><div class="empty-icon">◌</div><h3>Could not load the catalogue</h3><p>' + escapeHtml(error.message) + '</p><button class="btn btn-primary" data-route="/home">Try again</button></div>';
@@ -365,12 +455,12 @@
       ];
       const home = state.home;
       const extraRows = (popular, upcoming) =>
-        shelf("All Time Popular", "", popular, "/discover") +
-        shelf("Upcoming Anime", "", upcoming, "/discover");
+        shelf("All Time Popular", "", popular, sectionUrl("popular")) +
+        shelf("Upcoming Anime", "", upcoming, sectionUrl("upcoming"));
       $("#view").innerHTML =
         pageHead("", "Discover Anime", "Find your next favorite series") +
         '<button class="discover-search-launch" data-route="/search"><span>⌕</span>Search anime titles…</button>' +
-        shelf(sort === "TRENDING_DESC" ? "Trending Now" : sort === "POPULARITY_DESC" ? "Most Popular" : "Top Rated", "", (data.media || []).slice(0, 14), "/discover") +
+        shelf(sort === "TRENDING_DESC" ? "Trending Now" : sort === "POPULARITY_DESC" ? "Most Popular" : "Top Rated", "", (data.media || []).slice(0, 14), sectionUrl(sort === "TRENDING_DESC" ? "trending" : sort === "POPULARITY_DESC" ? "popular" : "top")) +
         '<div id="discover-extras">' + (home ? extraRows(home.popular.slice(0, 12), home.upcoming.slice(0, 12)) : '') + '</div>' +
         '<section class="section"><div class="section-heading"><h2 class="section-title">Explore anime</h2></div>' +
         '<div class="toolbar"><select class="select-control" id="discover-sort">' + options.map(o =>
