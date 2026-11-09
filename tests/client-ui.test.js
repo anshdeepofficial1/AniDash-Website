@@ -87,7 +87,7 @@ test("anime details and episode buttons appear while all provider requests hang"
   const html = browser.getElement("#view").innerHTML;
   assert.match(html, /Sample Anime/);
   assert.match(html, /Episodes/);
-  assert.match(browser.getElement("#episode-list").innerHTML, /data-play-episode="1\\|1"/);
+  assert.match(browser.getElement("#episode-list").innerHTML, /data-play-episode="1\|1"/);
   assert.match(html, /Start watching/);
   assert.doesNotMatch(html, /Checking JustAnime, HiAnime and AniKoto/);
   assert.ok(browser.urls.some(url => url.startsWith("/api/")), "provider discovery should run independently");
