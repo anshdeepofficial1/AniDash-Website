@@ -25,7 +25,7 @@ function createBrowser(initialHash) {
       elements.set(selector, {
         innerHTML: "", value: "", style: {},
         classList: { add() {}, remove() {}, toggle() {} },
-        focus() {}, getAttribute() { return null; }
+        focus() {}, addEventListener() {}, getAttribute() { return null; }
       });
     }
     return elements.get(selector);
