@@ -1,0 +1,177 @@
+/* AniDash — Unslop design pass, Nov 2026.
+   Direction: quiet screening-room chrome; anime art owns the color.
+   Consistent 4px spacing, readable text, calm surfaces and one brand accent.
+   Source method: https://github.com/heydamir/unslop (CC BY 4.0). */
+:root {
+  --radius: 16px;
+  --sidebar: 244px;
+}
+body { line-height: 1.45; }
+button, a, input, select { touch-action: manipulation; }
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 3px;
+}
+.ambient, .sidebar-promo { display: none !important; }
+.app-shell { max-width: 100%; }
+.sidebar { padding: 24px 16px; backdrop-filter: none; }
+.brand { margin-bottom: 36px; gap: 12px; }
+.brand-mark { background: transparent; border-radius: 12px; box-shadow: none; }
+.brand-word, .mobile-brand b { letter-spacing: -.5px; }
+.side-label { font-size: 11px; letter-spacing: .4px; font-weight: 600; padding: 0 12px 8px; }
+.side-label-spaced { margin-top: 28px; }
+.side-nav { gap: 4px; }
+.side-nav a, .settings-link {
+  min-height: 40px; gap: 12px; padding: 10px 12px; font-size: 13px;
+  border-radius: 10px; transition: background-color .16s ease, color .16s ease;
+}
+.side-nav a.active { box-shadow: none; }
+.sidebar-foot { font-size: 10px; letter-spacing: .2px; }
+.main-panel { padding-inline: clamp(20px, 3.2vw, 52px); }
+.topbar { height: 72px; }
+.topbar-search { height: 42px; border-radius: 12px; }
+.topbar-search input { font-size: 13px; }
+.topbar-search kbd { letter-spacing: 0; }
+.profile-avatar, .icon-button { border-radius: 12px; }
+.view-content { padding-top: 24px; }
+.page-title { letter-spacing: -.7px; }
+.section-title { font-weight: 600; letter-spacing: -.4px; }
+.section-note, .page-subtitle { font-size: 12px; line-height: 1.6; }
+.hero-stage, .home-hero { border-radius: 18px; }
+.hero-content { padding: 32px; }
+.hero-description { font-size: 13px; }
+.hero-title { line-height: 1.03; }
+.hero-kicker, .eyebrow { letter-spacing: .5px; font-weight: 600; }
+.hero-kicker:before { box-shadow: none; }
+.btn { min-height: 44px; border-radius: 12px; font-size: 13px; font-weight: 600; box-shadow: none; }
+.btn-primary { box-shadow: none; }
+.btn-primary:hover { transform: none; }
+.btn-secondary { backdrop-filter: none; }
+.anime-card { min-width: 0; }
+.poster-wrap { overflow: hidden; }
+.card-title { font-weight: 600; line-height: 1.35; }
+.card-subtitle { line-height: 1.4; }
+.content-panel, .player-panel, .settings-group, .account-provider { border-radius: 16px; }
+.preference-title { font-size: 14px; font-weight: 600; }
+.preference-help { font-size: 12px; }
+.source-pill { min-height: 42px; border-radius: 10px; padding: 10px 14px; font-size: 13px; font-weight: 500; }
+.source-pill.active { font-weight: 600; }
+.player-page { max-width: 1440px; margin: 0 auto 40px; }
+.player-topline { margin-bottom: 16px; gap: 12px; }
+.player-topline h1 { font-size: 20px; font-weight: 600; line-height: 1.3; }
+.player-topline p { font-size: 12px; margin-top: 4px; }
+.back-button { flex: 0 0 40px; width: 40px; height: 40px; font-size: 19px; }
+.player-layout { grid-template-columns: minmax(0, 1fr) minmax(260px, 312px); gap: 20px; }
+.video-frame { box-shadow: none; border-radius: 14px; background: #070a08; border: 1px solid rgba(255,255,255,.1); }
+.video-frame video, .video-frame iframe { width: 100%; height: 100%; object-fit: contain; background: #070a08; border: 0; }
+.player-overlay { padding: 24px; background: rgba(5, 8, 6, .9); gap: 12px; }
+.player-overlay.has-error { background: rgba(5,8,6,.95); }
+.player-overlay strong { font-size: clamp(15px, 2vw, 18px); font-weight: 600; color: #fff; }
+.player-overlay p { font-size: 13px; line-height: 1.55; max-width: 420px; color: #bdc7c0; }
+.player-error-symbol { width: 36px; height: 36px; border-radius: 50%; background: #8c3939; font-size: 18px; }
+.player-error-actions { display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; width: min(100%, 400px); }
+.player-error-actions .btn { min-width: 132px; }
+.player-under { padding: 20px 2px 8px; gap: 16px; align-items: start; }
+.player-under h2 { font-size: 19px; font-weight: 600; line-height: 1.35; }
+.player-under p { font-size: 12px; line-height: 1.5; }
+.player-controls { gap: 8px; }
+.player-controls .btn { min-width: 112px; }
+.player-sidebar { display: grid; grid-template-columns: 1fr; align-content: start; gap: 12px; }
+.player-panel { padding: 20px; }
+.player-panel h3 { margin: 0; font-size: 15px; font-weight: 600; }
+.player-panel-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+.stream-state, .stream-hint { color: var(--muted); font-size: 11px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+#category-pills, #quality-pills { gap: 8px; }
+.player-stream-panel[hidden] { display: none !important; }
+#quality-pills .source-pill { flex: 1 1 auto; }
+.player-episode-list { max-height: 416px; overflow: auto; scrollbar-width: thin; }
+.player-episode-tools { display: flex; gap: 8px; flex-wrap: wrap; }
+.player-episode { min-height: 40px; padding: 10px 12px; font-size: 12px; text-align: left; gap: 12px; }
+.player-episode span { min-width: 24px; text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }
+.player-episode:hover { text-decoration: none; }
+.player-episode.active { font-weight: 600; }
+#skip-buttons { margin-top: 12px !important; }
+.player-episode-pagination { font-size: 12px; }
+.episode-range, .episode-page-label { font-size: 12px; }
+.input-control, .select-control { min-height: 42px; border-radius: 10px; font-size: 13px; }
+body[data-theme="dark"] {
+  --bg: #101512;
+  --surface: #1a221c;
+  --surface-2: #232e26;
+  --surface-3: #29382e;
+  --text: #f0f5ef;
+  --soft: #c1cec3;
+  --muted: #9dab9e;
+  --line: rgba(244,253,243,.09);
+  --line-strong: rgba(244,253,243,.16);
+  --accent: #a0d6af;
+}
+body[data-theme="dark"] .player-panel,
+body[data-theme="dark"] .content-panel,
+body[data-theme="dark"] .sidebar,
+body[data-theme="dark"] .settings-group { background: var(--surface); }
+body[data-theme="dark"] .source-pill.active {
+  background: #365642; color: #f5fff5; border-color: #6b9d77;
+}
+body[data-theme="dark"] .player-episode.active { background: #2d4234; color: #f5fff5; }
+body[data-theme="dark"] .player-episode span { color: var(--accent); }
+@media (max-width: 1020px) {
+  .player-layout { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  .player-sidebar { grid-template-columns: repeat(2, minmax(0,1fr)); }
+  .player-sidebar > .player-panel:last-child { grid-column: 1 / -1; }
+}
+@media (max-width: 760px) {
+  .main-panel { padding-inline: 16px; }
+  .topbar { height: 68px; }
+  .view-content { padding-top: 14px; padding-bottom: 112px; }
+  .mobile-brand b { font-size: 21px; }
+  .mobile-dock {
+    width: min(calc(100vw - 32px), 390px);
+    min-height: 64px;
+    padding: 8px;
+    border: 1px solid var(--line-strong);
+    border-radius: 24px;
+    box-shadow: 0 10px 32px rgba(0,0,0,.12);
+  }
+  .mobile-dock a { min-height: 48px; }
+  .mobile-dock a span { height: 44px; border-radius: 16px; }
+  .mobile-dock a svg { width: 22px; height: 22px; }
+  .home-hero { border-radius: 20px !important; }
+  .home-hero .hero-content { padding: 20px; }
+  .section-title { font-size: 20px; }
+  .section-note { font-size: 12px; }
+  .anime-shelf .anime-card:not(.resume-card) .card-title,
+  .anime-grid .card-title { font-size: 13px; }
+  .anime-shelf .anime-card:not(.resume-card) .card-subtitle,
+  .anime-grid .card-subtitle { font-size: 11px; }
+  .player-page { margin-top: 0; padding-bottom: 20px; }
+  .player-topline { gap: 10px; margin-bottom: 12px; }
+  .player-topline h1 { font-size: 16px; }
+  .player-topline p { font-size: 11px; }
+  .video-frame { border-radius: 12px; }
+  .player-overlay { padding: 16px; gap: 8px; }
+  .player-overlay strong { font-size: 15px; }
+  .player-overlay p { font-size: 11px; }
+  .player-error-actions .btn { min-width: 0; flex: 1 1 132px; }
+  .player-under { padding: 16px 0 8px; gap: 12px; }
+  .player-under h2 { font-size: 17px; }
+  .player-controls { width: 100%; }
+  .player-controls .btn { flex: 1 1 0; min-width: 0; }
+  .player-sidebar { grid-template-columns: 1fr; gap: 12px; }
+  .player-panel { padding: 16px; border-radius: 14px; }
+  .player-sidebar > .player-panel:last-child { grid-column: auto; }
+  .player-episode-list { max-height: 360px; }
+  .player-episode { font-size: 13px; min-height: 44px; }
+  .player-episode-tools { flex-wrap: wrap; }
+  .player-episode-tools #player-episode-filter { flex: 1 1 100%; max-width: none; }
+  .player-episode-tools #player-episode-jump { flex: 1 1 100px; }
+  .player-episode-tools [data-episode-go] { flex: 0 0 56px; }
+  .source-pill { font-size: 13px; min-height: 44px; }
+}
+@media (max-width: 390px) {
+  .main-panel { padding-inline: 12px; }
+  .player-panel { padding: 14px; }
+  .player-topline h1 { font-size: 15px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .source-pill, .btn, .side-nav a { transition: none !important; animation: none !important; }
+}
