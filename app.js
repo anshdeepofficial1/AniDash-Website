@@ -25,7 +25,7 @@
         libraryStatuses: raw.libraryStatuses || {},
         localFavorites: raw.localFavorites || {},
         malStatuses: raw.malStatuses || {},
-                providerManifest: raw.providerManifest || null,
+        providerManifest: raw.providerManifest || null,
         adultContent: raw.adultContent === true,
         preferences: raw.preferences && typeof raw.preferences === "object" ? raw.preferences : {},
         hiddenCloudEntries: raw.hiddenCloudEntries || {},
@@ -43,6 +43,7 @@
     themeMode: "light", preferredAudio: "dub", defaultQuality: "Auto",
     autoEnableSubtitles: true, autoSkipIntro: false, showNextEpisodePrompt: true,
     episodeViewMode: "list", preferredSource: "auto",
+    showMangaTab: false, showNewsSection: true, showNewsNotifications: true,
     trackProgress: true
   };
   store.preferences = { ...DEFAULT_PREFERENCES, ...store.preferences };
@@ -54,6 +55,10 @@
     document.body.dataset.theme = themeMode === "dark" || (themeMode === "system" && systemDark)
       ? "dark" : "light";
     document.body.dataset.episodeLayout = setting("episodeViewMode") || "list";
+    document.body.dataset.mangaNav = setting("showMangaTab") ? "true" : "false";
+    $('[data-optional-manga]').forEach(item => { item.hidden = !setting("showMangaTab"); });
+    const themeMeta = document.querySelector('meta[name="theme-color"]');
+    if (themeMeta) themeMeta.content = document.body.dataset.theme === "dark" ? "#101512" : "#f4f8f5";
   }
   applyPreferences();
   const state = {
@@ -80,7 +85,9 @@
     progressTimer: 0,
     spotlight: [], spotlightIndex: 0, spotlightTimer: null,
     malEntries: [], libraryTab: "CURRENT", cloudSyncing: false,
-    mangaDetail: null, lastCloudProgressSync: new Map()
+    mangaDetail: null, lastCloudProgressSync: new Map(),
+    news: [], newsFetched: false, newsPending: null, newsError: "",
+    notificationRead: {}, lastInfoRefresh: 0
   };
 
   const escapeHtml = value => String(value == null ? "" : value).replace(/[&<>"']/g, char => ({
@@ -92,6 +99,19 @@
   const mediaYear = media => media && (media.seasonYear || (media.startDate && media.startDate.year)) || "";
   const imageOf = media => media && media.coverImage && (media.coverImage.extraLarge || media.coverImage.large || media.coverImage.medium) || "";
   const slug = value => String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const hhmmss = value => {
+    const total = Math.max(0, Math.floor(Number(value) || 0));
+    const seconds = String(total % 60).padStart(2, "0");
+    const minutes = Math.floor(total / 60);
+    return minutes >= 60
+      ? Math.floor(minutes / 60) + ":" + String(minutes % 60).padStart(2, "0") + ":" + seconds
+      : String(minutes).padStart(2, "0") + ":" + seconds;
+  };
+  const progressCaption = entry => {
+    if (!entry || Number(entry.position || 0) <= 0) return "Resume episode " + (entry?.episode || 1);
+    const played = hhmmss(entry.position), duration = Number(entry.duration || 0);
+    return duration > entry.position ? "Resume at " + played + " / " + hhmmss(duration) : "Resume at " + played;
+  };
   const UI_ICON_NAMES = new Set(["home","compass","search","manga","library","user","settings",
     "download","play","bookmark","chevron-right","chevron-left","chevron-down","heart","star",
     "refresh","sliders","calendar","filter","history","check","info","shield","eye","cloud"]);
@@ -290,6 +310,7 @@
           '<div class="poster-wrap">' + (poster ? '<img loading="lazy" src="' + escapeHtml(poster) + '" alt="">' : '<div class="poster-fallback">' + escapeHtml(titleOf(media)) + '</div>') +
           '<span class="poster-score">EP ' + escapeHtml(item.episode || 1) + '</span><span class="resume-play">▶</span></div>' +
           '<div class="card-title">' + escapeHtml(titleOf(media)) + '</div><p class="card-subtitle">' + escapeHtml(item.episodeTitle || ("Episode " + (item.episode || 1))) + '</p>' +
+          '<p class="resume-timestamp">' + escapeHtml(progressCaption(item)) + '</p>' +
           '<div class="card-progress"><span style="width:' + pct + '%"></span></div></article>';
       }).join("") + '</div></section>';
   }
@@ -2316,8 +2337,9 @@
 
   function openModal(content) {
     $("#modal-root").innerHTML = '<div class="modal-backdrop" data-close-modal><section class="modal-card" role="dialog" aria-modal="true">' + content + '</section></div>';
-    const cardEl = $(".modal-card");
-    if (cardEl) cardEl.addEventListener("click", event => event.stopPropagation());
+    const close = $(".modal-card [data-close]");
+    if (close && typeof close.focus === "function") close.focus();
+    // Never stop propagation within the dialog: delegated X/Done actions must work.
   }
 
   function closeModal() {
@@ -2414,10 +2436,8 @@
 
   document.addEventListener("click", async event => {
     const target = event.target.closest("button,a,article");
-    if (!target) {
-      if (event.target.matches("[data-close-modal]")) closeModal();
-      return;
-    }
+    if (event.target.matches("[data-close-modal]")) { closeModal(); return; }
+    if (!target) return;
     if (target.hasAttribute("data-route")) {
       event.preventDefault();
       navigate(target.getAttribute("data-route"));
@@ -2791,6 +2811,9 @@
 
   document.addEventListener("anidash:downloads-changed", () => {
     if (state.route === "/downloads") renderDownloads();
+  });
+  document.addEventListener("keydown", event => {
+    if (event.key === "Escape" && $(".modal-backdrop")) { closeModal(); event.preventDefault(); }
   });
   document.addEventListener("change", async event => {
     if (event.target.id === "cbz-file-input") {
