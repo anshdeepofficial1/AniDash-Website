@@ -1729,7 +1729,7 @@
     const hasPrev = episodeIndex > 0;
     const hasNext = episodeIndex >= 0 && episodeIndex < state.detailEpisodes.length - 1;
     $("#view").innerHTML = '<div class="player-page"><div class="player-topline"><button class="back-button" data-anime="' + media.id + '" aria-label="Back to anime">←</button><div><h1>' + escapeHtml(titleOf(media)) + '</h1><p>Episode ' + escapeHtml(episode.number) + ' · <span id="player-episode-heading">' + escapeHtml(episode.title) + '</span></p></div></div>' +
-      '<div class="player-layout"><section><div class="video-frame"><video id="anime-video" controls playsinline webkit-playsinline preload="metadata"></video><iframe id="anime-embed" title="Episode stream" allow="autoplay; fullscreen; picture-in-picture; encrypted-media" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen hidden></iframe><div class="player-overlay" id="player-overlay" role="status"><div class="player-mini-loader"></div><strong>Opening episode…</strong></div></div>' +
+      '<div class="player-layout"><section><div class="video-frame"><video id="anime-video" controls playsinline webkit-playsinline preload="metadata"></video><iframe id="anime-embed" title="Episode stream" allow="autoplay; fullscreen; picture-in-picture; encrypted-media" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen hidden></iframe><div class="video-ui" id="video-ui" hidden><div class="video-ui-top"><span>' + escapeHtml(titleOf(media)) + ' · Episode ' + escapeHtml(episode.number) + '</span></div><div class="video-ui-bottom"><input class="video-seek" id="video-seek" type="range" min="0" max="1000" value="0" aria-label="Seek position"><div class="video-ui-buttons"><button data-player-toggle aria-label="Play or pause">' + uiIcon("play") + '</button><button data-player-jump="-10" aria-label="Back 10 seconds">−10</button><button data-player-jump="10" aria-label="Forward 10 seconds">+10</button><span id="video-clock" class="video-timecode">00:00 / --:--</span><span class="video-ui-spacer"></span><button data-player-speed aria-label="Playback speed">1×</button><button data-player-fullscreen aria-label="Fullscreen">' + uiIcon("expand") + '</button></div></div></div><div class="player-overlay" id="player-overlay" role="status"><div class="player-mini-loader"></div><strong>Opening episode…</strong></div></div>' +
       '<div class="player-under"><div><h2 id="player-episode-inline-title">' + escapeHtml(episode.title) + '</h2><p>' + escapeHtml(titleOf(media)) + ' · Episode ' + escapeHtml(episode.number) + '</p></div><div class="player-controls"><button class="btn btn-quiet" data-prev ' + (hasPrev ? "" : "disabled") + '>← Previous</button><button class="btn btn-quiet" data-next ' + (hasNext ? "" : "disabled") + '>Next →</button></div></div>' +
       '<div class="button-row" style="margin-top:14px" id="skip-buttons"></div></section>' +
       '<aside class="player-sidebar"><div class="player-panel player-audio-panel"><div class="player-panel-head"><h3>Audio language</h3><span class="stream-state" id="stream-status" role="status">Checking streams</span></div><div class="source-row" id="category-pills" role="group" aria-label="Audio language"><button class="source-pill' + (player.category === "sub" ? " active" : "") + '" data-category="sub" aria-pressed="' + (player.category === "sub") + '">Subtitled</button><button class="source-pill' + (player.category !== "sub" ? " active" : "") + '" data-category="dub" aria-pressed="' + (player.category !== "sub") + '">English dub</button></div></div>' +
@@ -2082,6 +2082,28 @@
     );
   }
 
+
+  function updateVideoControls() {
+    const video = $("#anime-video");
+    if (!video) return;
+    const clock = $("#video-clock");
+    if (clock) {
+      const valid = Number.isFinite(video.duration) && video.duration > 0;
+      clock.textContent = hhmmss(video.currentTime) + " / " + (valid ? hhmmss(video.duration) : "--:--");
+    }
+    const seek = $("#video-seek");
+    if (seek && Number.isFinite(video.duration) && video.duration > 0) {
+      seek.value = String(Math.round(Math.min(1, video.currentTime / video.duration) * 1000));
+    }
+    const toggle = $('[data-player-toggle]');
+    if (toggle) {
+      toggle.innerHTML = uiIcon(video.paused ? "play" : "pause");
+      toggle.setAttribute("aria-label", video.paused ? "Play" : "Pause");
+    }
+    const speed = $('[data-player-speed]');
+    if (speed) speed.textContent = Number(video.playbackRate || 1).toFixed(2).replace(/0$/, "").replace(/\.$/, "") + "×";
+  }
+
   function attachStream(url, stream, tracks) {
     if (!url) {
       fallbackToNextProvider("The provider did not return a media URL.");
@@ -2101,6 +2123,9 @@
     const embed = $("#anime-embed");
     const overlay = $("#player-overlay");
     if (!video) return;
+    const playerUI = $("#video-ui");
+    if (playerUI) playerUI.hidden = true;
+    video.controls = true;
     if (state.playbackWatchdog) {
       window.clearTimeout(state.playbackWatchdog);
       state.playbackWatchdog = null;
@@ -2192,6 +2217,10 @@
           });
         } catch (_) {}
       }
+      if (state.currentVideo !== url) return;
+      const playerUI = $("#video-ui");
+      if (playerUI) { playerUI.hidden = false; video.controls = false; }
+      updateVideoControls();
       video.play().catch(error => {
         if (state.currentVideo !== url) return;
         if (error?.name === "NotAllowedError") {
@@ -2209,6 +2238,7 @@
       if (state.playbackWatchdog) window.clearTimeout(state.playbackWatchdog);
       state.playbackWatchdog = null;
       if (overlay) overlay.style.display = "none";
+      updateVideoControls();
     };
     video.onwaiting = () => {
       if (state.currentVideo === url && !video.paused && overlay) {
@@ -2227,6 +2257,7 @@
       }
     };
     video.ontimeupdate = () => {
+      updateVideoControls();
       savePlaybackProgress(video);
       const intro = state.player?.intro;
       if (setting("autoSkipIntro") && intro && Number.isFinite(Number(intro.start)) &&
@@ -2235,8 +2266,9 @@
         video.currentTime = Number(intro.end);
       }
     };
-    video.onpause = () => savePlaybackProgress(video, false, true);
+    video.onpause = () => { updateVideoControls(); savePlaybackProgress(video, false, true); };
     video.onended = () => {
+      updateVideoControls();
       savePlaybackProgress(video, true, true);
       if (setting("showNextEpisodePrompt")) {
         const next = state.detailEpisodes.find(ep => Number(ep.number) === Number(state.player.episode.number) + 1);
@@ -2599,6 +2631,44 @@
     const target = event.target.closest("button,a,article");
     if (event.target.matches("[data-close-modal]")) { closeModal(); return; }
     if (!target) return;
+    if (target.hasAttribute("data-player-toggle")) {
+      const video = $("#anime-video");
+      if (video) {
+        if (video.paused) video.play().catch(() => toast("Playback was blocked by this browser."));
+        else video.pause();
+        updateVideoControls();
+      }
+      return;
+    }
+    if (target.hasAttribute("data-player-jump")) {
+      const video = $("#anime-video");
+      if (video && Number.isFinite(video.duration) && video.duration > 0) {
+        video.currentTime = Math.max(0, Math.min(video.duration, video.currentTime + Number(target.getAttribute("data-player-jump"))));
+        updateVideoControls();
+      }
+      return;
+    }
+    if (target.hasAttribute("data-player-speed")) {
+      const video = $("#anime-video");
+      if (video) {
+        const speeds = [1, 1.25, 1.5, 2, 0.75];
+        const next = (speeds.indexOf(video.playbackRate) + 1) % speeds.length;
+        video.playbackRate = speeds[next];
+        updateVideoControls();
+      }
+      return;
+    }
+    if (target.hasAttribute("data-player-fullscreen")) {
+      const video = $("#anime-video");
+      const frame = $(".video-frame");
+      try {
+        if (document.fullscreenElement && document.exitFullscreen) await document.exitFullscreen();
+        else if (frame?.requestFullscreen) await frame.requestFullscreen();
+        else if (video?.webkitEnterFullscreen) video.webkitEnterFullscreen();
+        else toast("Fullscreen is unavailable in this browser.");
+      } catch (_) { toast("Fullscreen could not be opened."); }
+      return;
+    }
     if (target.hasAttribute("data-open-news")) {
       const item = state.news[Number(target.getAttribute("data-open-news"))];
       if (item && /^https:\/\//i.test(item.url)) {
@@ -3063,6 +3133,14 @@
   });
 
   document.addEventListener("input", event => {
+    if (event.target.id === "video-seek") {
+      const video = $("#anime-video");
+      if (video && Number.isFinite(video.duration) && video.duration > 0) {
+        video.currentTime = Math.max(0, Math.min(video.duration, Number(event.target.value) / 1000 * video.duration));
+        updateVideoControls();
+      }
+      return;
+    }
     if (event.target.id === "episode-filter") {
       state.episodeFilter = event.target.value;
       state.episodePage = 1;
