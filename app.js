@@ -314,7 +314,7 @@
 
   function showLoading(_message) {
     const view = $("#view");
-    if (!view || view.querySelector(".home-hero, .anime-grid, .library-tabs, .native-home-header")) return;
+    if (!view || (typeof view.querySelector === "function" && view.querySelector(".home-hero, .anime-grid, .library-tabs, .native-home-header"))) return;
     view.innerHTML = '<section class="page-skeleton" aria-label="Loading content" role="status">' +
       '<div class="skeleton-line medium"></div><div class="skeleton-hero"></div>' +
       '<div class="skeleton-line short"></div><div class="skeleton-grid">' +
