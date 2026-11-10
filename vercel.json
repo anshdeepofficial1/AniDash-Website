@@ -58,5 +58,79 @@
       "**": false,
       "main": true
     }
-  }
+  },
+  "rewrites": [
+    {
+      "source": "/home",
+      "destination": "/"
+    },
+    {
+      "source": "/discover",
+      "destination": "/"
+    },
+    {
+      "source": "/library",
+      "destination": "/"
+    },
+    {
+      "source": "/history",
+      "destination": "/"
+    },
+    {
+      "source": "/account",
+      "destination": "/"
+    },
+    {
+      "source": "/news",
+      "destination": "/"
+    },
+    {
+      "source": "/notifications",
+      "destination": "/"
+    },
+    {
+      "source": "/settings",
+      "destination": "/"
+    },
+    {
+      "source": "/manga",
+      "destination": "/"
+    },
+    {
+      "source": "/manga-library",
+      "destination": "/"
+    },
+    {
+      "source": "/search",
+      "destination": "/"
+    },
+    {
+      "source": "/downloads",
+      "destination": "/"
+    },
+    {
+      "source": "/anime/:id",
+      "destination": "/"
+    },
+    {
+      "source": "/watch/:id",
+      "destination": "/"
+    },
+    {
+      "source": "/watch/:id/:episode",
+      "destination": "/"
+    },
+    {
+      "source": "/section/:name",
+      "destination": "/"
+    },
+    {
+      "source": "/manga-section/:name",
+      "destination": "/"
+    },
+    {
+      "source": "/manga-detail/:id",
+      "destination": "/"
+    }
+  ]
 }

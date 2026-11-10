@@ -3,10 +3,12 @@
   "name": "AniDash — Anime Streaming",
   "short_name": "AniDash",
   "description": "Discover anime, save your watchlist and stream with AniDash's built-in sources.",
-  "start_url": "/#/home",
+  "start_url": "/home",
   "scope": "/",
   "display": "standalone",
-  "display_override": ["standalone"],
+  "display_override": [
+    "standalone"
+  ],
   "orientation": "any",
   "background_color": "#f4f8f5",
   "theme_color": "#f4f8f5",
@@ -27,7 +29,7 @@
       "name": "Search anime",
       "short_name": "Search",
       "description": "Find an anime in the AniList catalogue.",
-      "url": "/#/search",
+      "url": "/discover?focus=search",
       "icons": [
         {
           "src": "/icons/anidash-icon.png",
@@ -39,7 +41,7 @@
       "name": "My watchlist",
       "short_name": "Watchlist",
       "description": "Open your saved anime.",
-      "url": "/#/library",
+      "url": "/library",
       "icons": [
         {
           "src": "/icons/anidash-icon.png",
@@ -51,7 +53,7 @@
       "name": "Continue watching",
       "short_name": "Continue",
       "description": "Resume your recent episode.",
-      "url": "/#/history",
+      "url": "/history",
       "icons": [
         {
           "src": "/icons/anidash-icon.png",

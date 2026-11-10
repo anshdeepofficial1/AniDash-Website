@@ -1,4 +1,4 @@
-const CACHE_NAME = "anidash-watch-shell-v17";
+const CACHE_NAME = "anidash-watch-shell-v18";
 const READER_LIB = "https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js";
 const SHELL = ["/", "/index.html", "/styles.css", "/android-ui.css", "/preferences.css", "/app-parity.css", "/unslop.css", "/native-parity.css", "/catalog-polish.css", "/library-storage.js", "/anilist-account.js", "/mal-account.js", "/cbz-reader.js", "/episode-arcs.js", "/app.js", "/manifest.webmanifest", "/icons/anidash-icon.png", "/icons/ui-sprite.svg"];
 
@@ -37,6 +37,24 @@ self.addEventListener("fetch", event => {
     return;
   }
   if (url.origin !== self.location.origin || url.pathname.startsWith("/api/")) return;
+  // Path-based PWA deep links need the app shell when offline. A network-first
+  // navigation keeps new deployments fresh while allowing offline reopening.
+  if (request.mode === "navigate") {
+    event.respondWith((async () => {
+      try {
+        const response = await fetch(new Request(request, { cache: "no-cache" }));
+        if (response.ok) return response;
+        return response;
+      } catch (_) {
+        const shell = await caches.match("/") || await caches.match("/index.html");
+        if (shell) return shell;
+        return new Response("AniDash app shell is not cached for offline access.", {
+          status: 503, headers: { "Content-Type": "text/plain; charset=utf-8" }
+        });
+      }
+    })());
+    return;
+  }
   const isShellAsset =
     ["/", "/index.html", "/styles.css", "/android-ui.css", "/preferences.css", "/app-parity.css", "/unslop.css", "/native-parity.css", "/catalog-polish.css", "/library-storage.js", "/anilist-account.js", "/mal-account.js", "/cbz-reader.js", "/episode-arcs.js", "/app.js", "/manifest.webmanifest"].includes(url.pathname) ||
     url.pathname.startsWith("/icons/");

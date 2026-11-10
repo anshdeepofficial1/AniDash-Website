@@ -62,7 +62,12 @@ const server = createServer(async (req, res) => {
       res.end(JSON.stringify(payload));
       return;
     }
-    const name = pathname === "/" ? "/index.html" : pathname;
+    // Emulate Vercel SPA rewrites so a hard reload on /anime/21, /watch/21/2,
+    // or any other clean route is tested as a real document request.
+    const staticRoutes = /^\/(?:home|discover|library|history|account|news|notifications|settings|manga|manga-library|search|downloads)\/?$/;
+    const dynamicRoutes = /^\/(?:anime|watch|section|manga-section|manga-detail)\/[^/.]+(?:\/[^/.]+)?\/?$/;
+    const name = pathname === "/" || staticRoutes.test(pathname) || dynamicRoutes.test(pathname)
+      ? "/index.html" : pathname;
     const absolute = path.resolve(root, "." + name);
     if (!absolute.startsWith(root + path.sep)) { res.writeHead(403); res.end(); return; }
     const mime = name.endsWith(".html") ? "text/html" : name.endsWith(".js") ? "text/javascript" :
@@ -100,7 +105,7 @@ try {
   await context.route("https://example.com/**", route =>
     route.fulfill({ status: 200, contentType: "image/svg+xml", body: imageSvg })
   );
-  await page.goto(address + "/#/home", { waitUntil: "domcontentloaded" });
+  await page.goto(address + "/home", { waitUntil: "domcontentloaded" });
   try {
     await page.locator(".home-hero").waitFor({ timeout: 15000 });
   } catch (error) {
@@ -136,7 +141,7 @@ try {
   await page.locator(".section-rank-item").first().waitFor({ timeout: 15000 });
   assert.match(await page.locator(".page-title").textContent(), /Trending Right Now/);
   await page.screenshot({ path: path.join(artifacts, "mobile-trending-ranked.png") });
-  await page.goto(address + "/#/manga", { waitUntil: "domcontentloaded" });
+  await page.goto(address + "/manga", { waitUntil: "domcontentloaded" });
   await page.getByRole("heading",{name:"Manga"}).first().waitFor({timeout:15000});
   await page.locator('[data-manga]').first().waitFor({timeout:15000});
   await page.screenshot({ path: path.join(artifacts, "mobile-manga.png") });
@@ -157,35 +162,35 @@ try {
   assert.equal(restored.count, 1);
   assert.equal(restored.name, "verified-offline.cbz");
   assert.ok(restored.bytes > 100);
-  await page.goto(address + "/#/downloads", { waitUntil:"domcontentloaded" });
-  await page.waitForURL("**/#/library", { timeout: 10000 });
+  await page.goto(address + "/downloads", { waitUntil:"domcontentloaded" });
+  await page.waitForURL("**/library", { timeout: 10000 });
   assert.equal(await page.locator(".download-details").count(), 0,
     "Old Downloads deep link should land in Library");
 
-  await page.goto(address + "/#/home", { waitUntil: "domcontentloaded" });
+  await page.goto(address + "/home", { waitUntil: "domcontentloaded" });
   await page.locator(".home-hero").waitFor({ timeout: 15000 });
   // Save a guest watchlist entry, reload and verify durable browser storage.
   assert.equal(await page.locator('.sidebar-promo').count(), 0, "Provider promo should not appear in sidebar");
   assert.equal(await page.locator('.mobile-dock [data-route="/history"]').count(), 0, "Continue Watching nav is removed");
   const initialHomeCalls = homeApiCalls;
-  await page.goto(address + "/#/notifications", { waitUntil: "domcontentloaded" });
+  await page.goto(address + "/notifications", { waitUntil: "domcontentloaded" });
   await page.locator('button[data-route="/home"]').first().click();
   await page.locator(".home-hero").waitFor({ timeout: 15000 });
   assert.equal(homeApiCalls, initialHomeCalls,
     "Returning from Notifications to Home must use saved catalogue");
   await page.locator('.home-hero [data-watchlist]').first().click();
-  await page.goto(address + "/#/library", { waitUntil: "domcontentloaded" });
+  await page.goto(address + "/library", { waitUntil: "domcontentloaded" });
   await page.locator('[data-library-tab="PLANNING"]').click();
   await page.locator('.anime-card[data-anime="21"]').waitFor({ timeout: 15000 });
   await page.reload({ waitUntil: "domcontentloaded" });
   await page.locator('[data-library-tab="PLANNING"]').click();
   await page.locator('.anime-card[data-anime="21"]').waitFor({ timeout: 15000 });
   assert.ok((await page.evaluate(() => localStorage.getItem("anidash.watch.web.v1")) || "").includes("21"));
-  await page.goto(address + "/#/account", { waitUntil: "domcontentloaded" });
+  await page.goto(address + "/account", { waitUntil: "domcontentloaded" });
   await page.getByRole("heading", { name: "Your AniDash Account" }).waitFor({ timeout: 15000 });
   await page.getByText("Continue with MyAnimeList").waitFor({ timeout: 15000 });
   assert.equal(await page.locator('input[type="password"]').count(), 0, "No provider password field");
-  await page.goto(address + "/#/settings", { waitUntil: "domcontentloaded" });
+  await page.goto(address + "/settings", { waitUntil: "domcontentloaded" });
   await page.locator(".settings-screen [data-install]").click();
   await page.locator(".modal-backdrop").waitFor({ timeout: 4000 });
   await page.locator(".modal-card .close-modal").click();
@@ -207,7 +212,7 @@ try {
   assert.equal(await page.locator('[data-setting="preferredAudio"]').inputValue(), "sub");
   assert.equal(await page.locator('body').getAttribute("data-theme"), "dark");
   await page.locator('[data-setting="themeMode"]').selectOption("light");
-  await page.goto(address + "/#/home", { waitUntil: "domcontentloaded" });
+  await page.goto(address + "/home", { waitUntil: "domcontentloaded" });
   await page.locator(".home-hero").waitFor({ timeout: 15000 });
 
   const dock = await page.locator(".mobile-dock").boundingBox();
@@ -233,7 +238,7 @@ try {
   const desktop = await context.newPage();
   await desktop.setViewportSize({ width: 1440, height: 900 });
   desktop.on("pageerror", err => errors.push(err.message));
-  await desktop.goto(address + "/#/home", { waitUntil: "domcontentloaded" });
+  await desktop.goto(address + "/home", { waitUntil: "domcontentloaded" });
   await desktop.locator(".home-hero").waitFor({ timeout: 15000 });
   const firstHeight = (await desktop.locator(".spotlight-shell").boundingBox()).height;
   await desktop.locator("[data-spotlight-next]").click();
@@ -251,7 +256,7 @@ try {
   const tablet = await context.newPage();
   await tablet.setViewportSize({ width: 820, height: 1180 });
   tablet.on("pageerror", err => errors.push(err.message));
-  await tablet.goto(address + "/#/home", { waitUntil:"domcontentloaded" });
+  await tablet.goto(address + "/home", { waitUntil:"domcontentloaded" });
   await tablet.locator(".home-hero").waitFor({ timeout:15000 });
   const tabletDock = await tablet.locator(".mobile-dock").boundingBox();
   assert.ok(tabletDock && tabletDock.x >= 0 && tabletDock.x + tabletDock.width <= 820,
@@ -271,19 +276,61 @@ try {
     headers:{"access-control-allow-origin":"*","retry-after":"30"},
     body:JSON.stringify({ errors:[{message:"Too many requests"}] })
   }));
-  await ratePage.goto(address + "/#/home", { waitUntil:"domcontentloaded" });
+  await ratePage.goto(address + "/home", { waitUntil:"domcontentloaded" });
   await ratePage.locator("[data-retry-home]").waitFor({timeout:15000});
   await ratePage.locator("[data-retry-home]").click();
   await ratePage.locator("[data-retry-home]").waitFor({timeout:15000});
   assert.equal(await ratePage.locator(".native-home-header").count(), 1,
     "Rate-limited Home should remain navigable and retryable");
-  await ratePage.goto(address + "/#/discover", { waitUntil:"domcontentloaded" });
+  await ratePage.goto(address + "/discover", { waitUntil:"domcontentloaded" });
   await ratePage.locator("[data-retry-discover]").waitFor({timeout:15000});
   await ratePage.locator("[data-retry-discover]").click();
   await ratePage.locator("[data-retry-discover]").waitFor({timeout:15000});
   assert.equal(await ratePage.locator("#search-page-input").count(), 1,
     "Rate-limited Discover retains its integrated search input");
   await rateContext.close();
+  // Clean paths are independently reloadable and compatible with Back/Forward.
+  const navPage = await context.newPage();
+  navPage.on("pageerror", error => errors.push(error.message));
+  await navPage.goto(address + "/home", { waitUntil: "domcontentloaded" });
+  await navPage.locator(".home-hero").waitFor({ timeout: 15000 });
+  assert.equal(new URL(navPage.url()).hash, "");
+  await navPage.locator('.mobile-dock [data-route="/discover"]').click();
+  await navPage.waitForURL("**/discover", { timeout: 8000 });
+  await navPage.locator("#search-page-input").waitFor({timeout:8000});
+  await navPage.locator('.mobile-dock [data-route="/library"]').click();
+  await navPage.waitForURL("**/library", { timeout: 8000 });
+  await navPage.goBack();
+  await navPage.waitForURL("**/discover", { timeout: 8000 });
+  await navPage.locator("#search-page-input").waitFor({timeout:8000});
+  await navPage.goBack();
+  await navPage.waitForURL("**/home", { timeout:8000 });
+  await navPage.locator(".home-hero").waitFor({timeout:8000});
+  await navPage.goForward();
+  await navPage.waitForURL("**/discover", {timeout:8000});
+  assert.equal(new URL(navPage.url()).hash, "");
+  await navPage.goto(address + "/anime/21", { waitUntil:"domcontentloaded" });
+  await navPage.locator("#episode-list .episode-item").first().waitFor({timeout:15000});
+  await navPage.reload({waitUntil:"domcontentloaded"});
+  await navPage.locator("#episode-list .episode-item").first().waitFor({timeout:15000});
+  assert.equal(new URL(navPage.url()).pathname, "/anime/21");
+  await navPage.goto(address + "/watch/21/2", {waitUntil:"domcontentloaded"});
+  await navPage.locator("#anime-video").waitFor({timeout:15000});
+  assert.equal(new URL(navPage.url()).hash, "");
+  await navPage.goto(address + "/discover?q=ONE%20PIECE", {waitUntil:"domcontentloaded"});
+  await navPage.locator("#discover-results .anime-card").first().waitFor({timeout:15000});
+  assert.equal(new URL(navPage.url()).pathname, "/discover");
+  // Existing saved #/anime/21 links are rewritten client-side without
+  // creating a second history entry or showing the hash to the user.
+  await navPage.goto(address + "/#/anime/21", {waitUntil:"domcontentloaded"});
+  await navPage.waitForURL("**/anime/21", {timeout:10000});
+  await navPage.locator("#episode-list .episode-item").first().waitFor({timeout:15000});
+  assert.equal(new URL(navPage.url()).hash, "");
+  await navPage.goto(address + "/search?q=ONE%20PIECE", {waitUntil:"domcontentloaded"});
+  await navPage.waitForURL("**/discover?q=ONE%20PIECE", {timeout:10000});
+  await navPage.goto(address + "/downloads", {waitUntil:"domcontentloaded"});
+  await navPage.waitForURL("**/library", {timeout:10000});
+  await navPage.close();
   assert.deepEqual(errors, [], "No uncaught browser page errors");
   console.log("Visual checks passed. Screenshots: " + artifacts);
   await context.close();

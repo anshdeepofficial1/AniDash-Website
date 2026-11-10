@@ -44,14 +44,14 @@
     // Refuse unsolicited/mismatched callbacks; never accept URL tokens blindly.
     if (!accessToken || !expectedState || expectedState !== returnedState) {
       clearToken();
-      try { history.replaceState(null, "", location.pathname + location.search + "#/account"); }
-      catch (_) { location.hash = "#/account"; }
+      try { history.replaceState(null, "", "/account"); }
+      catch (_) { location.assign("/account"); }
       return "invalid";
     }
     token = accessToken;
     try { localStorage.setItem(TOKEN_KEY, token); } catch (_) {}
-    try { history.replaceState(null, "", location.pathname + location.search + "#/account"); }
-    catch (_) { location.hash = "#/account"; }
+    try { history.replaceState(null, "", "/account"); }
+    catch (_) { location.assign("/account"); }
     return "success";
   }
   async function settings() {

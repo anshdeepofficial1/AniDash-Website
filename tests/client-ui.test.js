@@ -44,7 +44,21 @@ function createBrowser(initialHash) {
     setTimeout, clearTimeout,
     addEventListener: (name, handler) => listeners.set(name, handler)
   };
-  const location = { hash: initialHash, protocol: "http:" };
+  const location = {
+    hash: initialHash.startsWith("#") ? initialHash : "",
+    pathname: initialHash.startsWith("#") ? "/" : initialHash,
+    search: "", protocol: "http:", origin: "http://localhost"
+  };
+  const updateLocation = path => {
+    const next = new URL(path, location.origin);
+    location.pathname = next.pathname;
+    location.search = next.search;
+    location.hash = next.hash;
+  };
+  const history = {
+    pushState(_state, _unused, path) { updateLocation(path); },
+    replaceState(_state, _unused, path) { updateLocation(path); }
+  };
   const localData = new Map();
   const localStorage = {
     getItem: key => localData.get(key) || null,
@@ -63,7 +77,7 @@ function createBrowser(initialHash) {
     return new Promise(() => {});
   };
   const context = {
-    document, window, location, localStorage, fetch,
+    document, window, location, history, localStorage, fetch,
     URL, URLSearchParams, AbortController,
     setTimeout, clearTimeout,
     navigator: { userAgent: "Node test" },
