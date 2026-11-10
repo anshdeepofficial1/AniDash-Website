@@ -2024,7 +2024,7 @@
       '<div class="player-under"><div><h2 id="player-episode-inline-title">' + escapeHtml(episode.title) + '</h2><p>' + escapeHtml(titleOf(media)) + ' · Episode ' + escapeHtml(episode.number) + '</p></div><div class="player-controls"><button class="btn btn-quiet" data-prev ' + (hasPrev ? "" : "disabled") + '>← Previous</button><button class="btn btn-quiet" data-next ' + (hasNext ? "" : "disabled") + '>Next →</button></div></div>' +
       '<div class="button-row" style="margin-top:14px" id="skip-buttons"></div></section>' +
       '<aside class="player-sidebar"><div class="player-panel player-audio-panel"><div class="player-panel-head"><h3>Audio language</h3><span class="stream-state" id="stream-status" role="status">Checking streams</span></div><div class="source-row" id="category-pills" role="group" aria-label="Audio language"><button class="source-pill' + (player.category === "sub" ? " active" : "") + '" data-category="sub" aria-pressed="' + (player.category === "sub") + '">Subtitled</button><button class="source-pill' + (player.category !== "sub" ? " active" : "") + '" data-category="dub" aria-pressed="' + (player.category !== "sub") + '">English dub</button></div></div>' +
-      '<div class="player-panel player-stream-panel" id="available-streams-panel" hidden><div class="player-panel-head"><h3>Available streams</h3><span class="stream-hint">Resolved links only</span></div><div class="source-row" id="quality-pills" role="group" aria-label="Available streams"></div></div>' +
+      '<div class="player-panel player-stream-panel" id="available-streams-panel" hidden><div class="player-panel-head"><h3>Available streams</h3><span class="stream-hint">Resolved links only</span></div><div class="source-row" id="quality-pills" role="group" aria-label="Available streams"></div><button class="btn btn-secondary" id="next-stream-button" data-next-stream hidden>Try another stream</button></div>' +
       '<div class="player-panel"><h3>Episode list</h3><div class="player-episode-list">' + playerEpisodeItems() + '</div></div>' +
       '</aside></div></div>';
     renderPlayerEpisodeBrowser();
@@ -2215,7 +2215,9 @@
       if (!fallback) return null;
       const preferredDirect = await Promise.race([
         directReady,
-        new Promise(resolve => window.setTimeout(() => resolve(null), 180))
+        // Direct HLS/MP4 sources need time to resolve. The earlier 180 ms
+        // preference almost always selected an unverified iframe first.
+        new Promise(resolve => window.setTimeout(() => resolve(null), 3200))
       ]);
       return preferredDirect || fallback;
     });
@@ -2278,7 +2280,13 @@
       }
       return qb - qa;
     });
-    player.candidates = [...rankedStreams, ...winner.embeds];
+    const seen = new Set();
+    player.candidates = [...rankedStreams, ...winner.embeds].filter(candidate => {
+      const link = String(candidate?.url || candidate?.src || candidate?.file || "");
+      if (!link || seen.has(link)) return false;
+      seen.add(link);
+      return true;
+    });
     player.candidateIndex = 0;
     player.tracks = winner.tracks;
     player.intro = winner.intro;
@@ -2287,7 +2295,7 @@
 
     const first = player.candidates[0];
     attachStream(first.url || first.src || first.file, first, first.isEmbed ? [] : player.tracks);
-    toast((category === "dub" ? "English dub" : "Subtitled") + " stream ready.");
+    // A resolved URL is not proof that the browser can play it.
   }
 
 
@@ -2307,6 +2315,8 @@
     const candidates = Array.isArray(player.candidates) ? player.candidates : [];
     const panel = $("#available-streams-panel");
     if (panel) panel.hidden = candidates.length === 0;
+    const switcher = $("#next-stream-button");
+    if (switcher) switcher.hidden = candidates.length < 2;
     const qualities = $("#quality-pills");
     if (qualities) {
       qualities.innerHTML = candidates.map((stream, index) => {
@@ -2318,7 +2328,7 @@
     }
     const status = $("#stream-status");
     if (status) status.textContent = candidates.length
-      ? candidates.length + (candidates.length === 1 ? " stream" : " streams") + " found"
+      ? candidates.length + (candidates.length === 1 ? " option" : " options") + " available"
       : "Checking streams";
     const skip = $("#skip-buttons");
     if (skip) {
@@ -3321,6 +3331,10 @@
       state.player.streams = [];
       state.player.embeds = [];
       loadPlayerStreams(state.token);
+      return;
+    }
+    if (target.hasAttribute("data-next-stream")) {
+      fallbackToNextProvider("Requested another stream");
       return;
     }
     if (target.hasAttribute("data-stream")) {
