@@ -171,7 +171,6 @@
       window.AniDashStorage.save(store).catch(() => {});
     }
   }
-  if (gridDefaultMigration) persist();
   async function restoreStorage() {
     if (!window.AniDashStorage) return;
     try {
@@ -189,6 +188,10 @@
         }
       }
     } catch (_) {}
+    if (gridDefaultMigration) {
+      store.preferences.episodeViewMode = "grid";
+      persist();
+    }
     applyPreferences();
   }
 
