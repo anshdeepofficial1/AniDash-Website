@@ -257,6 +257,33 @@ try {
   assert.ok(tabletDock && tabletDock.x >= 0 && tabletDock.x + tabletDock.width <= 820,
     "iPad-size viewport must have an on-screen app dock");
   await tablet.screenshot({path: path.join(artifacts, "tablet-home.png")});
+  // Regression: when both the shared cache endpoint and direct AniList are
+  // rate-limited, Home and Discover must retain functional same-route retry.
+  const rateContext = await browser.newContext({ viewport:{ width:390, height:844 } });
+  const ratePage = await rateContext.newPage();
+  ratePage.on("pageerror", error => errors.push(error.message));
+  await rateContext.route("**/api/catalog?**", route => route.fulfill({
+    status:503, contentType:"application/json",
+    body:JSON.stringify({ error:"AniList is busy. Try again shortly.", retryAfter:30 })
+  }));
+  await rateContext.route("https://graphql.anilist.co/**", route => route.fulfill({
+    status:429, contentType:"application/json",
+    headers:{"access-control-allow-origin":"*","retry-after":"30"},
+    body:JSON.stringify({ errors:[{message:"Too many requests"}] })
+  }));
+  await ratePage.goto(address + "/#/home", { waitUntil:"domcontentloaded" });
+  await ratePage.locator("[data-retry-home]").waitFor({timeout:15000});
+  await ratePage.locator("[data-retry-home]").click();
+  await ratePage.locator("[data-retry-home]").waitFor({timeout:15000});
+  assert.equal(await ratePage.locator(".native-home-header").count(), 1,
+    "Rate-limited Home should remain navigable and retryable");
+  await ratePage.goto(address + "/#/discover", { waitUntil:"domcontentloaded" });
+  await ratePage.locator("[data-retry-discover]").waitFor({timeout:15000});
+  await ratePage.locator("[data-retry-discover]").click();
+  await ratePage.locator("[data-retry-discover]").waitFor({timeout:15000});
+  assert.equal(await ratePage.locator("#search-page-input").count(), 1,
+    "Rate-limited Discover retains its integrated search input");
+  await rateContext.close();
   assert.deepEqual(errors, [], "No uncaught browser page errors");
   console.log("Visual checks passed. Screenshots: " + artifacts);
   await context.close();
