@@ -211,7 +211,8 @@
       if (Date.now() < rateLimitedUntil) {
         throw new Error("AniList is temporarily busy. Please retry shortly.");
       }
-      await delay(Math.max(0, nextRequestAt - Date.now()));
+      const wait = Math.max(0, nextRequestAt - Date.now());
+      if (wait > 0) await delay(wait);
       nextRequestAt = Date.now() + 540;
       const controller = new AbortController();
       const timeout = window.setTimeout(() => controller.abort(), 14500);
