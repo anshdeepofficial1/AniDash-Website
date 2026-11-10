@@ -3133,6 +3133,25 @@
   });
 
   document.addEventListener("input", event => {
+    if (event.target.id === "settings-filter") {
+      const query = String(event.target.value || "").trim().toLowerCase();
+      const groups = $(".settings-screen .settings-group");
+      const headings = $(".settings-screen .settings-section-label");
+      groups.forEach((group, index) => {
+        const title = String(headings[index]?.textContent || "").toLowerCase();
+        const rows = Array.from(group.querySelectorAll(".preference-row"));
+        let visible = 0;
+        rows.forEach(row => {
+          const matches = !query || title.includes(query) ||
+            String(row.textContent || "").toLowerCase().includes(query);
+          row.hidden = !matches;
+          if (matches) visible++;
+        });
+        group.hidden = visible === 0;
+        if (headings[index]) headings[index].hidden = visible === 0;
+      });
+      return;
+    }
     if (event.target.id === "video-seek") {
       const video = $("#anime-video");
       if (video && Number.isFinite(video.duration) && video.duration > 0) {
