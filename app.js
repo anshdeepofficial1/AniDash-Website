@@ -1071,7 +1071,10 @@
     state.playerEpisodePage = Math.max(1, Math.min(pageCount, Number(state.playerEpisodePage) || 1));
     const start = (state.playerEpisodePage - 1) * PLAYER_EPISODES_PER_PAGE;
     container.innerHTML = filtered.slice(start, start + PLAYER_EPISODES_PER_PAGE).map(episode =>
-      '<button class="player-episode' + (Number(episode.number) === Number(state.player.episode.number) ? " active" : "") + '" data-player-episode="' + episode.number + '"><span>' + episode.number + '</span>' + escapeHtml(episode.title) + '</button>'
+      '<button class="player-episode' + (Number(episode.number) === Number(state.player.episode.number) ? " active" : "") +
+      '" data-player-episode="' + episode.number + '"><span class="player-episode-number">' + episode.number + '</span>' +
+      (episode.thumbnail ? '<img class="player-episode-thumb" src="' + escapeHtml(episode.thumbnail) + '" alt="" loading="lazy" referrerpolicy="no-referrer">' : '') +
+      '<span class="player-episode-title">' + escapeHtml(episode.title || ("Episode " + episode.number)) + '</span></button>'
     ).join("") || '<div class="compact-empty">No matching episodes.</div>';
     pagination.innerHTML = episodePagerMarkup(filtered.length, state.playerEpisodePage, PLAYER_EPISODES_PER_PAGE, "player");
   }
@@ -1145,7 +1148,7 @@
 
     let aniListMappedEpisodes = [];
     const validAniListId = media.id != null && /^\d{1,12}$/.test(String(media.id));
-    if (validAniListId && (!hasReadyProvider("justanime") || !hasReadyProvider("hianime"))) {
+    if (validAniListId) {
       try {
         const response = await fetch("/api/episode-map?anilistId=" + encodeURIComponent(String(media.id)), {
           headers: { Accept: "application/json" },
@@ -1170,6 +1173,26 @@
       }
     }
 
+    // Combine authoritative Ani.zip titles/thumbnails with source-specific
+    // episode IDs so metadata improvements never break playback.
+    if (aniListMappedEpisodes.length) {
+      const byNumber = new Map(aniListMappedEpisodes.map(item => [Number(item.number), item]));
+      for (const match of checked) {
+        if (!match || !Array.isArray(match.episodes)) continue;
+        match.episodes = match.episodes.map(item => {
+          const known = byNumber.get(Number(item.number));
+          if (!known) return item;
+          const generic = /^(?:episode|ep)\s*#?\d+$/i.test(String(item.title || "").trim());
+          return { ...item, title: generic || !item.title ? known.title : item.title,
+            thumbnail: item.thumbnail || known.thumbnail, date: item.date || known.date };
+        });
+      }
+      const history = store.history[String(media.id)];
+      const matched = history && byNumber.get(Number(history.episode));
+      if (matched && /^(?:episode|ep)\s*#?\d+$/i.test(String(history.episodeTitle || ""))) {
+        history.episodeTitle = matched.title; persist();
+      }
+    }
     // If AniZip is down but AniList knows the total count, create episode-number
     // candidates. These IDs are valid for the AniList-based JustAnime/VidNest
     // resolver and for AniKoto's external-ID embed providers.
@@ -1373,7 +1396,7 @@
   }
 
   function episodeCard(episode) {
-    const thumb = episode.thumbnail ? '<img class="episode-thumb" loading="lazy" src="' + escapeHtml(episode.thumbnail) + '" alt="">' : '<div class="episode-thumb"></div>';
+    const thumb = episode.thumbnail ? '<img class="episode-thumb" loading="lazy" referrerpolicy="no-referrer" src="' + escapeHtml(episode.thumbnail) + '" alt="Episode ' + escapeHtml(episode.number) + ' still">' : '<div class="episode-thumb episode-thumb-fallback"><span>' + escapeHtml(episode.number) + '</span></div>';
     return '<button class="episode-item" data-play-episode="' + escapeHtml(episode.number) + '|' + escapeHtml(episode.id) + '">' + thumb +
       '<span><span class="episode-number">EPISODE ' + escapeHtml(episode.number) + (episode.isFiller ? ' · FILLER' : '') + '</span><span class="episode-name">' + escapeHtml(episode.title) + '</span><span class="episode-date">' + escapeHtml(episode.date || (episode.generated ? "Episode metadata fallback" : "")) + '</span></span><span class="episode-play">›</span></button>';
   }
@@ -1680,6 +1703,14 @@
         applyPreparedSources(prepared, preferredId);
         const refreshed = state.detailMatches.find(match => match?.provider?.id === preferredId && match.episodesReady);
         if (refreshed) player.match = refreshed;
+        const updated = state.detailEpisodes.find(item => Number(item.number) === Number(player.episode.number));
+        if (updated) {
+          player.episode = { ...player.episode, title: updated.title, thumbnail: updated.thumbnail };
+          const titleNode = $("#player-episode-heading");
+          if (titleNode) titleNode.textContent = updated.title;
+          const inlineTitle = $("#player-episode-inline-title");
+          if (inlineTitle) inlineTitle.textContent = updated.title;
+        }
         renderPlayerEpisodeBrowser();
         if (player.needsProviderRetry) {
           player.needsProviderRetry = false;
@@ -1697,9 +1728,9 @@
     const episodeIndex = state.detailEpisodes.findIndex(item => Number(item.number) === Number(episode.number));
     const hasPrev = episodeIndex > 0;
     const hasNext = episodeIndex >= 0 && episodeIndex < state.detailEpisodes.length - 1;
-    $("#view").innerHTML = '<div class="player-page"><div class="player-topline"><button class="back-button" data-anime="' + media.id + '" aria-label="Back to anime">←</button><div><h1>' + escapeHtml(titleOf(media)) + '</h1><p>Episode ' + escapeHtml(episode.number) + ' · ' + escapeHtml(episode.title) + '</p></div></div>' +
+    $("#view").innerHTML = '<div class="player-page"><div class="player-topline"><button class="back-button" data-anime="' + media.id + '" aria-label="Back to anime">←</button><div><h1>' + escapeHtml(titleOf(media)) + '</h1><p>Episode ' + escapeHtml(episode.number) + ' · <span id="player-episode-heading">' + escapeHtml(episode.title) + '</span></p></div></div>' +
       '<div class="player-layout"><section><div class="video-frame"><video id="anime-video" controls playsinline webkit-playsinline preload="metadata"></video><iframe id="anime-embed" title="Episode stream" allow="autoplay; fullscreen; picture-in-picture; encrypted-media" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen hidden></iframe><div class="player-overlay" id="player-overlay" role="status"><div class="player-mini-loader"></div><strong>Opening episode…</strong></div></div>' +
-      '<div class="player-under"><div><h2>' + escapeHtml(episode.title) + '</h2><p>' + escapeHtml(titleOf(media)) + ' · Episode ' + escapeHtml(episode.number) + '</p></div><div class="player-controls"><button class="btn btn-quiet" data-prev ' + (hasPrev ? "" : "disabled") + '>← Previous</button><button class="btn btn-quiet" data-next ' + (hasNext ? "" : "disabled") + '>Next →</button></div></div>' +
+      '<div class="player-under"><div><h2 id="player-episode-inline-title">' + escapeHtml(episode.title) + '</h2><p>' + escapeHtml(titleOf(media)) + ' · Episode ' + escapeHtml(episode.number) + '</p></div><div class="player-controls"><button class="btn btn-quiet" data-prev ' + (hasPrev ? "" : "disabled") + '>← Previous</button><button class="btn btn-quiet" data-next ' + (hasNext ? "" : "disabled") + '>Next →</button></div></div>' +
       '<div class="button-row" style="margin-top:14px" id="skip-buttons"></div></section>' +
       '<aside class="player-sidebar"><div class="player-panel player-audio-panel"><div class="player-panel-head"><h3>Audio language</h3><span class="stream-state" id="stream-status" role="status">Checking streams</span></div><div class="source-row" id="category-pills" role="group" aria-label="Audio language"><button class="source-pill' + (player.category === "sub" ? " active" : "") + '" data-category="sub" aria-pressed="' + (player.category === "sub") + '">Subtitled</button><button class="source-pill' + (player.category !== "sub" ? " active" : "") + '" data-category="dub" aria-pressed="' + (player.category !== "sub") + '">English dub</button></div></div>' +
       '<div class="player-panel player-stream-panel" id="available-streams-panel" hidden><div class="player-panel-head"><h3>Available streams</h3><span class="stream-hint">Resolved links only</span></div><div class="source-row" id="quality-pills" role="group" aria-label="Available streams"></div></div>' +
