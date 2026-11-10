@@ -199,3 +199,35 @@ body { min-height: 100dvh; }
 @media (prefers-reduced-motion:reduce) {
   .spotlight-shell .hero-bg, .spotlight-shell .hero-content { animation:none !important; }
 }
+
+/* Native-inspired controls, using the HTML video engine with proper browser fallbacks. */
+.video-ui[hidden] { display:none !important; }
+.video-ui { position:absolute; inset:0; z-index:2; display:flex; flex-direction:column;
+  justify-content:space-between; pointer-events:none; color:#fff; font-variant-numeric:tabular-nums; }
+.video-ui-top { padding:16px 20px 24px; font-size:13px; font-weight:600;
+  background:linear-gradient(to bottom,rgba(0,0,0,.74),transparent); }
+.video-ui-bottom { background:linear-gradient(to top,rgba(0,0,0,.88),rgba(0,0,0,.54) 65%,transparent);
+  padding:22px 18px 12px; pointer-events:none; }
+.video-ui-bottom>* { pointer-events:auto; }
+.video-seek { display:block; width:100%; height:20px; margin:0 0 6px; accent-color:#eaf9ed;
+  cursor:pointer; border:0; background:transparent; touch-action:none; }
+.video-ui-buttons { display:flex; gap:6px; align-items:center; width:100%; min-height:38px; }
+.video-ui-buttons button { display:grid; place-items:center; min-width:38px; min-height:38px;
+  padding:0 8px; border:0; border-radius:9px; background:transparent; color:#fff;
+  cursor:pointer; font-size:13px; font-weight:600; line-height:1; }
+.video-ui-buttons button:hover,.video-ui-buttons button:focus-visible { background:rgba(255,255,255,.19); }
+.video-ui-buttons button svg { width:19px; height:19px; fill:none; stroke:currentColor; stroke-width:1.75; }
+.video-ui-spacer { flex:1; }
+.video-timecode { white-space:nowrap; font-size:12px; font-weight:500; letter-spacing:.1px; margin-left:4px; }
+.video-frame:fullscreen,.video-frame:-webkit-full-screen { width:100%; height:100%; aspect-ratio:auto; border:0; border-radius:0; }
+.video-frame:fullscreen video,.video-frame:-webkit-full-screen video { height:100%; width:100%; }
+.video-frame:fullscreen .video-ui-bottom,.video-frame:-webkit-full-screen .video-ui-bottom { padding-bottom:max(16px,env(safe-area-inset-bottom)); }
+@media(max-width:760px) {
+ .video-ui-top { padding:10px 12px 16px; font-size:11px; }
+ .video-ui-bottom { padding:12px 8px 6px; }
+ .video-ui-buttons { gap:0; }
+ .video-ui-buttons button { min-width:30px; min-height:34px; font-size:10px; padding:0 4px; }
+ .video-ui-buttons button svg { width:17px; height:17px; }
+ .video-timecode { font-size:10px; margin-left:2px; }
+ .video-seek { height:16px; margin-bottom:2px; }
+}
