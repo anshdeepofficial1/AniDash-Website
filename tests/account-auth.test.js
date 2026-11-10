@@ -10,8 +10,8 @@ function browser(options = {}) {
   const session = new Map();
   const called = [];
   const location = {
-    hash: options.hash || "#/home",
-    pathname: "/", search: "",
+    hash: options.hash || "",
+    pathname: "/home", search: "",
     assign(url) { called.push(url); }
   };
   const store = map => ({
@@ -20,7 +20,12 @@ function browser(options = {}) {
     removeItem: key => map.delete(key)
   });
   const history = {
-    replaceState(_state, _unused, url) { location.hash = url.slice(url.indexOf("#")); }
+    replaceState(_state, _unused, path) {
+      const next = new URL(path, "https://anidash-watch.vercel.app");
+      location.pathname = next.pathname;
+      location.search = next.search;
+      location.hash = next.hash;
+    }
   };
   const crypto = { getRandomValues(bytes) {
     for (let i = 0; i < bytes.length; i++) bytes[i] = i + 1;
@@ -87,7 +92,8 @@ test("OAuth callback checks state before saving a token, loads real AniList prof
   const state = b.session.get("anidash.watch.anilist.oauth-state");
   b.location.hash = "#access_token=valid-token&token_type=Bearer&state=" + state;
   assert.equal(b.api.captureRedirect(), "success");
-  assert.equal(b.location.hash, "#/account");
+  assert.equal(b.location.pathname, "/account");
+  assert.equal(b.location.hash, "", "OAuth callback must remove the token fragment");
   assert.equal(b.local.get("anidash.watch.anilist.token"), "valid-token");
   const user = await b.api.init();
   assert.equal(user.name, "TestUser");
@@ -106,7 +112,8 @@ test("unsolicited/mismatched OAuth callback cannot authenticate a browser", asyn
   const b = browser({ hash: "#access_token=stolen-token&state=wrong" });
   assert.equal(b.api.captureRedirect(), "invalid");
   assert.equal(b.local.size, 0);
-  assert.equal(b.location.hash, "#/account");
+  assert.equal(b.location.pathname, "/account");
+  assert.equal(b.location.hash, "", "OAuth callback must remove the token fragment");
 });
 
 test("AniList public config endpoint does not expose private credentials", async () => {
