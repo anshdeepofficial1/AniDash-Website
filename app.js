@@ -75,6 +75,7 @@
     selectedMatch: null,
     episodePage: 1,
     episodeFilter: "",
+    episodeArcMode: null, selectedArcId: null,
     playerEpisodePage: 1,
     playerEpisodeFilter: "",
     player: null,
@@ -1239,20 +1240,57 @@
       '</div></div>';
   }
 
+  function namedEpisodeArcs() {
+    return window.AniDashEpisodeArcs?.forMedia?.(state.detail || state.player?.media) || [];
+  }
+  function activeEpisodeArc(arcs) {
+    if (!arcs.length || state.episodeArcMode !== "arcs") return null;
+    const selected = arcs.find(arc => arc.id === state.selectedArcId);
+    if (selected) return selected;
+    const resume = Number(store.history[String(state.detail?.id || "")]?.episode || 1);
+    const matching = arcs.find(arc => resume >= arc.start && resume <= arc.end) || arcs[0];
+    state.selectedArcId = matching.id;
+    return matching;
+  }
+
   function renderEpisodeBrowser() {
     const container = $("#episode-list");
     const pagination = $("#episode-pagination");
     if (!container || !pagination) return;
-    const filtered = matchingEpisodes(state.detailEpisodes, state.episodeFilter);
+    const arcs = namedEpisodeArcs();
+    if (state.episodeArcMode == null) state.episodeArcMode = arcs.length ? "arcs" : "all";
+    if (!arcs.length) state.episodeArcMode = "all";
+    const arc = activeEpisodeArc(arcs);
+    const controls = $("#episode-arc-tabs");
+    if (controls) {
+      controls.innerHTML = state.episodeArcMode === "arcs" && arcs.length ?
+        '<div class="episode-arcs-header"><span>Verified story arcs</span><small>' +
+        arcs.length + ' groups</small></div><div class="episode-arc-scroll" role="group" aria-label="Story arcs">' +
+        arcs.map(group => {
+          const end = group.end >= 9999 ? group.start + "+" : group.start + "–" + group.end;
+          const active = group.id === arc?.id;
+          return '<button class="episode-arc-chip' + (active ? " active" : "") +
+            '" data-episode-arc="' + escapeHtml(group.id) + '" aria-pressed="' + active + '">' +
+            '<strong>' + escapeHtml(group.title) + '</strong><span>Episodes ' + end + '</span></button>';
+        }).join("") + '</div>' : "";
+    }
+    const groupSelector = $("#episode-group-mode");
+    if (groupSelector) groupSelector.value = state.episodeArcMode;
+    const layoutSelector = $("#episode-view-mode");
+    if (layoutSelector) layoutSelector.value = setting("episodeViewMode") || "grid";
+    const base = matchingEpisodes(state.detailEpisodes, state.episodeFilter);
+    const filtered = arc
+      ? base.filter(item => Number(item.number) >= arc.start && Number(item.number) <= arc.end)
+      : base;
     const pageCount = Math.max(1, Math.ceil(filtered.length / DETAIL_EPISODES_PER_PAGE));
     state.episodePage = Math.max(1, Math.min(pageCount, Number(state.episodePage) || 1));
     const start = (state.episodePage - 1) * DETAIL_EPISODES_PER_PAGE;
     container.innerHTML = filtered.slice(start, start + DETAIL_EPISODES_PER_PAGE).map(episodeCard).join("") ||
-      '<div class="empty-state compact-empty">No matching episodes. Try another episode number or title.</div>';
+      '<div class="empty-state compact-empty">No episodes in this range. Try another arc or search.</div>';
     pagination.innerHTML = episodePagerMarkup(filtered.length, state.episodePage, DETAIL_EPISODES_PER_PAGE, "detail");
   }
 
-  function renderPlayerEpisodeBrowser() {
+    function renderPlayerEpisodeBrowser() {
     const container = $("#player-episode-items");
     const pagination = $("#player-episode-pagination");
     if (!container || !pagination || !state.player) return;
@@ -1509,6 +1547,8 @@
     state.selectedMatch = null;
     state.episodePage = 1;
     state.episodeFilter = "";
+    state.episodeArcMode = null;
+    state.selectedArcId = null;
     showLoading("Opening anime…");
     try {
       const media = await getAnime(id);
@@ -1561,7 +1601,11 @@
           '<div class="button-row"><button class="btn btn-primary" data-play-first="' + media.id + '" ' + (episodes.length ? "" : "disabled") + '>▶ Start watching</button><button class="btn btn-secondary" data-watchlist="' + media.id + '">' + (watched ? "✓ In watchlist" : "♡ Add to watchlist") + '</button></div>' +
         '</div></div></div>' +
       '<div class="details-layout"><section class="content-panel"><div class="section-heading"><div><h2 class="panel-title">Episodes</h2><p class="section-note">' + (matches.length ? escapeHtml(sourceInfo) : "Open an episode to check available streams.") + '</p></div><span class="watchlist-badge">' + episodes.length + ' listed</span></div>' +
-        '<div class="episode-toolbar"><input id="episode-filter" class="input-control" style="max-width:180px" placeholder="Search episodes…"><input id="episode-jump" class="input-control episode-jump-input" type="number" min="1" placeholder="EP #"><button class="btn btn-quiet" data-episode-go="detail">Go</button><button class="btn btn-quiet" data-refresh-sources>Retry sources</button></div>' +
+        '<div class="episode-toolbar"><input id="episode-filter" class="input-control" placeholder="Find an episode…" aria-label="Find episode"><input id="episode-jump" class="input-control episode-jump-input" type="number" min="1" placeholder="EP #" aria-label="Jump to episode number"><button class="btn btn-quiet" data-episode-go="detail">Go</button>' +
+        '<select class="select-control episode-view-selector" id="episode-view-mode" aria-label="Episode layout"><option value="grid">Grid</option><option value="list">List</option></select>' +
+        (window.AniDashEpisodeArcs?.forMedia?.(media)?.length ?
+          '<select class="select-control episode-group-selector" id="episode-group-mode" aria-label="Episode grouping"><option value="arcs">Story arcs</option><option value="all">All episodes</option></select>' : '') +
+        '</div><div id="episode-arc-tabs"></div>' +
         '<div id="episode-list" class="episode-list"></div><div id="episode-pagination"></div>' +
         (!episodes.length ? '<div class="notice" style="margin-top:14px">No episodes are listed yet. Refresh the episode list.</div>' : '') +
         '</section><aside class="content-panel"><h2 class="panel-title">About this anime</h2><div class="info-list">' +
@@ -3128,6 +3172,13 @@
       }
       return;
     }
+    if (target.hasAttribute("data-episode-arc")) {
+      state.selectedArcId = target.getAttribute("data-episode-arc");
+      state.episodeArcMode = "arcs";
+      state.episodePage = 1;
+      renderEpisodeBrowser();
+      return;
+    }
     if (target.hasAttribute("data-episode-go")) {
       jumpToEpisode(target.getAttribute("data-episode-go"));
       return;
@@ -3326,7 +3377,22 @@
     }
     if (event.target.id === "discover-sort") {
       state.discoverSort = event.target.value;
-      renderDiscover();
+      renderDiscover(state.discoverTerm || "");
+      return;
+    }
+    if (event.target.id === "episode-view-mode") {
+      store.preferences.episodeViewMode = event.target.value === "list" ? "list" : "grid";
+      persist();
+      applyPreferences();
+      renderEpisodeBrowser();
+      return;
+    }
+    if (event.target.id === "episode-group-mode") {
+      state.episodeArcMode = event.target.value === "arcs" ? "arcs" : "all";
+      state.selectedArcId = null;
+      state.episodePage = 1;
+      renderEpisodeBrowser();
+      return;
     }
   });
 
