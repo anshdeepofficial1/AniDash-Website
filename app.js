@@ -272,7 +272,7 @@
       '<div class="card-title">' + escapeHtml(titleOf(media)) + '</div>' +
       '<p class="card-subtitle">' + escapeHtml([mediaYear(media), episodes].filter(Boolean).join(" · ")) + '</p>' +
       (progress ? '<div class="card-progress"><span style="width:' + pct + '%"></span></div><div class="card-resume">Episode ' +
-        escapeHtml(progress.episode || 1) + (progress.position > 0 ? " · " + Math.floor(progress.position / 60) + "m" : "") +
+        escapeHtml(progress.episode || 1) + (progress.position > 0 ? " · " + hhmmss(progress.position) : "") +
         '</div>' : '') +
     '</article>';
   }
@@ -2368,7 +2368,7 @@
       (items.length ? '<div class="anime-grid">' + items.map(item => {
         const pct = item.duration ? Math.min(100, Math.max(0, item.position / item.duration * 100)) : 0;
         const poster = imageOf(item.media);
-        return '<article class="anime-card" data-resume="' + item.media.id + '" tabindex="0"><div class="poster-wrap">' + (poster ? '<img loading="lazy" src="' + escapeHtml(poster) + '" alt="">' : '<div class="poster-fallback">' + escapeHtml(titleOf(item.media)) + '</div>') + '<span class="poster-score">EP ' + escapeHtml(item.episode) + '</span></div><div class="card-title">' + escapeHtml(titleOf(item.media)) + '</div><p class="card-subtitle">' + escapeHtml(item.episodeTitle || "Episode " + item.episode) + '</p><div class="card-progress"><span style="width:' + pct + '%"></span></div><div class="card-resume">Resume at ' + Math.floor((item.position || 0) / 60) + ' min</div></article>';
+        return '<article class="anime-card" data-resume="' + item.media.id + '" tabindex="0"><div class="poster-wrap">' + (poster ? '<img loading="lazy" src="' + escapeHtml(poster) + '" alt="">' : '<div class="poster-fallback">' + escapeHtml(titleOf(item.media)) + '</div>') + '<span class="poster-score">EP ' + escapeHtml(item.episode) + '</span></div><div class="card-title">' + escapeHtml(titleOf(item.media)) + '</div><p class="card-subtitle">' + escapeHtml(item.episodeTitle || "Episode " + item.episode) + '</p><div class="card-progress"><span style="width:' + pct + '%"></span></div><div class="card-resume">' + escapeHtml(progressCaption(item)) + '</div></article>';
       }).join("") + '</div>' : '<div class="empty-state"><div class="empty-icon">◷</div><h3>No episodes watched yet</h3><p>When you start watching, AniDash will remember your episode and playback position on this device.</p><button class="btn btn-primary" data-route="/discover">Find anime</button></div>');
   }
 
@@ -2419,7 +2419,10 @@
       '<section class="account-hero"><div class="account-avatar">' + avatar + '</div><div><h2>' +
         escapeHtml(display) + '</h2><p>' +
         (user || malUser ? "Your account connections and synced anime library" : "Sign in to bring your anime library to every device") +
-        '</p></div></section>' +
+        '</p><span class="profile-platform-tag">' + escapeHtml(user ? "AniList connected" : malUser ? "MyAnimeList connected" : "Guest mode") + '</span></div></section>' +
+      '<div class="profile-stats"><div><strong>' + Object.keys(store.watchlist).length + '</strong><span>Saved titles</span></div><div><strong>' +
+      Object.keys(store.history).length + '</strong><span>Watching history</span></div><div><strong>' +
+      Object.keys(store.mangaList).length + '</strong><span>Saved manga</span></div></div>' +
       '<div class="account-providers">' +
         '<section class="account-provider"><div class="account-icon">AL</div><strong>AniList</strong>' +
         '<p>Sync watching lists, favourites and exact episode timestamps via Android-compatible progress notes.</p>' +
@@ -2434,8 +2437,8 @@
           ? '<span class="preference-help">Site owner must configure MAL_WEB_CLIENT_ID (and MAL_WEB_CLIENT_SECRET if required).</span>' : '') +
         '</section></div>' +
       '<div class="account-info"><strong>One AniDash library</strong>' +
-      '<p>Connect AniList and/or MyAnimeList. AniDash merges their lists without deleting your local entries. Your passwords are entered only on the providers’ official sign-in pages.</p>' +
-      '<p>For an exact 5-minute handoff from your Android app to this website, enable AniList tracking in the app. Android writes a <code>shx:ep=…&sec=…</code> note; AniDash Watch reads it and seeks to that timestamp. MAL currently shares completed-episode counts, not precise seconds.</p>' +
+      '<p>Connect AniList and/or MyAnimeList. AniDash merges supported lists without deleting local entries. Your passwords stay with their official login services.</p>' +
+      '<p>For an exact 5-minute handoff from your Android app to this website, enable AniList tracking in the app. Android writes a <code>shx:ep=…&sec=…</code> note; AniDash Watch reads it and seeks to that timestamp. MAL shares episode counts, not exact seconds. Connected account APIs do not provide email addresses, so AniDash never labels an account as email-synced.</p>' +
       '<button class="btn btn-quiet" data-route="/library">' + uiIcon("library") + ' Open Library</button></div>';
   }
 
@@ -2458,11 +2461,12 @@
   function renderSettings() {
     const connected = window.AniDashAccount?.authenticated();
     $("#view").innerHTML = '<div class="settings-screen">' +
-      pageHead("", "Settings", "AniDash Android-inspired preferences for the web") +
+      pageHead("", "Settings", "Customize your AniDash web experience") +
+      '<div class="settings-search-wrap">' + uiIcon("search") + '<input id="settings-filter" class="input-control" type="search" placeholder="Search settings" aria-label="Search settings"></div>' +
       settingsGroup("Account & sync", '<div class="preference-row"><div><h3 class="preference-title">AniList account</h3><p class="preference-help">' +
         (connected ? 'Connected · Watchlist sync available' : 'Guest mode · local data only until you sign in') +
         '</p></div><button class="btn btn-secondary" data-route="/account">' + (connected ? "Manage" : "Sign in") + '</button></div>' +
-        prefToggle("trackProgress", "Save playback progress", "Store the last watched episode and playback time on this device. No Continue Watching shelf is displayed.")) +
+        prefToggle("trackProgress", "Save playback progress", "Keep exact playback time locally, and sync through AniList when connected.")) +
       settingsGroup("Video Player", 
         prefSelect("preferredAudio", { label:"Preferred audio", values:[["dub","English DUB"],["sub","Original SUB"]] }, "Default audio language when a source supports it.") +
         prefSelect("defaultQuality", { label:"Preferred quality", values:[["Auto","Auto (recommended)"],["1080p","1080p"],["720p","720p"],["480p","480p"],["360p","360p"]] }, "Choose the closest stream quality actually offered by a source.") +
@@ -2471,7 +2475,12 @@
         prefToggle("showNextEpisodePrompt", "Next episode prompt", "Offer the next episode when the current video finishes.")) +
       settingsGroup("Appearance & layout",
         prefSelect("themeMode", { label:"Theme mode", values:[["light","Light"],["dark","Dark"],["system","Follow device"]] }, "Choose a light, dark or system-matched design.") +
-        prefSelect("episodeViewMode", { label:"Episode layout", values:[["list","List"],["grid","Grid"]] }, "How episodes appear on the anime details screen.")) +
+        prefSelect("episodeViewMode", { label:"Episode layout", values:[["list","List"],["grid","Grid"]] }, "How episodes appear on the anime details screen.") +
+        prefToggle("showMangaTab", "Show Manga navigation", "Off by default; enable Manga as an optional tab.") +
+        prefToggle("showNewsSection", "News on Home", "Show real anime headlines on your homepage.")) +
+      settingsGroup("News & notifications",
+        prefToggle("showNewsNotifications", "In-app news notifications", "Unread anime headlines in the local inbox; not system push.") +
+        '<div class="preference-row"><div><h3 class="preference-title">Notification inbox</h3><p class="preference-help">View and mark headlines read on this device.</p></div><button class="btn btn-quiet" data-route="/notifications">Open inbox</button></div>') +
       settingsGroup("Data & storage",
         '<div class="preference-row"><div><h3 class="preference-title">Local library backup</h3><p class="preference-help">Your watchlist, playback progress and settings are saved in browser storage with an IndexedDB recovery copy. Keep a JSON backup when changing browsers.</p></div><button class="btn btn-quiet" data-export-backup>Export JSON</button></div>' +
         '<div class="preference-row"><div><h3 class="preference-title">Restore your library</h3><p class="preference-help">Import an AniDash Watch JSON backup. Existing entries are merged, not replaced.</p></div><button class="btn btn-quiet" data-import-backup>Import JSON</button><input class="backup-import" type="file" id="backup-file" accept=".json,application/json"></div>' +
