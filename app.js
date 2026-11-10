@@ -112,7 +112,7 @@
     const played = hhmmss(entry.position), duration = Number(entry.duration || 0);
     return duration > entry.position ? "Resume at " + played + " / " + hhmmss(duration) : "Resume at " + played;
   };
-  const UI_ICON_NAMES = new Set(["home","compass","search","manga","library","user","settings",
+  const UI_ICON_NAMES = new Set(["home","compass","search","manga","library","user","settings","news","bell","clock","expand","pause","volume",
     "download","play","bookmark","chevron-right","chevron-left","chevron-down","heart","star",
     "refresh","sliders","calendar","filter","history","check","info","shield","eye","cloud"]);
   function uiIcon(name) {
@@ -321,6 +321,120 @@
   }
 
 
+
+  const newsKey = "anidash.news-read.v1";
+  try { state.notificationRead = JSON.parse(localStorage.getItem(newsKey) || "{}") || {}; } catch (_) { state.notificationRead = {}; }
+  const newsId = item => String(item?.url || "");
+  const isUnread = item => !state.notificationRead[newsId(item)];
+  function newsDate(value) {
+    const date = new Date(value || 0);
+    return Number.isFinite(date.getTime())
+      ? date.toLocaleDateString(undefined, { month: "short", day: "numeric" })
+      : "";
+  }
+  function newsItemsMarkup(items, compact = false) {
+    if (!items.length) return '<p class="news-empty">No headlines available at the moment.</p>';
+    return items.map((item, i) => {
+      const index = state.news.indexOf(item);
+      const image = /^https:\/\//i.test(item.imageUrl || "") ? item.imageUrl : "";
+      return '<button class="news-item' + (compact ? " compact" : "") + '" data-open-news="' + index +
+        '" aria-label="Read: ' + escapeHtml(item.title) + '">' +
+        (image ? '<img src="' + escapeHtml(image) + '" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.hidden=true">' : '<span class="news-art">' + uiIcon("news") + '</span>') +
+        '<span class="news-copy"><strong>' + escapeHtml(item.title) + '</strong><span>' +
+        escapeHtml(newsDate(item.date)) + ' · Anime News Network</span></span>' +
+        (isUnread(item) ? '<span class="news-unread-dot" aria-label="Unread"></span>' : '') + '</button>';
+    }).join("");
+  }
+  function newsPreview() {
+    if (!setting("showNewsSection")) return "";
+    return '<section class="section news-section"><div class="section-heading"><h2 class="section-title">Latest news</h2>' +
+      '<button class="section-link" data-route="/news">View all ' + uiIcon("chevron-right") + '</button></div>' +
+      '<div class="news-scroller" id="home-news-panel">' +
+      (state.news.length ? newsItemsMarkup(state.news.slice(0, 7), true) :
+      state.newsError ? '<p class="news-empty">News is temporarily unavailable.</p>' :
+      '<p class="news-empty">Checking anime headlines…</p>') + '</div></section>';
+  }
+  function unreadNewsCount() {
+    return setting("showNewsNotifications") ? state.news.filter(isUnread).length : 0;
+  }
+  function updateNewsBadge() {
+    const count = unreadNewsCount();
+    $("[data-news-badge]").forEach(el => {
+      el.textContent = count > 9 ? "9+" : String(count);
+      el.hidden = count === 0;
+    });
+  }
+  async function loadNews(force = false) {
+    if (state.newsPending) return state.newsPending;
+    if (state.newsFetched && !force) return state.news;
+    state.newsPending = (async () => {
+      try {
+        const response = await fetch("/api/news", { headers: { Accept: "application/json" }, cache: "default" });
+        if (!response.ok) throw new Error("News unavailable");
+        const payload = await response.json();
+        if (!Array.isArray(payload.items)) throw new Error("Invalid news feed");
+        state.news = payload.items.filter(item => item && item.title && /^https:\/\//i.test(item.url || "")).slice(0, 30);
+        state.newsFetched = true;
+        state.newsError = "";
+      } catch (error) {
+        state.newsError = error?.message || "News unavailable";
+      } finally {
+        state.newsPending = null;
+      }
+      const panel = $("#home-news-panel");
+      if (panel) panel.innerHTML = state.news.length ? newsItemsMarkup(state.news.slice(0, 7), true) :
+        '<p class="news-empty">News is temporarily unavailable.</p>';
+      updateNewsBadge();
+      if (state.route === "/news") renderNews();
+      if (state.route === "/notifications") renderNotifications();
+      return state.news;
+    })();
+    return state.newsPending;
+  }
+  function markNewsRead(item) {
+    if (!item || !item.url) return;
+    state.notificationRead[newsId(item)] = true;
+    try { localStorage.setItem(newsKey, JSON.stringify(state.notificationRead)); } catch (_) {}
+    updateNewsBadge();
+  }
+  function renderNews() {
+    $("#view").innerHTML = pageHead("", "Anime news", "Latest published headlines from Anime News Network") +
+      '<div class="news-list">' + (state.news.length ? newsItemsMarkup(state.news) :
+      '<div class="empty-state"><h3>No headlines loaded</h3><p>' +
+      escapeHtml(state.newsError || "Checking for articles.") +
+      '</p><button class="btn btn-primary" data-refresh-news>Refresh news</button></div>') + '</div>';
+    void loadNews();
+  }
+  function renderNotifications() {
+    const rows = state.news;
+    $("#view").innerHTML = pageHead("", "Notifications", "In-app anime news alerts on this device") +
+      '<div class="notification-toolbar"><span>' + unreadNewsCount() + ' unread</span>' +
+      '<button class="btn btn-quiet" data-read-all-news ' + (!rows.length ? "disabled" : "") + '>Mark all read</button></div>' +
+      (setting("showNewsNotifications") ?
+        '<div class="news-list">' + (rows.length ? newsItemsMarkup(rows) :
+          '<div class="empty-state"><h3>No notifications yet</h3><p>New anime headlines appear here when the feed updates.</p></div>') +
+          '</div>' :
+        '<div class="empty-state"><h3>News alerts are disabled</h3><p>Enable them under Settings.</p></div>');
+    void loadNews();
+  }
+  function profileGreetingMarkup() {
+    const user = window.AniDashAccount?.currentUser() || window.AniDashMal?.currentUser();
+    const avatar = user?.avatar?.large || user?.avatar?.medium || user?.picture || "";
+    const photo = /^https:\/\//i.test(avatar)
+      ? '<img src="' + escapeHtml(avatar) + '" alt="" referrerpolicy="no-referrer">'
+      : uiIcon("user");
+    const hour = new Date().getHours();
+    const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
+    return '<button class="home-profile" data-route="/account" aria-label="View account profile">' +
+      '<span class="home-profile-photo">' + photo + '</span><span class="home-profile-copy">' +
+      '<span class="home-greeting">' + greeting + '</span><strong>' + escapeHtml(user?.name || "Guest") + '</strong>' +
+      '</span></button>';
+  }
+  function renderHomeProfile() {
+    const node = $("#home-profile-slot");
+    if (node) node.innerHTML = profileGreetingMarkup();
+  }
+
   function spotlightMarkup(media) {
     const image = media?.bannerImage || imageOf(media);
     return '<section class="hero-stage home-hero"><div class="hero-bg" style="background-image:url(&quot;' +
@@ -446,13 +560,15 @@
         '<button data-route="/account">' + uiIcon("user") + ' Account</button>' +
       '</div>';
 
-      const hour = new Date().getHours();
-      const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
       $("#view").innerHTML =
-        '<section class="home-welcome"><div><span class="welcome-eyebrow">' + greeting + '</span><h1 class="welcome-title">AniDash</h1></div><div class="welcome-actions"><button data-route="/account" aria-label="Your profile">' + uiIcon("user") + '</button><button data-route="/settings" aria-label="Settings">' + uiIcon("settings") + '</button></div></section>' +
+        '<section class="home-welcome native-home-header"><div id="home-profile-slot">' + profileGreetingMarkup() + '</div>' +
+          '<div class="welcome-actions"><button data-route="/news" aria-label="Anime news">' + uiIcon("news") + '</button>' +
+          '<button class="notification-button" data-route="/notifications" aria-label="Notifications">' + uiIcon("bell") + '<span class="news-badge" data-news-badge hidden></span></button>' +
+          '<button data-route="/settings" aria-label="Settings">' + uiIcon("settings") + '</button></div></section>' +
         '<div class="trending-label">' + uiIcon("star") + ' Trending anime</div>' +
         spotlightPanel(spotlightItems) +
         quickLinks +
+        newsPreview() +
         resumeShelf(continueItems) +
         shelf("Currently airing", "Fresh episodes from currently releasing series.", airing.slice(0, 14), sectionUrl("airing")) +
         shelf("Trending right now", "The series viewers are talking about.", trending.slice(0, 14), sectionUrl("trending")) +
@@ -463,6 +579,8 @@
         shelf("Top rated", "Highly rated titles from the AniList catalogue.", top.slice(0, 14), sectionUrl("top")) +
         shelf("Hidden gems", "Well-rated series beyond the most popular charts.", hidden.slice(0, 14), sectionUrl("hidden"));
       scheduleSpotlight();
+      updateNewsBadge();
+      void loadNews();
     } catch (error) {
       if (token !== state.token) return;
       $("#view").innerHTML = '<div class="empty-state"><div class="empty-icon">◌</div><h3>Could not load the catalogue</h3><p>' + escapeHtml(error.message) + '</p><button class="btn btn-primary" data-route="/home">Try again</button></div>';
@@ -2230,6 +2348,7 @@
     const malUser = window.AniDashMal?.currentUser();
     const active = user || malUser;
     if (name) name.textContent = active?.name || "Sign in";
+    if (state.route === "/home") renderHomeProfile();
     if (avatar) {
       const source = user?.avatar?.medium || user?.avatar?.large || malUser?.picture;
       if (source && /^https:\/\//.test(source)) {
@@ -2418,6 +2537,8 @@
     if (current === "/library") return renderLibrary();
     if (current === "/history") return renderHistory();
     if (current === "/account") return renderAccount();
+    if (current === "/news") return renderNews();
+    if (current === "/notifications") return renderNotifications();
     if (current === "/settings") return renderSettings();
     if (current === "/anime" && parts[1]) return renderAnime(parts[1]);
     if (current === "/watch" && parts[1]) return renderWatch(parts[1], parts[2] || "1");
@@ -2438,6 +2559,22 @@
     const target = event.target.closest("button,a,article");
     if (event.target.matches("[data-close-modal]")) { closeModal(); return; }
     if (!target) return;
+    if (target.hasAttribute("data-open-news")) {
+      const item = state.news[Number(target.getAttribute("data-open-news"))];
+      if (item && /^https:\/\//i.test(item.url)) {
+        markNewsRead(item);
+        window.open(item.url, "_blank", "noopener,noreferrer");
+        if (state.route === "/notifications") renderNotifications();
+        if (state.route === "/news") renderNews();
+      }
+      return;
+    }
+    if (target.hasAttribute("data-read-all-news")) {
+      state.news.forEach(markNewsRead);
+      renderNotifications();
+      return;
+    }
+    if (target.hasAttribute("data-refresh-news")) { void loadNews(true); return; }
     if (target.hasAttribute("data-route")) {
       event.preventDefault();
       navigate(target.getAttribute("data-route"));
