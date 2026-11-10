@@ -47,6 +47,17 @@
     trackProgress: true
   };
   store.preferences = { ...DEFAULT_PREFERENCES, ...store.preferences };
+  // Earlier builds saved List as their implicit default. Migrate it once so
+  // existing installations receive the new Grid default. Users can switch back.
+  const GRID_DEFAULT_MIGRATION = "anidash.watch.grid-default.v2";
+  let gridDefaultMigration = false;
+  try {
+    if (!localStorage.getItem(GRID_DEFAULT_MIGRATION)) {
+      store.preferences.episodeViewMode = "grid";
+      localStorage.setItem(GRID_DEFAULT_MIGRATION, "1");
+      gridDefaultMigration = true;
+    }
+  } catch (_) {}
   const setting = key => store.preferences[key];
   function applyPreferences() {
     if (!document.body || !document.body.dataset) return;
@@ -160,6 +171,7 @@
       window.AniDashStorage.save(store).catch(() => {});
     }
   }
+  if (gridDefaultMigration) persist();
   async function restoreStorage() {
     if (!window.AniDashStorage) return;
     try {
@@ -167,6 +179,8 @@
       if (backup && Number(backup.updatedAt || 0) > Number(store.updatedAt || 0)) {
         Object.assign(store, backup);
         store.preferences = { ...DEFAULT_PREFERENCES, ...store.preferences };
+        // Preserve the Grid migration even if an older IndexedDB copy loads.
+        if (gridDefaultMigration) store.preferences.episodeViewMode = "grid";
         persist();
       } else if (!backup || Number(store.updatedAt || 0) >= Number(backup.updatedAt || 0)) {
         // Migrate earlier localStorage-only installations into the recovery DB.
