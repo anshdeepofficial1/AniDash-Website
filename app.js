@@ -42,8 +42,8 @@
   const DEFAULT_PREFERENCES = {
     themeMode: "light", preferredAudio: "dub", defaultQuality: "Auto",
     autoEnableSubtitles: true, autoSkipIntro: false, showNextEpisodePrompt: true,
-    episodeViewMode: "list", preferredSource: "auto",
-    showMangaTab: false, showNewsSection: true, showNewsNotifications: true,
+    episodeViewMode: "grid", preferredSource: "auto",
+    showMangaTab: false, showNewsSection: false, showNewsNotifications: true,
     trackProgress: true
   };
   store.preferences = { ...DEFAULT_PREFERENCES, ...store.preferences };
@@ -905,8 +905,7 @@
     const items = Object.values(store.mangaList).filter(media => media?.id);
     $("#view").innerHTML = pageHead("", "Your Manga Library", "Saved locally and imported from AniList") +
       '<div class="account-actions"><button class="btn btn-secondary" data-route="/manga">' +
-      uiIcon("chevron-left") + ' Discover manga</button><button class="btn btn-secondary" data-route="/downloads">' +
-      uiIcon("download") + ' Offline downloads</button></div>' +
+      uiIcon("chevron-left") + ' Discover manga</button></div>' +
       (items.length ? mangaGrid(items) : '<div class="empty-state"><h3>No saved manga</h3>' +
       '<p>Save a manga from its details page or connect AniList to import your reading list.</p>' +
       '<button class="btn btn-primary" data-route="/manga">Browse manga</button></div>');
@@ -953,8 +952,7 @@
         escapeHtml(query) + '"><button class="btn btn-primary" type="submit">Search</button></form>' +
         '<div class="manga-topline"><div class="feature-chip">' + uiIcon("manga") +
         ' AniList manga catalogue</div><div class="account-actions"><button class="btn btn-secondary" data-route="/manga-library">' +
-        uiIcon("bookmark") + ' Saved</button><button class="btn btn-secondary" data-route="/downloads">' +
-        uiIcon("download") + ' Downloads</button><button class="btn btn-secondary" data-open-cbz>' +
+        uiIcon("bookmark") + ' Saved</button><button class="btn btn-secondary" data-open-cbz>' +
         uiIcon("manga") + ' Import CBZ</button></div></div>' +
         '<input id="cbz-file-input" type="file" accept=".cbz,application/zip" style="display:none">' +
         savedMangaShelf() +
@@ -2701,7 +2699,7 @@
         prefSelect("themeMode", { label:"Theme mode", values:[["light","Light"],["dark","Dark"],["system","Follow device"]] }, "Choose a light, dark or system-matched design.") +
         prefSelect("episodeViewMode", { label:"Episode layout", values:[["list","List"],["grid","Grid"]] }, "How episodes appear on the anime details screen.") +
         prefToggle("showMangaTab", "Show Manga navigation", "Off by default; enable Manga as an optional tab.") +
-        prefToggle("showNewsSection", "News on Home", "Show real anime headlines on your homepage.")) +
+        "") +
       settingsGroup("News & notifications",
         prefToggle("showNewsNotifications", "In-app news notifications", "Unread anime headlines in the local inbox; not system push.") +
         '<div class="preference-row"><div><h3 class="preference-title">Notification inbox</h3><p class="preference-help">View and mark headlines read on this device.</p></div><button class="btn btn-quiet" data-route="/notifications">Open inbox</button></div>') +
@@ -2778,13 +2776,16 @@
     document.body.dataset.view = current.slice(1);
     updateActiveNav(current);
     if (current === "/home") return renderHome();
-    if (current === "/discover") return renderDiscover();
+    if (current === "/discover") {
+      const params = new URLSearchParams(hash.split("?")[1] || "");
+      return renderDiscover(params.get("q") || "", params.has("focus"));
+    }
     if (current === "/manga") {
       const params = new URLSearchParams(hash.split("?")[1] || "");
       return renderManga(params.get("q") || "");
     }
     if (current === "/manga-library") return renderSavedManga();
-    if (current === "/downloads") return renderDownloads();
+    if (current === "/downloads") { navigate("/library"); return; }
     if (current === "/manga-section" && parts[1]) {
       const params = new URLSearchParams(hash.split("?")[1] || "");
       return renderMangaSection(parts[1], Math.max(1, Number(params.get("page") || 1)));
@@ -2796,7 +2797,8 @@
     }
     if (current === "/search") {
       const params = new URLSearchParams(hash.split("?")[1] || "");
-      return renderSearch(params.get("q") || "");
+      navigate("/discover" + (params.get("q") ? "?q=" + encodeURIComponent(params.get("q")) : "?focus=search"));
+      return;
     }
     if (current === "/library") return renderLibrary();
     if (current === "/history") return renderHistory();
@@ -2818,7 +2820,7 @@
   async function submitSearch(term) {
     const value = String(term || "").trim();
     if (!value) return;
-    navigate("/search?q=" + encodeURIComponent(value));
+    navigate("/discover?q=" + encodeURIComponent(value));
   }
 
   document.addEventListener("click", async event => {
@@ -2879,6 +2881,8 @@
       return;
     }
     if (target.hasAttribute("data-refresh-news")) { void loadNews(true); return; }
+    if (target.hasAttribute("data-retry-home")) { void renderHome(true); return; }
+    if (target.hasAttribute("data-retry-discover")) { void renderDiscover(state.discoverTerm || ""); return; }
     if (target.hasAttribute("data-route")) {
       event.preventDefault();
       navigate(target.getAttribute("data-route"));
