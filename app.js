@@ -1656,12 +1656,10 @@
       const rawEmbeds = extractArray(payload, ["embeds", "embedSources", "providers"]).filter(hasMediaLink);
 
       const wantsDub = category === "dub";
-      const streams = rawStreams.filter(item =>
-        item.isDub === undefined || Boolean(item.isDub) === wantsDub
-      );
-      const embeds = rawEmbeds.filter(item =>
-        item.isDub === undefined || Boolean(item.isDub) === wantsDub
-      );
+      // Do not label an unverified audio track as an English dub.
+      const matchesAudio = item => wantsDub ? item.isDub === true : item.isDub !== true;
+      const streams = rawStreams.filter(matchesAudio);
+      const embeds = rawEmbeds.filter(matchesAudio);
 
       if (!streams.length && !embeds.length) {
         throw new Error(payload && payload.error
