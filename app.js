@@ -56,7 +56,7 @@
       ? "dark" : "light";
     document.body.dataset.episodeLayout = setting("episodeViewMode") || "list";
     document.body.dataset.mangaNav = setting("showMangaTab") ? "true" : "false";
-    $('[data-optional-manga]').forEach(item => { item.hidden = !setting("showMangaTab"); });
+    $$('[data-optional-manga]').forEach(item => { item.hidden = !setting("showMangaTab"); });
     const themeMeta = document.querySelector('meta[name="theme-color"]');
     if (themeMeta) themeMeta.content = document.body.dataset.theme === "dark" ? "#101512" : "#f4f8f5";
   }
