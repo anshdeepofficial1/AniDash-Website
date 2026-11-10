@@ -86,7 +86,16 @@ try {
     route.fulfill({ status: 200, contentType: "image/svg+xml", body: imageSvg })
   );
   await page.goto(address + "/#/home", { waitUntil: "domcontentloaded" });
-  await page.locator(".home-hero").waitFor({ timeout: 15000 });
+  try {
+    await page.locator(".home-hero").waitFor({ timeout: 15000 });
+  } catch (error) {
+    console.error("Homepage diagnostic", JSON.stringify({
+      errors,
+      viewText: await page.locator("#view").innerText().catch(() => "view missing"),
+      route: await page.evaluate(() => location.hash)
+    }));
+    throw error;
+  }
   assert.equal(await page.locator(".native-home-header").count(), 1, "Native-profile header must exist");
   await page.locator("#home-news-panel .news-item").waitFor({timeout:15000});
   await page.screenshot({ path: path.join(artifacts, "mobile-home.png") });
