@@ -74,8 +74,8 @@
     } catch (_) {}
     const valid = params.get("code") && pending && pending.state === params.get("state") &&
       Date.now() - pending.createdAt < 10 * 60 * 1000;
-    try { history.replaceState(null, "", location.pathname + "#/account"); }
-    catch (_) { location.hash = "#/account"; }
+    try { history.replaceState(null, "", "/account"); }
+    catch (_) { location.assign("/account"); }
     if (!valid) return "invalid";
     await exchange({
       grant_type: "authorization_code", code: params.get("code"),
