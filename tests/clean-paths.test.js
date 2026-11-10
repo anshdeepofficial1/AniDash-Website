@@ -13,7 +13,7 @@ const mal = read("mal-account.js");
 
 function pathMatchesRule(path, source) {
   const pattern = "^" + source.split("/").map(segment =>
-    segment.startsWith(":") ? "[^/]+" : segment.replace(/[.*+?^$()|[\]{}]/g, "\\$&")
+    segment.startsWith(":") ? "[^/]+" : segment
   ).join("/") + "$";
   return new RegExp(pattern).test(path);
 }
