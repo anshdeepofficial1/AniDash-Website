@@ -523,9 +523,31 @@
   function showSpotlight(index) {
     if (state.route !== "/home" || !state.spotlight?.length) return;
     const items = state.spotlight;
-    state.spotlightIndex = (index + items.length) % items.length;
+    const nextIndex = (index + items.length) % items.length;
+    if (nextIndex === state.spotlightIndex) { scheduleSpotlight(); return; }
+    state.spotlightIndex = nextIndex;
     const panel = $("#spotlight-content");
-    if (panel) panel.innerHTML = spotlightMarkup(items[state.spotlightIndex]);
+    if (panel) {
+      // Preserve a constant-sized viewport and animate between two layers,
+      // instead of replacing the entire hero node and causing a layout snap.
+      const outgoing = panel.querySelector(".spotlight-layer.is-active");
+      panel.querySelectorAll(".spotlight-layer:not(.is-active)").forEach(el => el.remove());
+      const incoming = document.createElement("div");
+      incoming.className = "spotlight-layer is-entering";
+      incoming.innerHTML = spotlightMarkup(items[nextIndex]);
+      panel.appendChild(incoming);
+      window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => {
+          incoming.classList.remove("is-entering");
+          incoming.classList.add("is-active");
+          if (outgoing) {
+            outgoing.classList.remove("is-active");
+            outgoing.classList.add("is-exiting");
+            window.setTimeout(() => outgoing.remove(), 800);
+          }
+        });
+      });
+    }
     $$("[data-spotlight-index]").forEach(el => {
       el.classList.toggle("active", Number(el.getAttribute("data-spotlight-index")) === state.spotlightIndex);
     });
@@ -538,16 +560,18 @@
     if (state.route !== "/home" || !state.spotlight || state.spotlight.length < 2) return;
     state.spotlightTimer = window.setTimeout(() => {
       if (state.route !== "/home") return;
-      if (document.visibilityState === "hidden") { scheduleSpotlight(); return; }
+      if (document.visibilityState === "hidden" || $("#spotlight-content")?.closest(".spotlight-shell")?.matches(":hover")) {
+        scheduleSpotlight(); return;
+      }
       showSpotlight(state.spotlightIndex + 1);
-    }, 2000);
+    }, 2300);
     if (state.spotlightTimer?.unref) state.spotlightTimer.unref();
   }
   function spotlightPanel(items) {
     const first = items[0];
     if (!first) return "";
     return '<div class="spotlight-shell" aria-label="Trending anime carousel">' +
-      '<div id="spotlight-content">' + spotlightMarkup(first) + '</div>' +
+      '<div id="spotlight-content"><div class="spotlight-layer is-active">' + spotlightMarkup(first) + '</div></div>' +
       '<button class="spotlight-control prev" data-spotlight-prev title="Previous trending anime" aria-label="Previous trending anime">' +
         uiIcon("chevron-left") + '</button>' +
       '<button class="spotlight-control next" data-spotlight-next title="Next trending anime" aria-label="Next trending anime">' +
@@ -557,6 +581,7 @@
         '<button data-spotlight-index="' + i + '" class="' + (i===0 ? "active" : "") +
         '" aria-label="Go to trending anime ' + (i+1) + '"></button>').join("") + '</div></div>';
   }
+
   async function renderSection(key, page = 1) {
     const config = SECTIONS[key];
     if (!config) { navigate("/discover"); return; }
