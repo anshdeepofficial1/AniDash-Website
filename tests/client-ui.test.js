@@ -103,7 +103,9 @@ test("player appears before stream resolution and DUB/SUB switching does not thr
   await flushUI();
   const html = browser.getElement("#view").innerHTML;
   assert.match(html, /id="anime-video"/);
-  assert.match(html, /DUB · ENGLISH/);
+  assert.match(html, /English dub/);
+  assert.doesNotMatch(html, /Paste stream link|JustAnime|HiAnime|AniKoto/);
+  assert.match(html, /id="available-streams-panel" hidden/);
   assert.match(html, /Episode 2/);
   const saved = JSON.parse(browser.localData.get("anidash.watch.web.v1"));
   assert.equal(saved.history["21"].episode, 2, "episode should be saved before stream becomes playable");
