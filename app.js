@@ -1562,9 +1562,10 @@
       '<div class="player-layout"><section><div class="video-frame"><video id="anime-video" controls playsinline webkit-playsinline preload="metadata"></video><iframe id="anime-embed" title="Episode stream" allow="autoplay; fullscreen; picture-in-picture; encrypted-media" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen hidden></iframe><div class="player-overlay" id="player-overlay" role="status"><div class="player-mini-loader"></div><strong>Opening episode…</strong></div></div>' +
       '<div class="player-under"><div><h2>' + escapeHtml(episode.title) + '</h2><p>' + escapeHtml(titleOf(media)) + ' · Episode ' + escapeHtml(episode.number) + '</p></div><div class="player-controls"><button class="btn btn-quiet" data-prev ' + (hasPrev ? "" : "disabled") + '>← Previous</button><button class="btn btn-quiet" data-next ' + (hasNext ? "" : "disabled") + '>Next →</button></div></div>' +
       '<div class="button-row" style="margin-top:14px" id="skip-buttons"></div></section>' +
-      '<aside class="player-sidebar"><div class="player-panel"><h3>Streaming source</h3><div class="source-row" id="provider-pills"></div><div style="height:12px"></div><h3>Audio & server</h3><div class="source-row" id="category-pills"><button class="source-pill' + (player.category === "sub" ? " active" : "") + '" data-category="sub">SUB</button><button class="source-pill' + (player.category !== "sub" ? " active" : "") + '" data-category="dub">DUB · ENGLISH</button></div><div style="height:9px"></div><div class="source-row" id="server-pills"><span class="form-help">Loading built-in source servers…</span></div><div style="height:12px"></div><div class="source-row" id="quality-pills"></div></div>' +
+      '<aside class="player-sidebar"><div class="player-panel player-audio-panel"><div class="player-panel-head"><h3>Audio language</h3><span class="stream-state" id="stream-status" role="status">Checking streams</span></div><div class="source-row" id="category-pills" role="group" aria-label="Audio language"><button class="source-pill' + (player.category === "sub" ? " active" : "") + '" data-category="sub" aria-pressed="' + (player.category === "sub") + '">Subtitled</button><button class="source-pill' + (player.category !== "sub" ? " active" : "") + '" data-category="dub" aria-pressed="' + (player.category !== "sub") + '">English dub</button></div></div>' +
+      '<div class="player-panel player-stream-panel" id="available-streams-panel" hidden><div class="player-panel-head"><h3>Available streams</h3><span class="stream-hint">Resolved links only</span></div><div class="source-row" id="quality-pills" role="group" aria-label="Available streams"></div></div>' +
       '<div class="player-panel"><h3>Episode list</h3><div class="player-episode-list">' + playerEpisodeItems() + '</div></div>' +
-      '<div class="notice">Playback source: ' + escapeHtml(player.match && player.match.provider ? player.match.provider.name : "Direct link") + '. If this server fails, try another server or source.</div></aside></div></div>';
+      '</aside></div></div>';
     renderPlayerEpisodeBrowser();
     updateActiveNav("/watch");
   }
@@ -1831,37 +1832,33 @@
     overlay.style.display = "grid";
     overlay.classList.toggle("has-error", Boolean(showAction));
     overlay.innerHTML = showAction
-      ? '<div class="player-error-symbol">!</div><strong>' + escapeHtml(title) + '</strong><p>' + escapeHtml(description) + '</p><div class="player-error-actions"><button class="btn btn-primary" data-retry-sources>Retry sources</button></div>'
+      ? '<div class="player-error-symbol">!</div><strong>' + escapeHtml(title) + '</strong><p>' + escapeHtml(description) + '</p><div class="player-error-actions"><button class="btn btn-primary" data-retry-sources>Retry playback</button>' + (state.player?.category === "dub" ? '<button class="btn btn-secondary" data-category="sub">Try subtitled</button>' : '') + '</div>'
       : '<div class="player-mini-loader"></div><strong>Opening episode…</strong>';
   }
 
   function renderPlayerOptions() {
     const player = state.player;
     if (!player) return;
-    const providers = $("#provider-pills");
-    if (providers) {
-      const candidates = player.availableProviders || (state.detailMatches || []).filter(match => match && match.episodesReady);
-      providers.innerHTML = candidates.length ? candidates.map(match =>
-        '<button class="source-pill' + (player.match && player.match.provider.id === match.provider.id ? " active" : "") + '" data-provider="' + escapeHtml(match.provider.id) + '">' + escapeHtml(match.provider.name) + '</button>'
-      ).join("") : '<span class="form-help">No provider has an episode list.</span>';
-    }
-    const servers = $("#server-pills");
-    if (servers) {
-      servers.innerHTML = player.servers.length ? player.servers.map(server =>
-        '<button class="source-pill' + (String(server.id) === String(player.selectedServer) ? " active" : "") + '" data-server="' + escapeHtml(server.id || "default") + '">' + escapeHtml(server.name || server.id || "Server") + '</button>'
-      ).join("") : '<span class="form-help">Trying built-in servers…</span>';
-    }
+    const candidates = Array.isArray(player.candidates) ? player.candidates : [];
+    const panel = $("#available-streams-panel");
+    if (panel) panel.hidden = candidates.length === 0;
     const qualities = $("#quality-pills");
     if (qualities) {
-      const qualityItems = Array.isArray(player.candidates) && player.candidates.length ? player.candidates : (player.streams.length ? player.streams : (player.embeds || []));
-      qualities.innerHTML = qualityItems.map((stream, index) =>
-        '<button class="source-pill' + (index === Number(player.candidateIndex || 0) ? " active" : "") + '" data-stream="' + index + '">' + escapeHtml(stream.quality || stream.name || stream.label || stream.type || ("Source " + (index + 1))) + '</button>'
-      ).join("");
+      qualities.innerHTML = candidates.map((stream, index) => {
+        const quality = /(?:^|[^0-9])(2160|1440|1080|720|480|360)\s*p(?:[^0-9]|$)/i.exec(String(stream.quality || ""));
+        const label = "Stream " + (index + 1) + (quality ? " · " + quality[1] + "p" : "");
+        return '<button class="source-pill' + (index === Number(player.candidateIndex || 0) ? " active" : "") +
+          '" data-stream="' + index + '" aria-pressed="' + (index === Number(player.candidateIndex || 0)) + '">' + escapeHtml(label) + '</button>';
+      }).join("");
     }
+    const status = $("#stream-status");
+    if (status) status.textContent = candidates.length
+      ? candidates.length + (candidates.length === 1 ? " stream" : " streams") + " found"
+      : "Checking streams";
     const skip = $("#skip-buttons");
     if (skip) {
-      skip.innerHTML = (player.intro && Number(player.intro.end) > Number(player.intro.start) ? '<button class="btn btn-quiet" data-skip="intro">Skip intro ↗</button>' : '') +
-        (player.outro && Number(player.outro.end) > Number(player.outro.start) ? '<button class="btn btn-quiet" data-skip="outro">Skip outro ↗</button>' : '');
+      skip.innerHTML = (player.intro && Number(player.intro.end) > Number(player.intro.start) ? '<button class="btn btn-quiet" data-skip="intro">Skip intro</button>' : '') +
+        (player.outro && Number(player.outro.end) > Number(player.outro.start) ? '<button class="btn btn-quiet" data-skip="outro">Skip outro</button>' : '');
     }
   }
 
@@ -1874,6 +1871,7 @@
     if (nextCandidateIndex < candidates.length) {
       player.candidateIndex = nextCandidateIndex;
       const candidate = candidates[nextCandidateIndex];
+      renderPlayerOptions();
       showPlayerOverlay(
         "Trying another server",
         reason + " Trying " + (candidate.quality || candidate.name || "the next stream") + "…",
@@ -2742,6 +2740,7 @@
       if (stream) {
         state.player.candidateIndex = index;
         $$("[data-stream]").forEach(el => el.classList.toggle("active", Number(el.getAttribute("data-stream")) === index));
+        renderPlayerOptions();
         attachStream(stream.url || stream.src || stream.file, stream, stream.isEmbed ? [] : state.player.tracks);
       }
       return;
