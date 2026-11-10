@@ -5,11 +5,11 @@
   <meta name="theme-color" content="#f4f8f5"><meta name="color-scheme" content="light dark">
   <meta name="description" content="AniDash — discover anime, save your watchlist and continue watching on phone, tablet and desktop.">
   <meta name="application-name" content="AniDash"><meta name="apple-mobile-web-app-title" content="AniDash">
-  <meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="default">
   <link rel="manifest" href="/manifest.webmanifest"><link rel="icon" type="image/png" href="/icons/anidash-icon.png"><link rel="apple-touch-icon" href="/icons/anidash-icon.png">
   <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/styles.css?v=11"><link rel="stylesheet" href="/android-ui.css?v=3"><link rel="stylesheet" href="/preferences.css?v=1"><link rel="stylesheet" href="/app-parity.css?v=2"><link rel="stylesheet" href="/unslop.css?v=1"><title>AniDash — Anime, without the noise</title>
+  <link rel="stylesheet" href="/styles.css?v=11"><link rel="stylesheet" href="/android-ui.css?v=3"><link rel="stylesheet" href="/preferences.css?v=1"><link rel="stylesheet" href="/app-parity.css?v=2"><link rel="stylesheet" href="/unslop.css?v=1"><link rel="stylesheet" href="/native-parity.css?v=1"><title>AniDash — Anime, without the noise</title>
 </head>
 <body>
   <div class="ambient ambient-one"></div><div class="ambient ambient-two"></div>
@@ -44,12 +44,13 @@
     </main>
   </div>
   <nav class="mobile-dock" aria-label="Mobile navigation">
-    <a href="#/home" data-route="/home" aria-label="Home"><span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1z"/></svg></span>Home</a>
+    <a href="#/home" data-route="/home" aria-label="Home"><span><svg class="ui-icon"><use href="/icons/ui-sprite.svg#home"/></svg></span>Home</a>
     <a href="#/discover" data-route="/discover" aria-label="Discover"><span><svg class="ui-icon"><use href="/icons/ui-sprite.svg#compass"/></svg></span>Discover</a>
-    <a href="#/manga" data-route="/manga" aria-label="Manga"><span><svg class="ui-icon"><use href="/icons/ui-sprite.svg#manga"/></svg></span>Manga</a>
+    <a href="#/search" data-route="/search" aria-label="Search"><span><svg class="ui-icon"><use href="/icons/ui-sprite.svg#search"/></svg></span>Search</a>
+    <a href="#/downloads" data-route="/downloads" aria-label="Downloads"><span><svg class="ui-icon"><use href="/icons/ui-sprite.svg#download"/></svg></span>Downloads</a>
     <a href="#/library" data-route="/library" aria-label="Library"><span><svg class="ui-icon"><use href="/icons/ui-sprite.svg#library"/></svg></span>Library</a>
-    <a href="#/account" data-route="/account" aria-label="Account"><span><svg class="ui-icon"><use href="/icons/ui-sprite.svg#user"/></svg></span>Account</a>
+    <a href="#/manga" data-route="/manga" data-optional-manga aria-label="Manga" hidden><span><svg class="ui-icon"><use href="/icons/ui-sprite.svg#manga"/></svg></span>Manga</a>
   </nav>
   <div id="modal-root"></div><div id="toast-root" class="toast-root"></div>
-  <script src="https://cdn.jsdelivr.net/npm/hls.js@1.6.13/dist/hls.min.js"></script><script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js" defer></script><script src="/library-storage.js?v=2" defer></script><script src="/anilist-account.js?v=1" defer></script><script src="/mal-account.js?v=1" defer></script><script src="/cbz-reader.js?v=2" defer></script><script src="/app.js?v=23" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@1.6.13/dist/hls.min.js"></script><script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js" defer></script><script src="/library-storage.js?v=2" defer></script><script src="/anilist-account.js?v=1" defer></script><script src="/mal-account.js?v=1" defer></script><script src="/cbz-reader.js?v=2" defer></script><script src="/app.js?v=24" defer></script>
 </body></html>
