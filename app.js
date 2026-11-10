@@ -1900,7 +1900,7 @@
       outro: null,
       requestId: 0
     };
-    location.hash = "#/watch/" + state.detail.id + "/" + number;
+    navigate("/watch/" + state.detail.id + "/" + number);
   }
 
   function playerEpisodeItems() {
@@ -2865,40 +2865,53 @@
     });
   }
 
+  // Use pathname-based URLs everywhere. Legacy #/ links are migrated once
+  // after OAuth callbacks, so existing bookmarks still open the right page.
+  const KNOWN_ROUTES = new Set([
+    "home", "discover", "manga", "manga-library", "downloads", "search",
+    "library", "history", "account", "news", "notifications", "settings",
+    "anime", "watch", "section", "manga-section", "manga-detail"
+  ]);
+  function migrateLegacyHashRoute() {
+    const fragment = String(location.hash || "");
+    if (!fragment.startsWith("#/")) return false; // OAuth token fragments are different.
+    try {
+      const legacy = new URL(fragment.slice(1), location.origin || "http://localhost");
+      const segment = legacy.pathname.split("/").filter(Boolean)[0] || "home";
+      if (!KNOWN_ROUTES.has(segment)) return false;
+      history.replaceState(null, "", legacy.pathname + legacy.search);
+      return true;
+    } catch (_) { return false; }
+  }
+  function currentRouteUrl() {
+    const pathname = String(location.pathname || "/");
+    return (pathname === "/" ? "/home" : pathname) + String(location.search || "");
+  }
   async function route() {
-    const hash = location.hash.replace(/^#/, "") || "/home";
-    if (state.route === "/home" && !hash.startsWith("/home") && state.spotlightTimer) {
+    const path = currentRouteUrl();
+    if (state.route === "/home" && !path.startsWith("/home") && state.spotlightTimer) {
       window.clearTimeout(state.spotlightTimer);
       state.spotlightTimer = null;
     }
-    const parts = hash.split("?")[0].split("/").filter(Boolean);
+    const parts = path.split("?")[0].split("/").filter(Boolean);
     const current = "/" + (parts[0] || "home");
+    const params = new URLSearchParams(String(location.search || ""));
     state.route = current;
     document.body.dataset.view = current.slice(1);
     updateActiveNav(current);
     if (current === "/home") return renderHome();
-    if (current === "/discover") {
-      const params = new URLSearchParams(hash.split("?")[1] || "");
-      return renderDiscover(params.get("q") || "", params.has("focus"));
-    }
-    if (current === "/manga") {
-      const params = new URLSearchParams(hash.split("?")[1] || "");
-      return renderManga(params.get("q") || "");
-    }
+    if (current === "/discover") return renderDiscover(params.get("q") || "", params.has("focus"));
+    if (current === "/manga") return renderManga(params.get("q") || "");
     if (current === "/manga-library") return renderSavedManga();
-    if (current === "/downloads") { navigate("/library"); return; }
-    if (current === "/manga-section" && parts[1]) {
-      const params = new URLSearchParams(hash.split("?")[1] || "");
+    if (current === "/downloads") { navigate("/library", true); return; }
+    if (current === "/manga-section" && parts[1])
       return renderMangaSection(parts[1], Math.max(1, Number(params.get("page") || 1)));
-    }
     if (current === "/manga-detail" && parts[1]) return renderMangaDetails(parts[1]);
-    if (current === "/section" && parts[1]) {
-      const params = new URLSearchParams(hash.split("?")[1] || "");
+    if (current === "/section" && parts[1])
       return renderSection(parts[1], Math.max(1, Math.min(250, Number(params.get("page") || 1))));
-    }
     if (current === "/search") {
-      const params = new URLSearchParams(hash.split("?")[1] || "");
-      navigate("/discover" + (params.get("q") ? "?q=" + encodeURIComponent(params.get("q")) : "?focus=search"));
+      navigate("/discover" + (params.get("q")
+        ? "?q=" + encodeURIComponent(params.get("q")) : "?focus=search"), true);
       return;
     }
     if (current === "/library") return renderLibrary();
@@ -2909,13 +2922,18 @@
     if (current === "/settings") return renderSettings();
     if (current === "/anime" && parts[1]) return renderAnime(parts[1]);
     if (current === "/watch" && parts[1]) return renderWatch(parts[1], parts[2] || "1");
-    location.hash = "#/home";
+    navigate("/home", true);
   }
 
-  function navigate(path) {
-    const next = "#" + path;
-    if (location.hash === next) { void route(); return; }
-    location.hash = next;
+  function navigate(path, replace = false) {
+    const value = String(path || "").trim();
+    // Internal navigation must not open external origins or reintroduce hashes.
+    if (!value.startsWith("/") || value.startsWith("//") || value.includes("#")) return;
+    const url = new URL(value, location.origin || "http://localhost");
+    const next = url.pathname + url.search;
+    if (currentRouteUrl() === next) { void route(); return; }
+    history[replace ? "replaceState" : "pushState"](null, "", next);
+    onRouteChange();
   }
 
   async function submitSearch(term) {
@@ -3507,19 +3525,32 @@
 
 
   // Stop orphaned audio and destroy HLS when leaving playback.
-  window.addEventListener("hashchange", () => {
+  function onRouteChange() {
     if (typeof window.scrollTo === "function") window.scrollTo(0, 0);
-    const nextRoute = location.hash.replace(/^#\//, "").split("/")[0];
-    if (nextRoute !== "watch") {
+    // Stop the old player on any route transition, including changing episodes.
+    if (state.route === "/watch") {
       const video = $("#anime-video");
       const embed = $("#anime-embed");
-      if (video) { savePlaybackProgress(video, false, true); video.pause(); video.removeAttribute("src"); video.load(); }
+      if (video) {
+        savePlaybackProgress(video, false, true);
+        video.pause();
+        video.removeAttribute("src");
+        video.load();
+      }
       if (embed) embed.src = "about:blank";
       if (state.hls) { try { state.hls.destroy(); } catch (_) {} state.hls = null; }
-      if (state.playbackWatchdog) { window.clearTimeout(state.playbackWatchdog); state.playbackWatchdog = null; }
+      if (state.playbackWatchdog) {
+        window.clearTimeout(state.playbackWatchdog);
+        state.playbackWatchdog = null;
+      }
       if (state.player) state.player.requestId = (state.player.requestId || 0) + 1;
     }
-    route();
+    void route();
+  }
+  window.addEventListener("popstate", onRouteChange);
+  // Honor older hash bookmarks if a user opens one within an existing tab.
+  window.addEventListener("hashchange", () => {
+    if (migrateLegacyHashRoute()) onRouteChange();
   });
   window.addEventListener("pagehide", () => {
     const video = $("#anime-video");
@@ -3583,6 +3614,7 @@
     }
     await restoreStorage();
   }).finally(() => {
+    migrateLegacyHashRoute();
     route();
     if (accountClient) {
       accountClient.setHandler(user => {
