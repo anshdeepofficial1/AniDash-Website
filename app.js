@@ -1603,7 +1603,7 @@
       player.needsProviderRetry = !preparedSourceCache.has(String(player.media.id));
       showPlayerOverlay(
         "No episode source is ready",
-        "AniDash could not load an episode list from JustAnime, HiAnime or AniKoto. Return to the anime page and retry the built-in sources.",
+        "Episode sources are unavailable right now. Retry or open another episode.",
         true
       );
       return;
@@ -1644,10 +1644,16 @@
         server: selectedServer
       });
 
-      const rawStreams = extractArray(payload, ["sources", "streams", "videos", "data.sources"])
-        .filter(item => item && (item.url || item.src || item.file));
-      const rawEmbeds = extractArray(payload, ["embeds", "embedSources", "providers"])
-        .filter(item => item && (item.url || item.src));
+      const hasMediaLink = item => {
+        const link = item && (item.url || item.src || item.file);
+        if (typeof link !== "string") return false;
+        try {
+          const parsed = new URL(link);
+          return parsed.protocol === "https:" || parsed.hostname === "localhost";
+        } catch (_) { return false; }
+      };
+      const rawStreams = extractArray(payload, ["sources", "streams", "videos", "data.sources"]).filter(hasMediaLink);
+      const rawEmbeds = extractArray(payload, ["embeds", "embedSources", "providers"]).filter(hasMediaLink);
 
       const wantsDub = category === "dub";
       const streams = rawStreams.filter(item =>
@@ -1781,7 +1787,7 @@
       renderPlayerOptions();
       showPlayerOverlay(
         "No English " + category.toUpperCase() + " stream found",
-        failures.join(" · ") || "None of the built-in sources returned an English " + category.toUpperCase() + " stream for this episode. You can switch to SUB manually.",
+        "No " + (category === "dub" ? "English-dubbed" : "subtitled") + " stream was returned for this episode. Retry or switch audio language.",
         true
       );
       return;
@@ -1822,7 +1828,7 @@
 
     const first = player.candidates[0];
     attachStream(first.url || first.src || first.file, first, first.isEmbed ? [] : player.tracks);
-    toast("English " + category.toUpperCase() + " ready: " + winner.match.provider.name + ".");
+    toast((category === "dub" ? "English dub" : "Subtitled") + " stream ready.");
   }
 
 
@@ -1874,7 +1880,7 @@
       renderPlayerOptions();
       showPlayerOverlay(
         "Trying another server",
-        reason + " Trying " + (candidate.quality || candidate.name || "the next stream") + "…",
+        "Trying the next available stream.",
         false
       );
       attachStream(candidate.url || candidate.src || candidate.file, candidate, candidate.isEmbed ? [] : player.tracks);
@@ -1897,13 +1903,13 @@
     if (next) {
       player.match = next;
       player.selectedServer = ({ justanime: "auto", hianime: "hd-1", anikoto: "anikoto" }[next.provider.id] || "auto");
-      showPlayerOverlay("Switching streaming source", reason + " Trying " + next.provider.name + "…", false);
+      showPlayerOverlay("Switching stream", "Trying another available source.", false);
       loadPlayerStreams(state.token);
       return;
     }
     showPlayerOverlay(
-      "Playback failed on all built-in sources",
-      reason + " AniDash tried the available servers and the other built-in providers, but none returned a playable stream. Try another episode or retry later.",
+      "Playback unavailable",
+      "None of the available streams could play in this browser. Try another audio language or episode.",
       true
     );
   }
@@ -1988,7 +1994,7 @@
         if (data && data.fatal && state.currentVideo === url) {
           try { activeHls.destroy(); } catch (_) {}
           if (state.hls === activeHls) state.hls = null;
-          fallbackToNextProvider("The browser could not load the HLS stream from " + (state.player.match.provider.name || "this source") + ".");
+          fallbackToNextProvider("The browser could not load this stream.");
         }
       });
     } else {
