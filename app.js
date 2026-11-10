@@ -2024,7 +2024,7 @@
       '<div class="player-under"><div><h2 id="player-episode-inline-title">' + escapeHtml(episode.title) + '</h2><p>' + escapeHtml(titleOf(media)) + ' · Episode ' + escapeHtml(episode.number) + '</p></div><div class="player-controls"><button class="btn btn-quiet" data-prev ' + (hasPrev ? "" : "disabled") + '>← Previous</button><button class="btn btn-quiet" data-next ' + (hasNext ? "" : "disabled") + '>Next →</button></div></div>' +
       '<div class="button-row" style="margin-top:14px" id="skip-buttons"></div></section>' +
       '<aside class="player-sidebar"><div class="player-panel player-audio-panel"><div class="player-panel-head"><h3>Audio language</h3><span class="stream-state" id="stream-status" role="status">Checking streams</span></div><div class="source-row" id="category-pills" role="group" aria-label="Audio language"><button class="source-pill' + (player.category === "sub" ? " active" : "") + '" data-category="sub" aria-pressed="' + (player.category === "sub") + '">Subtitled</button><button class="source-pill' + (player.category !== "sub" ? " active" : "") + '" data-category="dub" aria-pressed="' + (player.category !== "sub") + '">English dub</button></div></div>' +
-      '<div class="player-panel player-stream-panel" id="available-streams-panel" hidden><div class="player-panel-head"><h3>Available streams</h3><span class="stream-hint">Resolved links only</span></div><div class="source-row" id="quality-pills" role="group" aria-label="Available streams"></div></div>' +
+      '<div class="player-panel player-stream-panel" id="available-streams-panel" hidden><div class="player-panel-head"><h3>Available streams</h3><span class="stream-hint">Resolved links only</span></div><div class="source-row" id="quality-pills" role="group" aria-label="Available streams"></div><button class="btn btn-secondary" id="next-stream-button" data-next-stream hidden>Try another stream</button></div>' +
       '<div class="player-panel"><h3>Episode list</h3><div class="player-episode-list">' + playerEpisodeItems() + '</div></div>' +
       '</aside></div></div>';
     renderPlayerEpisodeBrowser();
@@ -2215,7 +2215,9 @@
       if (!fallback) return null;
       const preferredDirect = await Promise.race([
         directReady,
-        new Promise(resolve => window.setTimeout(() => resolve(null), 180))
+        // Direct HLS/MP4 sources need time to resolve. The earlier 180 ms
+        // preference almost always selected an unverified iframe first.
+        new Promise(resolve => window.setTimeout(() => resolve(null), 3200))
       ]);
       return preferredDirect || fallback;
     });
@@ -2278,7 +2280,13 @@
       }
       return qb - qa;
     });
-    player.candidates = [...rankedStreams, ...winner.embeds];
+    const seen = new Set();
+    player.candidates = [...rankedStreams, ...winner.embeds].filter(candidate => {
+      const link = String(candidate?.url || candidate?.src || candidate?.file || "");
+      if (!link || seen.has(link)) return false;
+      seen.add(link);
+      return true;
+    });
     player.candidateIndex = 0;
     player.tracks = winner.tracks;
     player.intro = winner.intro;
@@ -2287,7 +2295,7 @@
 
     const first = player.candidates[0];
     attachStream(first.url || first.src || first.file, first, first.isEmbed ? [] : player.tracks);
-    toast((category === "dub" ? "English dub" : "Subtitled") + " stream ready.");
+    // A resolved URL is not proof that the browser can play it.
   }
 
 
@@ -2307,6 +2315,8 @@
     const candidates = Array.isArray(player.candidates) ? player.candidates : [];
     const panel = $("#available-streams-panel");
     if (panel) panel.hidden = candidates.length === 0;
+    const switcher = $("#next-stream-button");
+    if (switcher) switcher.hidden = candidates.length < 2;
     const qualities = $("#quality-pills");
     if (qualities) {
       qualities.innerHTML = candidates.map((stream, index) => {
@@ -2318,7 +2328,7 @@
     }
     const status = $("#stream-status");
     if (status) status.textContent = candidates.length
-      ? candidates.length + (candidates.length === 1 ? " stream" : " streams") + " found"
+      ? candidates.length + (candidates.length === 1 ? " option" : " options") + " available"
       : "Checking streams";
     const skip = $("#skip-buttons");
     if (skip) {
@@ -2395,7 +2405,55 @@
     if (speed) speed.textContent = Number(video.playbackRate || 1).toFixed(2).replace(/0$/, "").replace(/\.$/, "") + "×";
   }
 
-  function attachStream(url, stream, tracks) {
+  // Load HLS.js only for browsers without native HLS, and try a second
+  // independent CDN if the first is unavailable. Never block Home startup.
+  let hlsEnginePending = null;
+  async function ensureHlsEngine() {
+    if (window.Hls?.isSupported?.()) return true;
+    if (!window.MediaSource && !window.ManagedMediaSource) return false;
+    if (hlsEnginePending) return hlsEnginePending;
+    hlsEnginePending = (async () => {
+      const sources = [
+        "https://cdn.jsdelivr.net/npm/hls.js@1.6.13/dist/hls.min.js",
+        "https://unpkg.com/hls.js@1.6.13/dist/hls.min.js"
+      ];
+      for (const source of sources) {
+        if (window.Hls?.isSupported?.()) return true;
+        try {
+          await new Promise((resolve, reject) => {
+            const script = document.createElement("script");
+            script.async = true;
+            script.src = source;
+            let finished = false;
+            const finish = error => {
+              if (finished) return;
+              finished = true;
+              window.clearTimeout(timeout);
+              script.onload = script.onerror = null;
+              if (error) {
+                script.remove();
+                reject(error);
+              } else resolve();
+            };
+            const timeout = window.setTimeout(() => finish(new Error("HLS engine download timeout")), 6500);
+            script.onload = () => finish(null);
+            script.onerror = () => finish(new Error("HLS engine unavailable"));
+            document.head.appendChild(script);
+          });
+          if (window.Hls?.isSupported?.()) return true;
+        } catch (_) {}
+      }
+      return false;
+    })().finally(() => { hlsEnginePending = null; });
+    return hlsEnginePending;
+  }
+  function clearPlaybackTimer() {
+    if (!state.playbackWatchdog) return;
+    window.clearTimeout(state.playbackWatchdog);
+    state.playbackWatchdog = null;
+  }
+
+  async function attachStream(url, stream, tracks) {
     if (!url) {
       fallbackToNextProvider("The provider did not return a media URL.");
       return;
@@ -2414,12 +2472,18 @@
     const embed = $("#anime-embed");
     const overlay = $("#player-overlay");
     if (!video) return;
+    const player = state.player;
+    const attemptId = player.activePlaybackId = (player.activePlaybackId || 0) + 1;
+    state.currentVideo = url;
+    const isActive = () => state.route === "/watch" && state.player === player &&
+      player.activePlaybackId === attemptId && state.currentVideo === url;
     const playerUI = $("#video-ui");
     if (playerUI) playerUI.hidden = true;
     video.controls = true;
-    if (state.playbackWatchdog) {
-      window.clearTimeout(state.playbackWatchdog);
-      state.playbackWatchdog = null;
+    clearPlaybackTimer();
+    if (state.stallNoticeTimer) {
+      window.clearTimeout(state.stallNoticeTimer);
+      state.stallNoticeTimer = null;
     }
     if (state.hls) {
       try { state.hls.destroy(); } catch (_) {}
@@ -2435,13 +2499,10 @@
       if (embed) {
         embed.hidden = false;
         embed.onerror = () => {
-          if (state.currentVideo === parsed.toString()) {
-            fallbackToNextProvider("The embedded player could not be loaded.");
-          }
+          if (isActive()) fallbackToNextProvider("The embedded player could not be loaded.");
         };
         embed.src = parsed.toString();
       }
-      state.currentVideo = parsed.toString();
       if (overlay) overlay.style.display = "none";
       const skip = $("#skip-buttons");
       if (skip) skip.innerHTML = "";
@@ -2466,39 +2527,57 @@
       el.src = track.url;
       video.appendChild(el);
     });
-    const isHls = stream && (stream.isM3U8 === true || String(stream.type || "").toLowerCase().includes("hls") || /\.m3u8(\?|$)/i.test(url));
-    if (isHls && video.canPlayType("application/vnd.apple.mpegurl")) {
-      video.src = url;
-    } else if (isHls && window.Hls && window.Hls.isSupported()) {
-      state.hls = new window.Hls({ enableWorker: true, lowLatencyMode: false, startLevel: -1, capLevelToPlayerSize: true, startFragPrefetch: true, backBufferLength: 20, maxBufferLength: 24, maxMaxBufferLength: 48 });
-      state.hls.loadSource(url);
-      state.hls.attachMedia(video);
-      const activeHls = state.hls;
-      state.hls.on(window.Hls.Events.ERROR, function (_event, data) {
-        if (data && data.fatal && state.currentVideo === url) {
-          try { activeHls.destroy(); } catch (_) {}
-          if (state.hls === activeHls) state.hls = null;
-          fallbackToNextProvider("The browser could not load this stream.");
-        }
-      });
-    } else {
-      video.src = url;
-    }
-    state.currentVideo = url;
+    const isHls = stream && (stream.isM3U8 === true ||
+      String(stream.type || "").toLowerCase().includes("hls") ||
+      /\.m3u8(\?|$)/i.test(url));
     if (overlay) {
       overlay.style.display = "grid";
       overlay.classList.remove("has-error");
-      overlay.innerHTML = '<div class="player-mini-loader"></div><strong>Opening episode…</strong>';
+      overlay.innerHTML = '<div class="player-mini-loader"></div><strong>Connecting to video…</strong>';
     }
-    state.playbackWatchdog = window.setTimeout(() => {
-      if (state.currentVideo === url && video.readyState < 2) {
-        fallbackToNextProvider("This server took too long to start playback.");
+    if (isHls && video.canPlayType("application/vnd.apple.mpegurl")) {
+      video.src = url;
+    } else if (isHls) {
+      const ready = await ensureHlsEngine();
+      if (!isActive()) return;
+      if (!ready) {
+        fallbackToNextProvider("HLS playback is unavailable in this browser.");
+        return;
       }
-    }, 12000);
+      const hls = new window.Hls({
+        enableWorker: true, lowLatencyMode: false, startLevel: -1,
+        capLevelToPlayerSize: true, startFragPrefetch: true,
+        backBufferLength: 30, maxBufferLength: 30, maxMaxBufferLength: 60
+      });
+      state.hls = hls;
+      const recoveries = { network: 0, media: 0 };
+      hls.on(window.Hls.Events.ERROR, (_event, data) => {
+        if (!isActive() || state.hls !== hls || !data?.fatal) return;
+        if (data.type === window.Hls.ErrorTypes.NETWORK_ERROR && recoveries.network++ < 2) {
+          try { hls.startLoad(); return; } catch (_) {}
+        }
+        if (data.type === window.Hls.ErrorTypes.MEDIA_ERROR && recoveries.media++ < 1) {
+          try { hls.recoverMediaError(); return; } catch (_) {}
+        }
+        fallbackToNextProvider("The HLS source could not recover.");
+      });
+      hls.loadSource(url);
+      hls.attachMedia(video);
+    } else {
+      video.src = url;
+    }
+    if (!isActive()) return;
+    clearPlaybackTimer();
+    state.playbackWatchdog = window.setTimeout(() => {
+      if (isActive() && video.readyState < 2 && !video.ended) {
+        fallbackToNextProvider("This stream took too long to start.");
+      }
+    }, 14000);
     video.onloadedmetadata = () => {
-      const key = String(state.player.media.id);
+      if (!isActive()) return;
+      const key = String(player.media.id);
       const saved = store.history[key];
-      if (saved && Number(saved.episode) === Number(state.player.episode.number) && saved.position > 15 && video.duration > saved.position + 15) {
+      if (saved && Number(saved.episode) === Number(player.episode.number) && saved.position > 15 && video.duration > saved.position + 15) {
         video.currentTime = saved.position;
       }
       if (video.textTracks && video.textTracks.length) {
@@ -2508,12 +2587,12 @@
           });
         } catch (_) {}
       }
-      if (state.currentVideo !== url) return;
+      if (!isActive()) return;
       const playerUI = $("#video-ui");
       if (playerUI) { playerUI.hidden = false; video.controls = false; }
       updateVideoControls();
       video.play().catch(error => {
-        if (state.currentVideo !== url) return;
+        if (!isActive()) return;
         if (error?.name === "NotAllowedError") {
           if (overlay) {
             overlay.style.display = "grid";
@@ -2525,22 +2604,40 @@
       });
     };
     video.onplaying = () => {
-      if (state.currentVideo !== url) return;
-      if (state.playbackWatchdog) window.clearTimeout(state.playbackWatchdog);
-      state.playbackWatchdog = null;
+      if (!isActive()) return;
+      clearPlaybackTimer();
+      if (state.stallNoticeTimer) {
+        window.clearTimeout(state.stallNoticeTimer);
+        state.stallNoticeTimer = null;
+      }
       if (overlay) overlay.style.display = "none";
       updateVideoControls();
     };
+    video.oncanplay = () => {
+      if (isActive() && !video.paused && overlay) overlay.style.display = "none";
+    };
     video.onwaiting = () => {
-      if (state.currentVideo === url && !video.paused && overlay) {
-        overlay.style.display = "grid";
-        overlay.innerHTML = '<div class="player-mini-loader"></div><strong>Buffering…</strong>';
-      }
+      if (!isActive() || video.paused || video.seeking) return;
+      // Hide momentary rebuffer events; if playback truly stalls, fail over
+      // instead of leaving an indefinite blocking "Buffering…" screen.
+      if (state.stallNoticeTimer) window.clearTimeout(state.stallNoticeTimer);
+      state.stallNoticeTimer = window.setTimeout(() => {
+        if (!isActive() || video.paused || video.readyState >= 3) return;
+        if (overlay) {
+          overlay.style.display = "grid";
+          overlay.innerHTML = '<div class="player-mini-loader"></div><strong>Buffering…</strong>';
+        }
+        clearPlaybackTimer();
+        state.playbackWatchdog = window.setTimeout(() => {
+          if (isActive() && !video.paused && video.readyState < 3) {
+            fallbackToNextProvider("Buffering stalled for too long.");
+          }
+        }, 10000);
+      }, 650);
     };
     video.onerror = () => {
-      if (state.currentVideo !== url) return;
-      if (state.playbackWatchdog) window.clearTimeout(state.playbackWatchdog);
-      state.playbackWatchdog = null;
+      if (!isActive()) return;
+      clearPlaybackTimer();
       if (state.player && state.player.match) {
         fallbackToNextProvider("The browser could not play the returned video URL.");
       } else {
@@ -2548,6 +2645,7 @@
       }
     };
     video.ontimeupdate = () => {
+      if (!isActive()) return;
       updateVideoControls();
       savePlaybackProgress(video);
       const intro = state.player?.intro;
@@ -2557,8 +2655,13 @@
         video.currentTime = Number(intro.end);
       }
     };
-    video.onpause = () => { updateVideoControls(); savePlaybackProgress(video, false, true); };
+    video.onpause = () => {
+      if (!isActive()) return;
+      updateVideoControls();
+      savePlaybackProgress(video, false, true);
+    };
     video.onended = () => {
+      if (!isActive()) return;
       updateVideoControls();
       savePlaybackProgress(video, true, true);
       if (setting("showNextEpisodePrompt")) {
@@ -3321,6 +3424,10 @@
       state.player.streams = [];
       state.player.embeds = [];
       loadPlayerStreams(state.token);
+      return;
+    }
+    if (target.hasAttribute("data-next-stream")) {
+      fallbackToNextProvider("Requested another stream");
       return;
     }
     if (target.hasAttribute("data-stream")) {

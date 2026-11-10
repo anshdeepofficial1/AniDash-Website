@@ -29,12 +29,26 @@ const collection = Array.from({ length: 14 }, (_, i) => ({
 const imageSvg = '<svg xmlns="http://www.w3.org/2000/svg" width="640" height="800"><defs><linearGradient id="g" x1="0" x2="1" y1="0" y2="1"><stop stop-color="#63b69e"/><stop offset="1" stop-color="#255c47"/></linearGradient></defs><rect width="640" height="800" fill="url(#g)"/><circle cx="475" cy="222" r="180" fill="#d0ece0" opacity=".35"/><circle cx="100" cy="690" r="280" fill="#153c31" opacity=".4"/></svg>';
 
 let homeApiCalls = 0;
+let streamingRaceFixture = false;
+const shortTestClip = Buffer.from("GkXfo59ChoEBQveBAULygQRC84EIQoKEd2VibUKHgQJChYECGFOAZwEAAAAAAAHtEU2bdLpNu4tTq4QVSalmU6yBoU27i1OrhBZUrmtTrIHWTbuMU6uEElTDZ1OsggEjTbuMU6uEHFO7a1OsggHX7AEAAAAAAABZAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAVSalmsCrXsYMPQkBNgIxMYXZmNjEuNy4xMDNXQYxMYXZmNjEuNy4xMDNEiYhAj0AAAAAAABZUrmvIrgEAAAAAAAA/14EBc8WI9X2cxT/RySKcgQAitZyDdW5kiIEAhoVWX1ZQOIOBASPjg4Q7msoA4JCwgUC6gUCagQJVsIRVuYEBElTDZ/tzc59jwIBnyJlFo4dFTkNPREVSRIeMTGF2ZjYxLjcuMTAzc3PWY8CLY8WI9X2cxT/RySJnyKFFo4dFTkNPREVSRIeUTGF2YzYxLjE5LjEwMSBsaWJ2cHhnyKFFo4hEVVJBVElPTkSHkzAwOjAwOjAxLjAwMDAwMDAwMAAfQ7Z1r+eBAKOqgQAAgPACAJ0BKkAAQAAARwiFhYiZhIgCAgAGcDxCYAqyIPcwAP7/q1CAHFO7a5G7j7OBALeK94EB8YIBo/CBAw==", "base64");
 const server = createServer(async (req, res) => {
   try {
     const pathname = new URL(req.url, "http://localhost").pathname;
     if (pathname.startsWith("/api/")) {
       const url = new URL(req.url, "http://localhost");
       const action = url.searchParams.get("action");
+      if (streamingRaceFixture && action === "streams") {
+        const isDub = url.searchParams.get("category") === "dub";
+        const response = pathname === "/api/justanime" ? {
+          sources: [{ url:"https://fixture.anidash.test/sample.webm", type:"mp4", quality:"Auto", isDub }]
+        } : pathname === "/api/anikoto" ? {
+          embeds: [{ url:"https://embed.anidash.test/player", type:"embed", isEmbed:true, isDub }]
+        } : { error:"Stream temporarily unavailable" };
+        if (pathname === "/api/justanime") await new Promise(resolve => setTimeout(resolve, 850));
+        res.writeHead(pathname === "/api/hianime" ? 502 : 200, {"Content-Type":"application/json"});
+        res.end(JSON.stringify(response));
+        return;
+      }
       if (pathname === "/api/catalog") {
         const view = url.searchParams.get("view") || "home";
         if (view === "home") homeApiCalls += 1;
@@ -331,6 +345,54 @@ try {
   await navPage.goto(address + "/downloads", {waitUntil:"domcontentloaded"});
   await navPage.waitForURL("**/library", {timeout:10000});
   await navPage.close();
+  // A fast iframe must not preempt a slightly slower working direct stream.
+  // This is the regression that caused real HLS/MP4 links to lose at 180 ms.
+  streamingRaceFixture = true;
+  await context.route("https://fixture.anidash.test/**", route =>
+    route.fulfill({
+      status:200, contentType:"video/webm",
+      headers:{"access-control-allow-origin":"*", "accept-ranges":"bytes"},
+      body:shortTestClip
+    })
+  );
+  await context.route("https://embed.anidash.test/**", route =>
+    route.fulfill({status:200,contentType:"text/html",body:"<!doctype html><title>Embed fixture</title>"})
+  );
+  const streamingPage = await context.newPage();
+  streamingPage.on("pageerror", err => errors.push(err.message));
+  await streamingPage.goto(address + "/watch/21/2", {waitUntil:"domcontentloaded"});
+  await streamingPage.locator("#anime-video").waitFor({timeout:15000});
+  try {
+    await streamingPage.waitForFunction(() => {
+      const video = document.getElementById("anime-video");
+      return !!video && (video.currentSrc || video.getAttribute("src") || "").includes("fixture.anidash.test");
+    }, null, {timeout:12000});
+  } catch (error) {
+    console.log("Streaming race diagnostic", JSON.stringify(await streamingPage.evaluate(() => {
+      const video = document.getElementById("anime-video");
+      const embed = document.getElementById("anime-embed");
+      return {
+        src: video?.getAttribute("src"), currentSrc: video?.currentSrc,
+        videoError: video?.error?.code, readyState: video?.readyState, networkState: video?.networkState,
+        embedSrc: embed?.getAttribute("src"), embedHidden: embed?.hidden,
+        streamButtons: Array.from(document.querySelectorAll("[data-stream]")).map(x=>x.textContent),
+        overlay: document.getElementById("player-overlay")?.textContent,
+        status: document.getElementById("stream-status")?.textContent
+      };
+    })));
+    throw error;
+  }
+  const playbackStatus = await streamingPage.evaluate(() => ({
+    source: document.getElementById("anime-video").currentSrc,
+    embeddedHidden: document.getElementById("anime-embed").hidden,
+    optionCount: document.querySelectorAll("[data-stream]").length
+  }));
+  assert.ok(playbackStatus.source.includes("fixture.anidash.test"));
+  assert.equal(playbackStatus.embeddedHidden, true,
+    "Working direct video must win over faster unverified embed");
+  assert.ok(playbackStatus.optionCount >= 1);
+  await streamingPage.close();
+  streamingRaceFixture = false;
   assert.deepEqual(errors, [], "No uncaught browser page errors");
   console.log("Visual checks passed. Screenshots: " + artifacts);
   await context.close();
