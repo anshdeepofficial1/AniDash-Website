@@ -187,28 +187,63 @@
     window.setTimeout(() => el.remove(), 3200);
   }
 
+  // Public metadata requests share a queue, a short-lived catalogue cache and
+  // the same rate-limit cooldown. Returning Home does not refetch seven pages.
+  const collectionCache = new Map();
+  const collectionPending = new Map();
+  const gqlPending = new Map();
+  const COLLECTION_PREFIX = "anidash.catalog.page.v2.";
+  let gqlQueue = Promise.resolve();
+  let nextRequestAt = 0;
+  let rateLimitedUntil = 0;
+  const delay = ms => new Promise(resolve => window.setTimeout(resolve, ms));
+  function waitNotice(error) {
+    const remaining = Math.max(0, rateLimitedUntil - Date.now());
+    return error?.message || (remaining
+      ? "AniList is busy. Retry in " + Math.ceil(remaining / 1000) + " seconds."
+      : "Catalogue temporarily unavailable.");
+  }
   async function gql(query, variables) {
-    const controller = new AbortController();
-    const timeout = window.setTimeout(() => controller.abort(), 18000);
-    try {
-      const response = await fetch(API, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "Accept": "application/json" },
-        body: JSON.stringify({ query: query, variables: variables || {} }),
-        signal: controller.signal
-      });
-      const body = await response.json();
-      if (!response.ok || body.errors) {
-        const message = body.errors && body.errors[0] && body.errors[0].message;
-        throw new Error(message || "AniList is temporarily unavailable.");
+    const key = JSON.stringify([query, variables || {}]);
+    if (gqlPending.has(key)) return gqlPending.get(key);
+    const request = gqlQueue.then(async () => {
+      if (Date.now() < rateLimitedUntil) {
+        throw new Error("AniList is temporarily busy. Please retry shortly.");
       }
-      return body.data;
-    } catch (error) {
-      if (error.name === "AbortError") throw new Error("AniList request timed out. Please retry.");
-      throw error;
-    } finally {
-      window.clearTimeout(timeout);
-    }
+      await delay(Math.max(0, nextRequestAt - Date.now()));
+      nextRequestAt = Date.now() + 540;
+      const controller = new AbortController();
+      const timeout = window.setTimeout(() => controller.abort(), 14500);
+      try {
+        const response = await fetch(API, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Accept": "application/json" },
+          body: JSON.stringify({ query, variables: variables || {} }),
+          signal: controller.signal
+        });
+        const body = await response.json().catch(() => ({}));
+        if (response.status === 429) {
+          const header = Number(response.headers?.get?.("retry-after") || 0);
+          rateLimitedUntil = Date.now() + Math.min(90000,
+            Math.max(5000, Number.isFinite(header) ? header * 1000 : 30000));
+          throw new Error("AniList is receiving too many requests. Cached titles remain available.");
+        }
+        if (!response.ok || body.errors) {
+          const message = body.errors?.[0]?.message || "AniList is temporarily unavailable.";
+          throw new Error(message);
+        }
+        if (!body.data) throw new Error("AniList returned an empty response.");
+        return body.data;
+      } catch (error) {
+        if (error.name === "AbortError") throw new Error("AniList request timed out. Retry shortly.");
+        throw error;
+      } finally {
+        window.clearTimeout(timeout);
+      }
+    });
+    gqlQueue = request.catch(() => {});
+    gqlPending.set(key, request);
+    return request.finally(() => gqlPending.delete(key));
   }
 
   function pageQuery(sort, page, perPage, extra) {
@@ -217,8 +252,37 @@
   }
 
   async function getCollection(sort, page, perPage, extra) {
-    const data = await gql(pageQuery(sort, page || 1, perPage || 18, extra || ""), { page: page || 1, perPage: perPage || 18 });
-    return data.Page;
+    const key = JSON.stringify([sort, page || 1, perPage || 18, extra || ""]);
+    let entry = collectionCache.get(key);
+    if (!entry) {
+      try {
+        entry = JSON.parse(localStorage.getItem(COLLECTION_PREFIX + encodeURIComponent(key)) || "null");
+        if (entry?.data && Number.isFinite(entry.updatedAt)) collectionCache.set(key, entry);
+        else entry = null;
+      } catch (_) { entry = null; }
+    }
+    const age = entry ? Date.now() - entry.updatedAt : Infinity;
+    if (entry && age < 12 * 60_000) return entry.data;
+    if (collectionPending.has(key)) return collectionPending.get(key);
+    if (entry && age < 24 * 60 * 60_000 && Date.now() < rateLimitedUntil) return entry.data;
+    const pending = (async () => {
+      try {
+        const data = await gql(pageQuery(sort, page || 1, perPage || 18, extra || ""), {
+          page: page || 1, perPage: perPage || 18
+        });
+        if (!data?.Page || !Array.isArray(data.Page.media)) throw new Error("Catalogue data is incomplete.");
+        const fresh = { data: data.Page, updatedAt: Date.now() };
+        collectionCache.set(key, fresh);
+        try { localStorage.setItem(COLLECTION_PREFIX + encodeURIComponent(key), JSON.stringify(fresh)); }
+        catch (_) {}
+        return fresh.data;
+      } catch (error) {
+        if (entry && age < 24 * 60 * 60_000) return entry.data;
+        throw error;
+      }
+    })().finally(() => collectionPending.delete(key));
+    collectionPending.set(key, pending);
+    return pending;
   }
 
 
@@ -247,8 +311,14 @@
     return data.Page;
   }
 
-  function showLoading(message) {
-    $("#view").innerHTML = '<section class="loading-state"><div class="loader"></div><p>' + escapeHtml(message || "Loading…") + '</p></section>';
+  function showLoading(_message) {
+    const view = $("#view");
+    if (!view || view.querySelector(".home-hero, .anime-grid, .library-tabs, .native-home-header")) return;
+    view.innerHTML = '<section class="page-skeleton" aria-label="Loading content" role="status">' +
+      '<div class="skeleton-line medium"></div><div class="skeleton-hero"></div>' +
+      '<div class="skeleton-line short"></div><div class="skeleton-grid">' +
+      Array.from({ length: 6 }, () => '<span class="skeleton-poster"></span>').join("") +
+      '</div></section>';
   }
 
   function card(media, type = "ANIME") {
@@ -2618,7 +2688,9 @@
   }
 
   function navigate(path) {
-    location.hash = "#" + path;
+    const next = "#" + path;
+    if (location.hash === next) { void route(); return; }
+    location.hash = next;
   }
 
   async function submitSearch(term) {
