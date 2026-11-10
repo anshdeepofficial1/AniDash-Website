@@ -2629,7 +2629,7 @@
 
   document.addEventListener("click", async event => {
     const target = event.target.closest("button,a,article");
-    if (event.target.matches("[data-close-modal]")) { closeModal(); return; }
+    if (event.target.matches?.("[data-close-modal]")) { closeModal(); return; }
     if (!target) return;
     if (target.hasAttribute("data-player-toggle")) {
       const video = $("#anime-video");
