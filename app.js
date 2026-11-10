@@ -25,8 +25,7 @@
         libraryStatuses: raw.libraryStatuses || {},
         localFavorites: raw.localFavorites || {},
         malStatuses: raw.malStatuses || {},
-        manualStreams: raw.manualStreams || {},
-        providerManifest: raw.providerManifest || null,
+                providerManifest: raw.providerManifest || null,
         adultContent: raw.adultContent === true,
         preferences: raw.preferences && typeof raw.preferences === "object" ? raw.preferences : {},
         hiddenCloudEntries: raw.hiddenCloudEntries || {},
@@ -34,7 +33,7 @@
       };
     } catch (_) {
       return { watchlist: {}, history: {}, mangaList: {}, libraryStatuses: {},
-        localFavorites: {}, malStatuses: {}, manualStreams: {}, providerManifest: null, adultContent: false,
+        localFavorites: {}, malStatuses: {}, providerManifest: null, adultContent: false,
         preferences: {}, hiddenCloudEntries: {}, updatedAt: 0 };
     }
   }
@@ -1196,24 +1195,8 @@
     const genres = (media.genres || []).slice(0, 10);
     const watched = isInWatchlist(media.id);
     const matches = state.detailMatches.filter(match => !match.error);
-    const sourceInfo = matches.some(match => match.provisional)
-      ? (media.episodes || media.nextAiringEpisode?.episode
-        ? "Quick access from anime metadata · Streaming checked on Play"
-        : "Quick-access episode numbers (unverified) · Streaming checked on Play")
-      : matches.length ? matches.map(match => match.provider.name + (match.mapped ? " (episode map)" : "")).join(", ") : "Built-in sources checked";
+    const sourceInfo = "Episode numbers come from the anime catalogue. Playback is checked when an episode opens.";
     const episodes = state.detailEpisodes || [];
-    const providerRows = BUILTIN_PROVIDERS.map(provider => {
-      const result = state.detailMatches.find(match =>
-        match && match.provider && match.provider.id === provider.id && match.episodesReady && Array.isArray(match.episodes)
-      ) || state.detailMatches.find(match => match && match.provider && match.provider.id === provider.id);
-      const available = result && !result.error && result.episodesReady === true;
-      const status = available ? (result.provisional ? "Ready to try" : result.mapped ? "Episode map ready" : "Title matched") :
-        result && result.error && result.error.toLowerCase().includes("no confident title match") ? "No title match" :
-        result && result.error ? "Temporarily unavailable" : "Checking";
-      const detail = available ? (result.provisional ? "Streaming is checked when you press Play" : result.mapped ? "AniList episode mapping fallback" : "Episode source found") :
-        result && result.error ? result.error : "Source check has not completed";
-      return '<div class="builtin-source-row"><div><strong>' + escapeHtml(provider.name) + '</strong><span>' + escapeHtml(provider.description) + '</span></div><div class="builtin-source-status ' + (available ? "is-ready" : "is-muted") + '"><b>' + escapeHtml(status) + '</b><small>' + escapeHtml(detail) + '</small></div></div>';
-    }).join("");
     const relationItems = media.relations && media.relations.edges ? media.relations.edges.filter(edge => edge.node && edge.node.type === "ANIME").slice(0, 6) : [];
     const malLink = media.idMal ? '<a href="https://myanimelist.net/anime/' + media.idMal + '" target="_blank" rel="noopener">MyAnimeList ↗</a>' : "Not mapped";
     $("#view").innerHTML =
@@ -1225,18 +1208,17 @@
           '<p class="details-description">' + escapeHtml(cleanText(media.description) || "No synopsis is available for this title yet.") + '</p>' +
           '<div class="button-row"><button class="btn btn-primary" data-play-first="' + media.id + '" ' + (episodes.length ? "" : "disabled") + '>▶ Start watching</button><button class="btn btn-secondary" data-watchlist="' + media.id + '">' + (watched ? "✓ In watchlist" : "♡ Add to watchlist") + '</button></div>' +
         '</div></div></div>' +
-      '<div class="details-layout"><section class="content-panel"><div class="section-heading"><div><h2 class="panel-title">Episodes</h2><p class="section-note">' + (matches.length ? "Source: " + escapeHtml(sourceInfo) : "AniDash checks all three built-in providers and uses AniList episode mapping as a fallback.") + '</p></div><span class="watchlist-badge">' + episodes.length + ' listed</span></div>' +
-        '<div class="episode-toolbar"><select id="episode-source" class="select-control">' + (matches.length ? matches.map((match, index) => '<option value="' + index + '"' + (match === state.selectedMatch ? " selected" : "") + '>' + escapeHtml(match.provider.name + (match.provisional ? " (quick access)" : match.mapped ? " (episode map)" : "")) + '</option>').join("") : '<option value="">No episode source available</option>') + '</select><input id="episode-filter" class="input-control" style="max-width:180px" placeholder="Search episodes…"><input id="episode-jump" class="input-control episode-jump-input" type="number" min="1" placeholder="EP #"><button class="btn btn-quiet" data-episode-go="detail">Go</button><button class="btn btn-quiet" data-refresh-sources>Retry sources</button></div>' +
+      '<div class="details-layout"><section class="content-panel"><div class="section-heading"><div><h2 class="panel-title">Episodes</h2><p class="section-note">' + (matches.length ? escapeHtml(sourceInfo) : "Open an episode to check available streams.") + '</p></div><span class="watchlist-badge">' + episodes.length + ' listed</span></div>' +
+        '<div class="episode-toolbar"><input id="episode-filter" class="input-control" style="max-width:180px" placeholder="Search episodes…"><input id="episode-jump" class="input-control episode-jump-input" type="number" min="1" placeholder="EP #"><button class="btn btn-quiet" data-episode-go="detail">Go</button><button class="btn btn-quiet" data-refresh-sources>Retry sources</button></div>' +
         '<div id="episode-list" class="episode-list"></div><div id="episode-pagination"></div>' +
-        (!episodes.length ? '<div class="notice" style="margin-top:14px">No episode list was returned. Check the source status below and retry when an upstream service is available.</div>' : '') +
-        '<div class="builtin-sources-panel"><div class="section-heading"><div><h3 class="panel-title">Built-in sources</h3><p class="section-note">These three sources are included with AniDash. No extensions are needed.</p></div></div>' + providerRows + '</div>' +
-      '</section><aside class="content-panel"><h2 class="panel-title">About this anime</h2><div class="info-list">' +
+        (!episodes.length ? '<div class="notice" style="margin-top:14px">No episodes are listed yet. Refresh the episode list.</div>' : '') +
+        '</section><aside class="content-panel"><h2 class="panel-title">About this anime</h2><div class="info-list">' +
         infoRow("Genres", genres.length ? genres.join(", ") : "Not listed") +
         infoRow("Season", [media.season, media.seasonYear].filter(Boolean).join(" ") || "Not listed") +
         infoRow("Studios", media.studios && media.studios.nodes.length ? media.studios.nodes.map(studio => studio.name).join(", ") : "Not listed") +
         infoRow("MyAnimeList", malLink) +
         infoRow("AniList", '<a href="https://anilist.co/anime/' + media.id + '" target="_blank" rel="noopener">Open AniList ↗</a>') +
-        infoRow("Sources", sourceInfo) +
+        infoRow("Playback", "Streams are checked when an episode opens") +
       '</div></aside></div>' +
       (relationItems.length ? '<section class="section" style="margin-top:28px"><div class="section-heading"><div><h2 class="section-title">Related anime</h2></div></div><div class="anime-grid">' + relationItems.map(edge => relationCard(edge.node)).join("") + '</div></section>' : '');
     renderEpisodeBrowser();
@@ -1463,7 +1445,7 @@
       category: setting("preferredAudio") === "sub" ? "sub" : "dub",
       intro: null,
       outro: null,
-      direct: store.manualStreams[String(state.detail.id) + ":" + String(number)] || ""
+      requestId: 0
     };
     location.hash = "#/watch/" + state.detail.id + "/" + number;
   }
@@ -1502,14 +1484,13 @@
       media, episode, match: state.selectedMatch, streams: [], embeds: [],
       availableProviders: [], servers: [], tracks: [], selectedServer: "auto",
       category: setting("preferredAudio") === "sub" ? "sub" : "dub", intro: null, outro: null, requestId: 0,
-      direct: store.manualStreams[String(id) + ":" + String(number)] || ""
+      requestId: 0
     };
     const changedEpisode = Number(player.lastRenderedEpisode) !== Number(episode.number);
     player.lastRenderedEpisode = Number(episode.number);
     state.player = player;
     player.media = media;
     player.episode = episode;
-    player.direct = store.manualStreams[String(id) + ":" + String(number)] || "";
     player.needsProviderRetry = false;
     if (changedEpisode) {
       player.failedProviders = [];
@@ -1551,11 +1532,7 @@
     }
     // Paint the player before any provider call; discovery happens independently.
     paintPlayer();
-    if (player.direct) {
-      attachStream(player.direct, { quality: "Direct link", type: /\.m3u8(\?|$)/i.test(player.direct) ? "hls" : "mp4" }, []);
-    } else {
-      void loadPlayerStreams(token);
-    }
+    void loadPlayerStreams(token);
 
     if (!preparedSourceCache.has(String(media.id))) {
       getPreparedMediaSources(media).then(prepared => {
@@ -1583,7 +1560,7 @@
     const hasNext = episodeIndex >= 0 && episodeIndex < state.detailEpisodes.length - 1;
     $("#view").innerHTML = '<div class="player-page"><div class="player-topline"><button class="back-button" data-anime="' + media.id + '" aria-label="Back to anime">←</button><div><h1>' + escapeHtml(titleOf(media)) + '</h1><p>Episode ' + escapeHtml(episode.number) + ' · ' + escapeHtml(episode.title) + '</p></div></div>' +
       '<div class="player-layout"><section><div class="video-frame"><video id="anime-video" controls playsinline webkit-playsinline preload="metadata"></video><iframe id="anime-embed" title="Episode stream" allow="autoplay; fullscreen; picture-in-picture; encrypted-media" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen hidden></iframe><div class="player-overlay" id="player-overlay" role="status"><div class="player-mini-loader"></div><strong>Opening episode…</strong></div></div>' +
-      '<div class="player-under"><div><h2>' + escapeHtml(episode.title) + '</h2><p>' + escapeHtml(titleOf(media)) + ' · Episode ' + escapeHtml(episode.number) + '</p></div><div class="player-controls"><button class="btn btn-quiet" data-prev ' + (hasPrev ? "" : "disabled") + '>← Previous</button><button class="btn btn-quiet" data-next ' + (hasNext ? "" : "disabled") + '>Next →</button><button class="btn btn-secondary" data-open-direct>Paste stream link</button></div></div>' +
+      '<div class="player-under"><div><h2>' + escapeHtml(episode.title) + '</h2><p>' + escapeHtml(titleOf(media)) + ' · Episode ' + escapeHtml(episode.number) + '</p></div><div class="player-controls"><button class="btn btn-quiet" data-prev ' + (hasPrev ? "" : "disabled") + '>← Previous</button><button class="btn btn-quiet" data-next ' + (hasNext ? "" : "disabled") + '>Next →</button></div></div>' +
       '<div class="button-row" style="margin-top:14px" id="skip-buttons"></div></section>' +
       '<aside class="player-sidebar"><div class="player-panel"><h3>Streaming source</h3><div class="source-row" id="provider-pills"></div><div style="height:12px"></div><h3>Audio & server</h3><div class="source-row" id="category-pills"><button class="source-pill' + (player.category === "sub" ? " active" : "") + '" data-category="sub">SUB</button><button class="source-pill' + (player.category !== "sub" ? " active" : "") + '" data-category="dub">DUB · ENGLISH</button></div><div style="height:9px"></div><div class="source-row" id="server-pills"><span class="form-help">Loading built-in source servers…</span></div><div style="height:12px"></div><div class="source-row" id="quality-pills"></div></div>' +
       '<div class="player-panel"><h3>Episode list</h3><div class="player-episode-list">' + playerEpisodeItems() + '</div></div>' +
@@ -1854,7 +1831,7 @@
     overlay.style.display = "grid";
     overlay.classList.toggle("has-error", Boolean(showAction));
     overlay.innerHTML = showAction
-      ? '<div class="player-error-symbol">!</div><strong>' + escapeHtml(title) + '</strong><p>' + escapeHtml(description) + '</p><div class="player-error-actions"><button class="btn btn-primary" data-retry-sources>Retry sources</button><button class="btn btn-secondary" data-open-direct>Paste stream link</button></div>'
+      ? '<div class="player-error-symbol">!</div><strong>' + escapeHtml(title) + '</strong><p>' + escapeHtml(description) + '</p><div class="player-error-actions"><button class="btn btn-primary" data-retry-sources>Retry sources</button></div>'
       : '<div class="player-mini-loader"></div><strong>Opening episode…</strong>';
   }
 
@@ -2354,14 +2331,6 @@
       ).join("") + '</div><div class="notice" style="margin-top:14px">A source can occasionally be unavailable when its upstream website or API is down. AniDash reports that failure instead of pretending a stream is ready.</div><div class="modal-actions"><button class="btn btn-primary" data-close>Done</button></div>');
   }
 
-  function openDirectModal() {
-    const current = state.player && state.player.direct || "";
-    openModal('<div class="modal-head"><div><div class="eyebrow">MANUAL SOURCE</div><h2>Paste a stream link</h2><p>Use an MP4 or HLS (.m3u8) URL that you own or are authorised to stream. The browser must be able to access it from this site.</p></div><button class="close-modal" data-close>×</button></div>' +
-      '<div class="form-field"><label for="direct-url">Video URL</label><input class="input-control" id="direct-url" type="url" placeholder="https://media.example/video.m3u8" value="' + escapeHtml(current) + '"></div>' +
-      '<div class="form-field"><label for="direct-subtitle">Optional English subtitle URL (.vtt)</label><input class="input-control" id="direct-subtitle" type="url" placeholder="https://media.example/subtitles/en.vtt"></div>' +
-      '<div class="modal-actions"><button class="btn btn-quiet" data-close>Cancel</button><button class="btn btn-primary" data-save-direct>Play stream</button></div>');
-  }
-
   function openInstallGuide() {
     const ua = navigator.userAgent || "";
     const ios = /iPhone|iPad|iPod/i.test(ua);
@@ -2640,7 +2609,6 @@
       }
       return;
     }
-    if (target.hasAttribute("data-open-direct")) { openDirectModal(); return; }
     if (target.hasAttribute("data-install")) { openInstallGuide(); return; }
     if (target.hasAttribute("data-close")) { closeModal(); return; }
     if (target.hasAttribute("data-play-first")) {
@@ -2663,7 +2631,6 @@
         const oldVideo = $("#anime-video");
         if (oldVideo) { savePlaybackProgress(oldVideo, false, true); oldVideo.pause(); }
         state.player.episode = item;
-        state.player.direct = store.manualStreams[String(state.player.media.id) + ":" + String(item.number)] || "";
         navigate("/watch/" + state.player.media.id + "/" + item.number);
       }
       return;
@@ -2676,7 +2643,6 @@
         const oldVideo = $("#anime-video");
         if (oldVideo) { savePlaybackProgress(oldVideo, false, true); oldVideo.pause(); }
         state.player.episode = item;
-        state.player.direct = store.manualStreams[String(state.player.media.id) + ":" + String(item.number)] || "";
         navigate("/watch/" + state.player.media.id + "/" + item.number);
       }
       return;
@@ -2693,7 +2659,7 @@
         state.episodeFilter = "";
         state.playerEpisodePage = 1;
         state.playerEpisodeFilter = "";
-        state.player = { media: media, episode: { id: String(item.episode), number: item.episode, title: item.episodeTitle || "Episode " + item.episode }, match: null, streams: [], embeds: [], availableProviders: [], servers: [], tracks: [], selectedServer: "default", category: "dub", direct: store.manualStreams[String(media.id) + ":" + String(item.episode)] || "" };
+        state.player = { media: media, episode: { id: String(item.episode), number: item.episode, title: item.episodeTitle || "Episode " + item.episode }, match: null, streams: [], embeds: [], availableProviders: [], servers: [], tracks: [], selectedServer: "default", category: "dub" };
         navigate("/watch/" + media.id + "/" + item.episode);
       }
       return;
@@ -2787,28 +2753,6 @@
         video.currentTime = Number(range.end);
         video.play().catch(() => {});
       }
-      return;
-    }
-    if (target.hasAttribute("data-save-direct")) {
-      const url = String($("#direct-url").value || "").trim();
-      try {
-        const parsed = new URL(url);
-        if (parsed.protocol !== "https:" && parsed.hostname !== "localhost") throw new Error("Use a valid HTTPS URL.");
-        if (!state.player) throw new Error("Open an episode first.");
-        const key = String(state.player.media.id) + ":" + String(state.player.episode.number);
-        store.manualStreams[key] = url;
-        persist();
-        state.player.direct = url;
-        const subtitle = String($("#direct-subtitle").value || "").trim();
-        const tracks = subtitle ? [{ url: subtitle, lang: "English", type: "subtitles" }] : [];
-        closeModal();
-        const video = $("#anime-video");
-        if (video) {
-          state.player.tracks = tracks;
-          attachStream(url, { quality: "Direct link", type: /\.m3u8(\?|$)/i.test(url) ? "hls" : "mp4" }, tracks);
-        }
-        toast("Stream link saved for this episode.");
-      } catch (error) { toast(error.message); }
       return;
     }
     if (target.hasAttribute("data-clear-history")) {
@@ -2915,9 +2859,6 @@
     if (event.target.id === "discover-sort") {
       state.discoverSort = event.target.value;
       renderDiscover();
-    }
-    if (event.target.id === "episode-source") {
-      selectDetailProvider(event.target.value);
     }
   });
 
