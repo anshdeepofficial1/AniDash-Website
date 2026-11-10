@@ -34,7 +34,12 @@ const server = createServer(async (req, res) => {
     if (pathname.startsWith("/api/")) {
       const url = new URL(req.url, "http://localhost");
       const action = url.searchParams.get("action");
-      const payload = action === "search" ? { results: [] }
+      const payload = pathname === "/api/news" ? { items: [{
+          title: "Anime industry updates",
+          url: "https://www.animenewsnetwork.com/",
+          date: "2026-11-10T08:00:00Z", imageUrl: "", excerpt: "Test-only news fixture"
+        }] }
+        : action === "search" ? { results: [] }
         : action === "episodes" ? { episodes: Array.from({ length: 12 }, (_, i) => ({ number: i + 1, id: String(i + 1) })) }
         : action === "streams" ? { sources: [{ url: "https://example.com/test-video.mp4", type: "mp4", isDub: true, quality: "Auto" }] }
         : { episodes: [] };
@@ -82,6 +87,8 @@ try {
   );
   await page.goto(address + "/#/home", { waitUntil: "domcontentloaded" });
   await page.locator(".home-hero").waitFor({ timeout: 15000 });
+  assert.equal(await page.locator(".native-home-header").count(), 1, "Native-profile header must exist");
+  await page.locator("#home-news-panel .news-item").waitFor({timeout:15000});
   await page.screenshot({ path: path.join(artifacts, "mobile-home.png") });
   assert.equal(await page.locator("#spotlight-count").textContent(), "1 / 10");
   await page.locator('[data-spotlight-next]').click();
@@ -147,6 +154,19 @@ try {
   await page.getByText("Continue with MyAnimeList").waitFor({ timeout: 15000 });
   assert.equal(await page.locator('input[type="password"]').count(), 0, "No provider password field");
   await page.goto(address + "/#/settings", { waitUntil: "domcontentloaded" });
+  await page.locator(".settings-screen [data-install]").click();
+  await page.locator(".modal-backdrop").waitFor({ timeout: 4000 });
+  await page.locator(".modal-card .close-modal").click();
+  assert.equal(await page.locator(".modal-backdrop").count(), 0, "X must close install guide");
+  await page.locator(".settings-screen [data-install]").click();
+  await page.locator(".modal-actions [data-close]").click();
+  assert.equal(await page.locator(".modal-backdrop").count(), 0, "Got it must close install guide");
+  await page.locator('[data-setting="showMangaTab"]').check();
+  assert.equal(await page.locator('.mobile-dock [data-optional-manga]').isVisible(), true,
+    "Optional Manga nav must respond to setting");
+  await page.locator('[data-setting="showMangaTab"]').uncheck();
+  assert.equal(await page.locator('.mobile-dock [data-optional-manga]').isVisible(), false,
+    "Disabled Manga nav must be hidden");
   await page.locator('[data-setting="preferredAudio"]').selectOption("sub");
   await page.locator('[data-setting="themeMode"]').selectOption("dark");
   assert.equal(await page.locator('body').getAttribute("data-theme"), "dark");
@@ -175,6 +195,10 @@ try {
   desktop.on("pageerror", err => errors.push(err.message));
   await desktop.goto(address + "/#/home", { waitUntil: "domcontentloaded" });
   await desktop.locator(".home-hero").waitFor({ timeout: 15000 });
+  const firstHeight = (await desktop.locator(".spotlight-shell").boundingBox()).height;
+  await desktop.locator("[data-spotlight-next]").click();
+  const secondHeight = (await desktop.locator(".spotlight-shell").boundingBox()).height;
+  assert.ok(Math.abs(firstHeight - secondHeight) < 1, "Desktop carousel must not resize on slide change");
   await desktop.screenshot({ path: path.join(artifacts, "desktop-home.png") });
   const dims = await desktop.evaluate(() => ({
     documentWidth: document.documentElement.scrollWidth,
@@ -182,6 +206,15 @@ try {
   }));
   assert.ok(dims.documentWidth <= dims.viewportWidth + 1, "Desktop must not scroll horizontally");
 
+  const tablet = await context.newPage();
+  await tablet.setViewportSize({ width: 820, height: 1180 });
+  tablet.on("pageerror", err => errors.push(err.message));
+  await tablet.goto(address + "/#/home", { waitUntil:"domcontentloaded" });
+  await tablet.locator(".home-hero").waitFor({ timeout:15000 });
+  const tabletDock = await tablet.locator(".mobile-dock").boundingBox();
+  assert.ok(tabletDock && tabletDock.x >= 0 && tabletDock.x + tabletDock.width <= 820,
+    "iPad-size viewport must have an on-screen app dock");
+  await tablet.screenshot({path: path.join(artifacts, "tablet-home.png")});
   assert.deepEqual(errors, [], "No uncaught browser page errors");
   console.log("Visual checks passed. Screenshots: " + artifacts);
   await context.close();
