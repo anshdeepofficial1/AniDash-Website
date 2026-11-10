@@ -38,10 +38,11 @@ const server = createServer(async (req, res) => {
       const url = new URL(req.url, "http://localhost");
       const action = url.searchParams.get("action");
       if (streamingRaceFixture && action === "streams") {
+        const isDub = url.searchParams.get("category") === "dub";
         const response = pathname === "/api/justanime" ? {
-          sources: [{ url:"https://fixture.anidash.test/sample.webm", type:"mp4", quality:"Auto", isDub:true }]
+          sources: [{ url:"https://fixture.anidash.test/sample.webm", type:"mp4", quality:"Auto", isDub }]
         } : pathname === "/api/anikoto" ? {
-          embeds: [{ url:"https://embed.anidash.test/player", type:"embed", isEmbed:true, isDub:true }]
+          embeds: [{ url:"https://embed.anidash.test/player", type:"embed", isEmbed:true, isDub }]
         } : { error:"Stream temporarily unavailable" };
         if (pathname === "/api/justanime") await new Promise(resolve => setTimeout(resolve, 850));
         res.writeHead(pathname === "/api/hianime" ? 502 : 200, {"Content-Type":"application/json"});
