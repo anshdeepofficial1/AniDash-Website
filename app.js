@@ -25,7 +25,7 @@
         libraryStatuses: raw.libraryStatuses || {},
         localFavorites: raw.localFavorites || {},
         malStatuses: raw.malStatuses || {},
-                providerManifest: raw.providerManifest || null,
+        providerManifest: raw.providerManifest || null,
         adultContent: raw.adultContent === true,
         preferences: raw.preferences && typeof raw.preferences === "object" ? raw.preferences : {},
         hiddenCloudEntries: raw.hiddenCloudEntries || {},
@@ -43,6 +43,7 @@
     themeMode: "light", preferredAudio: "dub", defaultQuality: "Auto",
     autoEnableSubtitles: true, autoSkipIntro: false, showNextEpisodePrompt: true,
     episodeViewMode: "list", preferredSource: "auto",
+    showMangaTab: false, showNewsSection: true, showNewsNotifications: true,
     trackProgress: true
   };
   store.preferences = { ...DEFAULT_PREFERENCES, ...store.preferences };
@@ -54,6 +55,10 @@
     document.body.dataset.theme = themeMode === "dark" || (themeMode === "system" && systemDark)
       ? "dark" : "light";
     document.body.dataset.episodeLayout = setting("episodeViewMode") || "list";
+    document.body.dataset.mangaNav = setting("showMangaTab") ? "true" : "false";
+    $$('[data-optional-manga]').forEach(item => { item.hidden = !setting("showMangaTab"); });
+    const themeMeta = document.querySelector('meta[name="theme-color"]');
+    if (themeMeta) themeMeta.content = document.body.dataset.theme === "dark" ? "#101512" : "#f4f8f5";
   }
   applyPreferences();
   const state = {
@@ -80,7 +85,9 @@
     progressTimer: 0,
     spotlight: [], spotlightIndex: 0, spotlightTimer: null,
     malEntries: [], libraryTab: "CURRENT", cloudSyncing: false,
-    mangaDetail: null, lastCloudProgressSync: new Map()
+    mangaDetail: null, lastCloudProgressSync: new Map(),
+    news: [], newsFetched: false, newsPending: null, newsError: "",
+    notificationRead: {}, lastInfoRefresh: 0
   };
 
   const escapeHtml = value => String(value == null ? "" : value).replace(/[&<>"']/g, char => ({
@@ -92,7 +99,20 @@
   const mediaYear = media => media && (media.seasonYear || (media.startDate && media.startDate.year)) || "";
   const imageOf = media => media && media.coverImage && (media.coverImage.extraLarge || media.coverImage.large || media.coverImage.medium) || "";
   const slug = value => String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-  const UI_ICON_NAMES = new Set(["home","compass","search","manga","library","user","settings",
+  const hhmmss = value => {
+    const total = Math.max(0, Math.floor(Number(value) || 0));
+    const seconds = String(total % 60).padStart(2, "0");
+    const minutes = Math.floor(total / 60);
+    return minutes >= 60
+      ? Math.floor(minutes / 60) + ":" + String(minutes % 60).padStart(2, "0") + ":" + seconds
+      : String(minutes).padStart(2, "0") + ":" + seconds;
+  };
+  const progressCaption = entry => {
+    if (!entry || Number(entry.position || 0) <= 0) return "Resume episode " + (entry?.episode || 1);
+    const played = hhmmss(entry.position), duration = Number(entry.duration || 0);
+    return duration > entry.position ? "Resume at " + played + " / " + hhmmss(duration) : "Resume at " + played;
+  };
+  const UI_ICON_NAMES = new Set(["home","compass","search","manga","library","user","settings","news","bell","clock","expand","pause","volume",
     "download","play","bookmark","chevron-right","chevron-left","chevron-down","heart","star",
     "refresh","sliders","calendar","filter","history","check","info","shield","eye","cloud"]);
   function uiIcon(name) {
@@ -252,7 +272,7 @@
       '<div class="card-title">' + escapeHtml(titleOf(media)) + '</div>' +
       '<p class="card-subtitle">' + escapeHtml([mediaYear(media), episodes].filter(Boolean).join(" · ")) + '</p>' +
       (progress ? '<div class="card-progress"><span style="width:' + pct + '%"></span></div><div class="card-resume">Episode ' +
-        escapeHtml(progress.episode || 1) + (progress.position > 0 ? " · " + Math.floor(progress.position / 60) + "m" : "") +
+        escapeHtml(progress.episode || 1) + (progress.position > 0 ? " · " + hhmmss(progress.position) : "") +
         '</div>' : '') +
     '</article>';
   }
@@ -290,6 +310,7 @@
           '<div class="poster-wrap">' + (poster ? '<img loading="lazy" src="' + escapeHtml(poster) + '" alt="">' : '<div class="poster-fallback">' + escapeHtml(titleOf(media)) + '</div>') +
           '<span class="poster-score">EP ' + escapeHtml(item.episode || 1) + '</span><span class="resume-play">▶</span></div>' +
           '<div class="card-title">' + escapeHtml(titleOf(media)) + '</div><p class="card-subtitle">' + escapeHtml(item.episodeTitle || ("Episode " + (item.episode || 1))) + '</p>' +
+          '<p class="resume-timestamp">' + escapeHtml(progressCaption(item)) + '</p>' +
           '<div class="card-progress"><span style="width:' + pct + '%"></span></div></article>';
       }).join("") + '</div></section>';
   }
@@ -299,6 +320,120 @@
       (subtitle ? '<p class="page-subtitle">' + escapeHtml(subtitle) + '</p>' : '') + '</div>' + (extra || '') + '</div>';
   }
 
+
+
+  const newsKey = "anidash.news-read.v1";
+  try { state.notificationRead = JSON.parse(localStorage.getItem(newsKey) || "{}") || {}; } catch (_) { state.notificationRead = {}; }
+  const newsId = item => String(item?.url || "");
+  const isUnread = item => !state.notificationRead[newsId(item)];
+  function newsDate(value) {
+    const date = new Date(value || 0);
+    return Number.isFinite(date.getTime())
+      ? date.toLocaleDateString(undefined, { month: "short", day: "numeric" })
+      : "";
+  }
+  function newsItemsMarkup(items, compact = false) {
+    if (!items.length) return '<p class="news-empty">No headlines available at the moment.</p>';
+    return items.map((item, i) => {
+      const index = state.news.indexOf(item);
+      const image = /^https:\/\//i.test(item.imageUrl || "") ? item.imageUrl : "";
+      return '<button class="news-item' + (compact ? " compact" : "") + '" data-open-news="' + index +
+        '" aria-label="Read: ' + escapeHtml(item.title) + '">' +
+        (image ? '<img src="' + escapeHtml(image) + '" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.hidden=true">' : '<span class="news-art">' + uiIcon("news") + '</span>') +
+        '<span class="news-copy"><strong>' + escapeHtml(item.title) + '</strong><span>' +
+        escapeHtml(newsDate(item.date)) + ' · Anime News Network</span></span>' +
+        (isUnread(item) ? '<span class="news-unread-dot" aria-label="Unread"></span>' : '') + '</button>';
+    }).join("");
+  }
+  function newsPreview() {
+    if (!setting("showNewsSection")) return "";
+    return '<section class="section news-section"><div class="section-heading"><h2 class="section-title">Latest news</h2>' +
+      '<button class="section-link" data-route="/news">View all ' + uiIcon("chevron-right") + '</button></div>' +
+      '<div class="news-scroller" id="home-news-panel">' +
+      (state.news.length ? newsItemsMarkup(state.news.slice(0, 7), true) :
+      state.newsError ? '<p class="news-empty">News is temporarily unavailable.</p>' :
+      '<p class="news-empty">Checking anime headlines…</p>') + '</div></section>';
+  }
+  function unreadNewsCount() {
+    return setting("showNewsNotifications") ? state.news.filter(isUnread).length : 0;
+  }
+  function updateNewsBadge() {
+    const count = unreadNewsCount();
+    $$("[data-news-badge]").forEach(el => {
+      el.textContent = count > 9 ? "9+" : String(count);
+      el.hidden = count === 0;
+    });
+  }
+  async function loadNews(force = false) {
+    if (state.newsPending) return state.newsPending;
+    if (state.newsFetched && !force) return state.news;
+    state.newsPending = (async () => {
+      try {
+        const response = await fetch("/api/news", { headers: { Accept: "application/json" }, cache: "default" });
+        if (!response.ok) throw new Error("News unavailable");
+        const payload = await response.json();
+        if (!Array.isArray(payload.items)) throw new Error("Invalid news feed");
+        state.news = payload.items.filter(item => item && item.title && /^https:\/\//i.test(item.url || "")).slice(0, 30);
+        state.newsFetched = true;
+        state.newsError = "";
+      } catch (error) {
+        state.newsError = error?.message || "News unavailable";
+      } finally {
+        state.newsPending = null;
+      }
+      const panel = $("#home-news-panel");
+      if (panel) panel.innerHTML = state.news.length ? newsItemsMarkup(state.news.slice(0, 7), true) :
+        '<p class="news-empty">News is temporarily unavailable.</p>';
+      updateNewsBadge();
+      if (state.route === "/news") renderNews();
+      if (state.route === "/notifications") renderNotifications();
+      return state.news;
+    })();
+    return state.newsPending;
+  }
+  function markNewsRead(item) {
+    if (!item || !item.url) return;
+    state.notificationRead[newsId(item)] = true;
+    try { localStorage.setItem(newsKey, JSON.stringify(state.notificationRead)); } catch (_) {}
+    updateNewsBadge();
+  }
+  function renderNews() {
+    $("#view").innerHTML = pageHead("", "Anime news", "Latest published headlines from Anime News Network") +
+      '<div class="news-list">' + (state.news.length ? newsItemsMarkup(state.news) :
+      '<div class="empty-state"><h3>No headlines loaded</h3><p>' +
+      escapeHtml(state.newsError || "Checking for articles.") +
+      '</p><button class="btn btn-primary" data-refresh-news>Refresh news</button></div>') + '</div>';
+    void loadNews();
+  }
+  function renderNotifications() {
+    const rows = state.news;
+    $("#view").innerHTML = pageHead("", "Notifications", "In-app anime news alerts on this device") +
+      '<div class="notification-toolbar"><span>' + unreadNewsCount() + ' unread</span>' +
+      '<button class="btn btn-quiet" data-read-all-news ' + (!rows.length ? "disabled" : "") + '>Mark all read</button></div>' +
+      (setting("showNewsNotifications") ?
+        '<div class="news-list">' + (rows.length ? newsItemsMarkup(rows) :
+          '<div class="empty-state"><h3>No notifications yet</h3><p>New anime headlines appear here when the feed updates.</p></div>') +
+          '</div>' :
+        '<div class="empty-state"><h3>News alerts are disabled</h3><p>Enable them under Settings.</p></div>');
+    void loadNews();
+  }
+  function profileGreetingMarkup() {
+    const user = window.AniDashAccount?.currentUser() || window.AniDashMal?.currentUser();
+    const avatar = user?.avatar?.large || user?.avatar?.medium || user?.picture || "";
+    const photo = /^https:\/\//i.test(avatar)
+      ? '<img src="' + escapeHtml(avatar) + '" alt="" referrerpolicy="no-referrer">'
+      : uiIcon("user");
+    const hour = new Date().getHours();
+    const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
+    return '<button class="home-profile" data-route="/account" aria-label="View account profile">' +
+      '<span class="home-profile-photo">' + photo + '</span><span class="home-profile-copy">' +
+      '<span class="home-greeting">' + greeting + '</span><strong>' + escapeHtml(user?.name || "Guest") + '</strong>' +
+      '</span></button>';
+  }
+  function renderHomeProfile() {
+    const node = $("#home-profile-slot");
+    if (node) node.innerHTML = profileGreetingMarkup();
+  }
 
   function spotlightMarkup(media) {
     const image = media?.bannerImage || imageOf(media);
@@ -425,13 +560,15 @@
         '<button data-route="/account">' + uiIcon("user") + ' Account</button>' +
       '</div>';
 
-      const hour = new Date().getHours();
-      const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
       $("#view").innerHTML =
-        '<section class="home-welcome"><div><span class="welcome-eyebrow">' + greeting + '</span><h1 class="welcome-title">AniDash</h1></div><div class="welcome-actions"><button data-route="/account" aria-label="Your profile">' + uiIcon("user") + '</button><button data-route="/settings" aria-label="Settings">' + uiIcon("settings") + '</button></div></section>' +
+        '<section class="home-welcome native-home-header"><div id="home-profile-slot">' + profileGreetingMarkup() + '</div>' +
+          '<div class="welcome-actions"><button data-route="/news" aria-label="Anime news">' + uiIcon("news") + '</button>' +
+          '<button class="notification-button" data-route="/notifications" aria-label="Notifications">' + uiIcon("bell") + '<span class="news-badge" data-news-badge hidden></span></button>' +
+          '<button data-route="/settings" aria-label="Settings">' + uiIcon("settings") + '</button></div></section>' +
         '<div class="trending-label">' + uiIcon("star") + ' Trending anime</div>' +
         spotlightPanel(spotlightItems) +
         quickLinks +
+        newsPreview() +
         resumeShelf(continueItems) +
         shelf("Currently airing", "Fresh episodes from currently releasing series.", airing.slice(0, 14), sectionUrl("airing")) +
         shelf("Trending right now", "The series viewers are talking about.", trending.slice(0, 14), sectionUrl("trending")) +
@@ -442,6 +579,8 @@
         shelf("Top rated", "Highly rated titles from the AniList catalogue.", top.slice(0, 14), sectionUrl("top")) +
         shelf("Hidden gems", "Well-rated series beyond the most popular charts.", hidden.slice(0, 14), sectionUrl("hidden"));
       scheduleSpotlight();
+      updateNewsBadge();
+      void loadNews();
     } catch (error) {
       if (token !== state.token) return;
       $("#view").innerHTML = '<div class="empty-state"><div class="empty-icon">◌</div><h3>Could not load the catalogue</h3><p>' + escapeHtml(error.message) + '</p><button class="btn btn-primary" data-route="/home">Try again</button></div>';
@@ -932,7 +1071,10 @@
     state.playerEpisodePage = Math.max(1, Math.min(pageCount, Number(state.playerEpisodePage) || 1));
     const start = (state.playerEpisodePage - 1) * PLAYER_EPISODES_PER_PAGE;
     container.innerHTML = filtered.slice(start, start + PLAYER_EPISODES_PER_PAGE).map(episode =>
-      '<button class="player-episode' + (Number(episode.number) === Number(state.player.episode.number) ? " active" : "") + '" data-player-episode="' + episode.number + '"><span>' + episode.number + '</span>' + escapeHtml(episode.title) + '</button>'
+      '<button class="player-episode' + (Number(episode.number) === Number(state.player.episode.number) ? " active" : "") +
+      '" data-player-episode="' + episode.number + '"><span class="player-episode-number">' + episode.number + '</span>' +
+      (episode.thumbnail ? '<img class="player-episode-thumb" src="' + escapeHtml(episode.thumbnail) + '" alt="" loading="lazy" referrerpolicy="no-referrer">' : '') +
+      '<span class="player-episode-title">' + escapeHtml(episode.title || ("Episode " + episode.number)) + '</span></button>'
     ).join("") || '<div class="compact-empty">No matching episodes.</div>';
     pagination.innerHTML = episodePagerMarkup(filtered.length, state.playerEpisodePage, PLAYER_EPISODES_PER_PAGE, "player");
   }
@@ -1006,7 +1148,7 @@
 
     let aniListMappedEpisodes = [];
     const validAniListId = media.id != null && /^\d{1,12}$/.test(String(media.id));
-    if (validAniListId && (!hasReadyProvider("justanime") || !hasReadyProvider("hianime"))) {
+    if (validAniListId) {
       try {
         const response = await fetch("/api/episode-map?anilistId=" + encodeURIComponent(String(media.id)), {
           headers: { Accept: "application/json" },
@@ -1031,6 +1173,26 @@
       }
     }
 
+    // Combine authoritative Ani.zip titles/thumbnails with source-specific
+    // episode IDs so metadata improvements never break playback.
+    if (aniListMappedEpisodes.length) {
+      const byNumber = new Map(aniListMappedEpisodes.map(item => [Number(item.number), item]));
+      for (const match of checked) {
+        if (!match || !Array.isArray(match.episodes)) continue;
+        match.episodes = match.episodes.map(item => {
+          const known = byNumber.get(Number(item.number));
+          if (!known) return item;
+          const generic = /^(?:episode|ep)\s*#?\d+$/i.test(String(item.title || "").trim());
+          return { ...item, title: generic || !item.title ? known.title : item.title,
+            thumbnail: item.thumbnail || known.thumbnail, date: item.date || known.date };
+        });
+      }
+      const history = store.history[String(media.id)];
+      const matched = history && byNumber.get(Number(history.episode));
+      if (matched && /^(?:episode|ep)\s*#?\d+$/i.test(String(history.episodeTitle || ""))) {
+        history.episodeTitle = matched.title; persist();
+      }
+    }
     // If AniZip is down but AniList knows the total count, create episode-number
     // candidates. These IDs are valid for the AniList-based JustAnime/VidNest
     // resolver and for AniKoto's external-ID embed providers.
@@ -1234,7 +1396,7 @@
   }
 
   function episodeCard(episode) {
-    const thumb = episode.thumbnail ? '<img class="episode-thumb" loading="lazy" src="' + escapeHtml(episode.thumbnail) + '" alt="">' : '<div class="episode-thumb"></div>';
+    const thumb = episode.thumbnail ? '<img class="episode-thumb" loading="lazy" referrerpolicy="no-referrer" src="' + escapeHtml(episode.thumbnail) + '" alt="Episode ' + escapeHtml(episode.number) + ' still">' : '<div class="episode-thumb episode-thumb-fallback"><span>' + escapeHtml(episode.number) + '</span></div>';
     return '<button class="episode-item" data-play-episode="' + escapeHtml(episode.number) + '|' + escapeHtml(episode.id) + '">' + thumb +
       '<span><span class="episode-number">EPISODE ' + escapeHtml(episode.number) + (episode.isFiller ? ' · FILLER' : '') + '</span><span class="episode-name">' + escapeHtml(episode.title) + '</span><span class="episode-date">' + escapeHtml(episode.date || (episode.generated ? "Episode metadata fallback" : "")) + '</span></span><span class="episode-play">›</span></button>';
   }
@@ -1541,6 +1703,14 @@
         applyPreparedSources(prepared, preferredId);
         const refreshed = state.detailMatches.find(match => match?.provider?.id === preferredId && match.episodesReady);
         if (refreshed) player.match = refreshed;
+        const updated = state.detailEpisodes.find(item => Number(item.number) === Number(player.episode.number));
+        if (updated) {
+          player.episode = { ...player.episode, title: updated.title, thumbnail: updated.thumbnail };
+          const titleNode = $("#player-episode-heading");
+          if (titleNode) titleNode.textContent = updated.title;
+          const inlineTitle = $("#player-episode-inline-title");
+          if (inlineTitle) inlineTitle.textContent = updated.title;
+        }
         renderPlayerEpisodeBrowser();
         if (player.needsProviderRetry) {
           player.needsProviderRetry = false;
@@ -1558,9 +1728,9 @@
     const episodeIndex = state.detailEpisodes.findIndex(item => Number(item.number) === Number(episode.number));
     const hasPrev = episodeIndex > 0;
     const hasNext = episodeIndex >= 0 && episodeIndex < state.detailEpisodes.length - 1;
-    $("#view").innerHTML = '<div class="player-page"><div class="player-topline"><button class="back-button" data-anime="' + media.id + '" aria-label="Back to anime">←</button><div><h1>' + escapeHtml(titleOf(media)) + '</h1><p>Episode ' + escapeHtml(episode.number) + ' · ' + escapeHtml(episode.title) + '</p></div></div>' +
-      '<div class="player-layout"><section><div class="video-frame"><video id="anime-video" controls playsinline webkit-playsinline preload="metadata"></video><iframe id="anime-embed" title="Episode stream" allow="autoplay; fullscreen; picture-in-picture; encrypted-media" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen hidden></iframe><div class="player-overlay" id="player-overlay" role="status"><div class="player-mini-loader"></div><strong>Opening episode…</strong></div></div>' +
-      '<div class="player-under"><div><h2>' + escapeHtml(episode.title) + '</h2><p>' + escapeHtml(titleOf(media)) + ' · Episode ' + escapeHtml(episode.number) + '</p></div><div class="player-controls"><button class="btn btn-quiet" data-prev ' + (hasPrev ? "" : "disabled") + '>← Previous</button><button class="btn btn-quiet" data-next ' + (hasNext ? "" : "disabled") + '>Next →</button></div></div>' +
+    $("#view").innerHTML = '<div class="player-page"><div class="player-topline"><button class="back-button" data-anime="' + media.id + '" aria-label="Back to anime">←</button><div><h1>' + escapeHtml(titleOf(media)) + '</h1><p>Episode ' + escapeHtml(episode.number) + ' · <span id="player-episode-heading">' + escapeHtml(episode.title) + '</span></p></div></div>' +
+      '<div class="player-layout"><section><div class="video-frame"><video id="anime-video" controls playsinline webkit-playsinline preload="metadata"></video><iframe id="anime-embed" title="Episode stream" allow="autoplay; fullscreen; picture-in-picture; encrypted-media" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen hidden></iframe><div class="video-ui" id="video-ui" hidden><div class="video-ui-top"><span>' + escapeHtml(titleOf(media)) + ' · Episode ' + escapeHtml(episode.number) + '</span></div><div class="video-ui-bottom"><input class="video-seek" id="video-seek" type="range" min="0" max="1000" value="0" aria-label="Seek position"><div class="video-ui-buttons"><button data-player-toggle aria-label="Play or pause">' + uiIcon("play") + '</button><button data-player-jump="-10" aria-label="Back 10 seconds">−10</button><button data-player-jump="10" aria-label="Forward 10 seconds">+10</button><span id="video-clock" class="video-timecode">00:00 / --:--</span><span class="video-ui-spacer"></span><button data-player-speed aria-label="Playback speed">1×</button><button data-player-fullscreen aria-label="Fullscreen">' + uiIcon("expand") + '</button></div></div></div><div class="player-overlay" id="player-overlay" role="status"><div class="player-mini-loader"></div><strong>Opening episode…</strong></div></div>' +
+      '<div class="player-under"><div><h2 id="player-episode-inline-title">' + escapeHtml(episode.title) + '</h2><p>' + escapeHtml(titleOf(media)) + ' · Episode ' + escapeHtml(episode.number) + '</p></div><div class="player-controls"><button class="btn btn-quiet" data-prev ' + (hasPrev ? "" : "disabled") + '>← Previous</button><button class="btn btn-quiet" data-next ' + (hasNext ? "" : "disabled") + '>Next →</button></div></div>' +
       '<div class="button-row" style="margin-top:14px" id="skip-buttons"></div></section>' +
       '<aside class="player-sidebar"><div class="player-panel player-audio-panel"><div class="player-panel-head"><h3>Audio language</h3><span class="stream-state" id="stream-status" role="status">Checking streams</span></div><div class="source-row" id="category-pills" role="group" aria-label="Audio language"><button class="source-pill' + (player.category === "sub" ? " active" : "") + '" data-category="sub" aria-pressed="' + (player.category === "sub") + '">Subtitled</button><button class="source-pill' + (player.category !== "sub" ? " active" : "") + '" data-category="dub" aria-pressed="' + (player.category !== "sub") + '">English dub</button></div></div>' +
       '<div class="player-panel player-stream-panel" id="available-streams-panel" hidden><div class="player-panel-head"><h3>Available streams</h3><span class="stream-hint">Resolved links only</span></div><div class="source-row" id="quality-pills" role="group" aria-label="Available streams"></div></div>' +
@@ -1912,6 +2082,28 @@
     );
   }
 
+
+  function updateVideoControls() {
+    const video = $("#anime-video");
+    if (!video) return;
+    const clock = $("#video-clock");
+    if (clock) {
+      const valid = Number.isFinite(video.duration) && video.duration > 0;
+      clock.textContent = hhmmss(video.currentTime) + " / " + (valid ? hhmmss(video.duration) : "--:--");
+    }
+    const seek = $("#video-seek");
+    if (seek && Number.isFinite(video.duration) && video.duration > 0) {
+      seek.value = String(Math.round(Math.min(1, video.currentTime / video.duration) * 1000));
+    }
+    const toggle = $('[data-player-toggle]');
+    if (toggle) {
+      toggle.innerHTML = uiIcon(video.paused ? "play" : "pause");
+      toggle.setAttribute("aria-label", video.paused ? "Play" : "Pause");
+    }
+    const speed = $('[data-player-speed]');
+    if (speed) speed.textContent = Number(video.playbackRate || 1).toFixed(2).replace(/0$/, "").replace(/\.$/, "") + "×";
+  }
+
   function attachStream(url, stream, tracks) {
     if (!url) {
       fallbackToNextProvider("The provider did not return a media URL.");
@@ -1931,6 +2123,9 @@
     const embed = $("#anime-embed");
     const overlay = $("#player-overlay");
     if (!video) return;
+    const playerUI = $("#video-ui");
+    if (playerUI) playerUI.hidden = true;
+    video.controls = true;
     if (state.playbackWatchdog) {
       window.clearTimeout(state.playbackWatchdog);
       state.playbackWatchdog = null;
@@ -2022,6 +2217,10 @@
           });
         } catch (_) {}
       }
+      if (state.currentVideo !== url) return;
+      const playerUI = $("#video-ui");
+      if (playerUI) { playerUI.hidden = false; video.controls = false; }
+      updateVideoControls();
       video.play().catch(error => {
         if (state.currentVideo !== url) return;
         if (error?.name === "NotAllowedError") {
@@ -2039,6 +2238,7 @@
       if (state.playbackWatchdog) window.clearTimeout(state.playbackWatchdog);
       state.playbackWatchdog = null;
       if (overlay) overlay.style.display = "none";
+      updateVideoControls();
     };
     video.onwaiting = () => {
       if (state.currentVideo === url && !video.paused && overlay) {
@@ -2057,6 +2257,7 @@
       }
     };
     video.ontimeupdate = () => {
+      updateVideoControls();
       savePlaybackProgress(video);
       const intro = state.player?.intro;
       if (setting("autoSkipIntro") && intro && Number.isFinite(Number(intro.start)) &&
@@ -2065,8 +2266,9 @@
         video.currentTime = Number(intro.end);
       }
     };
-    video.onpause = () => savePlaybackProgress(video, false, true);
+    video.onpause = () => { updateVideoControls(); savePlaybackProgress(video, false, true); };
     video.onended = () => {
+      updateVideoControls();
       savePlaybackProgress(video, true, true);
       if (setting("showNextEpisodePrompt")) {
         const next = state.detailEpisodes.find(ep => Number(ep.number) === Number(state.player.episode.number) + 1);
@@ -2198,7 +2400,7 @@
       (items.length ? '<div class="anime-grid">' + items.map(item => {
         const pct = item.duration ? Math.min(100, Math.max(0, item.position / item.duration * 100)) : 0;
         const poster = imageOf(item.media);
-        return '<article class="anime-card" data-resume="' + item.media.id + '" tabindex="0"><div class="poster-wrap">' + (poster ? '<img loading="lazy" src="' + escapeHtml(poster) + '" alt="">' : '<div class="poster-fallback">' + escapeHtml(titleOf(item.media)) + '</div>') + '<span class="poster-score">EP ' + escapeHtml(item.episode) + '</span></div><div class="card-title">' + escapeHtml(titleOf(item.media)) + '</div><p class="card-subtitle">' + escapeHtml(item.episodeTitle || "Episode " + item.episode) + '</p><div class="card-progress"><span style="width:' + pct + '%"></span></div><div class="card-resume">Resume at ' + Math.floor((item.position || 0) / 60) + ' min</div></article>';
+        return '<article class="anime-card" data-resume="' + item.media.id + '" tabindex="0"><div class="poster-wrap">' + (poster ? '<img loading="lazy" src="' + escapeHtml(poster) + '" alt="">' : '<div class="poster-fallback">' + escapeHtml(titleOf(item.media)) + '</div>') + '<span class="poster-score">EP ' + escapeHtml(item.episode) + '</span></div><div class="card-title">' + escapeHtml(titleOf(item.media)) + '</div><p class="card-subtitle">' + escapeHtml(item.episodeTitle || "Episode " + item.episode) + '</p><div class="card-progress"><span style="width:' + pct + '%"></span></div><div class="card-resume">' + escapeHtml(progressCaption(item)) + '</div></article>';
       }).join("") + '</div>' : '<div class="empty-state"><div class="empty-icon">◷</div><h3>No episodes watched yet</h3><p>When you start watching, AniDash will remember your episode and playback position on this device.</p><button class="btn btn-primary" data-route="/discover">Find anime</button></div>');
   }
 
@@ -2209,6 +2411,7 @@
     const malUser = window.AniDashMal?.currentUser();
     const active = user || malUser;
     if (name) name.textContent = active?.name || "Sign in";
+    if (state.route === "/home") renderHomeProfile();
     if (avatar) {
       const source = user?.avatar?.medium || user?.avatar?.large || malUser?.picture;
       if (source && /^https:\/\//.test(source)) {
@@ -2248,7 +2451,10 @@
       '<section class="account-hero"><div class="account-avatar">' + avatar + '</div><div><h2>' +
         escapeHtml(display) + '</h2><p>' +
         (user || malUser ? "Your account connections and synced anime library" : "Sign in to bring your anime library to every device") +
-        '</p></div></section>' +
+        '</p><span class="profile-platform-tag">' + escapeHtml(user ? "AniList connected" : malUser ? "MyAnimeList connected" : "Guest mode") + '</span></div></section>' +
+      '<div class="profile-stats"><div><strong>' + Object.keys(store.watchlist).length + '</strong><span>Saved titles</span></div><div><strong>' +
+      Object.keys(store.history).length + '</strong><span>Watching history</span></div><div><strong>' +
+      Object.keys(store.mangaList).length + '</strong><span>Saved manga</span></div></div>' +
       '<div class="account-providers">' +
         '<section class="account-provider"><div class="account-icon">AL</div><strong>AniList</strong>' +
         '<p>Sync watching lists, favourites and exact episode timestamps via Android-compatible progress notes.</p>' +
@@ -2263,8 +2469,8 @@
           ? '<span class="preference-help">Site owner must configure MAL_WEB_CLIENT_ID (and MAL_WEB_CLIENT_SECRET if required).</span>' : '') +
         '</section></div>' +
       '<div class="account-info"><strong>One AniDash library</strong>' +
-      '<p>Connect AniList and/or MyAnimeList. AniDash merges their lists without deleting your local entries. Your passwords are entered only on the providers’ official sign-in pages.</p>' +
-      '<p>For an exact 5-minute handoff from your Android app to this website, enable AniList tracking in the app. Android writes a <code>shx:ep=…&sec=…</code> note; AniDash Watch reads it and seeks to that timestamp. MAL currently shares completed-episode counts, not precise seconds.</p>' +
+      '<p>Connect AniList and/or MyAnimeList. AniDash merges supported lists without deleting local entries. Your passwords stay with their official login services.</p>' +
+      '<p>For an exact 5-minute handoff from your Android app to this website, enable AniList tracking in the app. Android writes a <code>shx:ep=…&sec=…</code> note; AniDash Watch reads it and seeks to that timestamp. MAL shares episode counts, not exact seconds. Connected account APIs do not provide email addresses, so AniDash never labels an account as email-synced.</p>' +
       '<button class="btn btn-quiet" data-route="/library">' + uiIcon("library") + ' Open Library</button></div>';
   }
 
@@ -2287,11 +2493,12 @@
   function renderSettings() {
     const connected = window.AniDashAccount?.authenticated();
     $("#view").innerHTML = '<div class="settings-screen">' +
-      pageHead("", "Settings", "AniDash Android-inspired preferences for the web") +
+      pageHead("", "Settings", "Customize your AniDash web experience") +
+      '<div class="settings-search-wrap">' + uiIcon("search") + '<input id="settings-filter" class="input-control" type="search" placeholder="Search settings" aria-label="Search settings"></div>' +
       settingsGroup("Account & sync", '<div class="preference-row"><div><h3 class="preference-title">AniList account</h3><p class="preference-help">' +
         (connected ? 'Connected · Watchlist sync available' : 'Guest mode · local data only until you sign in') +
         '</p></div><button class="btn btn-secondary" data-route="/account">' + (connected ? "Manage" : "Sign in") + '</button></div>' +
-        prefToggle("trackProgress", "Save playback progress", "Store the last watched episode and playback time on this device. No Continue Watching shelf is displayed.")) +
+        prefToggle("trackProgress", "Save playback progress", "Keep exact playback time locally, and sync through AniList when connected.")) +
       settingsGroup("Video Player", 
         prefSelect("preferredAudio", { label:"Preferred audio", values:[["dub","English DUB"],["sub","Original SUB"]] }, "Default audio language when a source supports it.") +
         prefSelect("defaultQuality", { label:"Preferred quality", values:[["Auto","Auto (recommended)"],["1080p","1080p"],["720p","720p"],["480p","480p"],["360p","360p"]] }, "Choose the closest stream quality actually offered by a source.") +
@@ -2300,7 +2507,12 @@
         prefToggle("showNextEpisodePrompt", "Next episode prompt", "Offer the next episode when the current video finishes.")) +
       settingsGroup("Appearance & layout",
         prefSelect("themeMode", { label:"Theme mode", values:[["light","Light"],["dark","Dark"],["system","Follow device"]] }, "Choose a light, dark or system-matched design.") +
-        prefSelect("episodeViewMode", { label:"Episode layout", values:[["list","List"],["grid","Grid"]] }, "How episodes appear on the anime details screen.")) +
+        prefSelect("episodeViewMode", { label:"Episode layout", values:[["list","List"],["grid","Grid"]] }, "How episodes appear on the anime details screen.") +
+        prefToggle("showMangaTab", "Show Manga navigation", "Off by default; enable Manga as an optional tab.") +
+        prefToggle("showNewsSection", "News on Home", "Show real anime headlines on your homepage.")) +
+      settingsGroup("News & notifications",
+        prefToggle("showNewsNotifications", "In-app news notifications", "Unread anime headlines in the local inbox; not system push.") +
+        '<div class="preference-row"><div><h3 class="preference-title">Notification inbox</h3><p class="preference-help">View and mark headlines read on this device.</p></div><button class="btn btn-quiet" data-route="/notifications">Open inbox</button></div>') +
       settingsGroup("Data & storage",
         '<div class="preference-row"><div><h3 class="preference-title">Local library backup</h3><p class="preference-help">Your watchlist, playback progress and settings are saved in browser storage with an IndexedDB recovery copy. Keep a JSON backup when changing browsers.</p></div><button class="btn btn-quiet" data-export-backup>Export JSON</button></div>' +
         '<div class="preference-row"><div><h3 class="preference-title">Restore your library</h3><p class="preference-help">Import an AniDash Watch JSON backup. Existing entries are merged, not replaced.</p></div><button class="btn btn-quiet" data-import-backup>Import JSON</button><input class="backup-import" type="file" id="backup-file" accept=".json,application/json"></div>' +
@@ -2316,8 +2528,9 @@
 
   function openModal(content) {
     $("#modal-root").innerHTML = '<div class="modal-backdrop" data-close-modal><section class="modal-card" role="dialog" aria-modal="true">' + content + '</section></div>';
-    const cardEl = $(".modal-card");
-    if (cardEl) cardEl.addEventListener("click", event => event.stopPropagation());
+    const close = $(".modal-card [data-close]");
+    if (close && typeof close.focus === "function") close.focus();
+    // Never stop propagation within the dialog: delegated X/Done actions must work.
   }
 
   function closeModal() {
@@ -2396,6 +2609,8 @@
     if (current === "/library") return renderLibrary();
     if (current === "/history") return renderHistory();
     if (current === "/account") return renderAccount();
+    if (current === "/news") return renderNews();
+    if (current === "/notifications") return renderNotifications();
     if (current === "/settings") return renderSettings();
     if (current === "/anime" && parts[1]) return renderAnime(parts[1]);
     if (current === "/watch" && parts[1]) return renderWatch(parts[1], parts[2] || "1");
@@ -2414,10 +2629,62 @@
 
   document.addEventListener("click", async event => {
     const target = event.target.closest("button,a,article");
-    if (!target) {
-      if (event.target.matches("[data-close-modal]")) closeModal();
+    if (event.target.matches?.("[data-close-modal]")) { closeModal(); return; }
+    if (!target) return;
+    if (target.hasAttribute("data-player-toggle")) {
+      const video = $("#anime-video");
+      if (video) {
+        if (video.paused) video.play().catch(() => toast("Playback was blocked by this browser."));
+        else video.pause();
+        updateVideoControls();
+      }
       return;
     }
+    if (target.hasAttribute("data-player-jump")) {
+      const video = $("#anime-video");
+      if (video && Number.isFinite(video.duration) && video.duration > 0) {
+        video.currentTime = Math.max(0, Math.min(video.duration, video.currentTime + Number(target.getAttribute("data-player-jump"))));
+        updateVideoControls();
+      }
+      return;
+    }
+    if (target.hasAttribute("data-player-speed")) {
+      const video = $("#anime-video");
+      if (video) {
+        const speeds = [1, 1.25, 1.5, 2, 0.75];
+        const next = (speeds.indexOf(video.playbackRate) + 1) % speeds.length;
+        video.playbackRate = speeds[next];
+        updateVideoControls();
+      }
+      return;
+    }
+    if (target.hasAttribute("data-player-fullscreen")) {
+      const video = $("#anime-video");
+      const frame = $(".video-frame");
+      try {
+        if (document.fullscreenElement && document.exitFullscreen) await document.exitFullscreen();
+        else if (frame?.requestFullscreen) await frame.requestFullscreen();
+        else if (video?.webkitEnterFullscreen) video.webkitEnterFullscreen();
+        else toast("Fullscreen is unavailable in this browser.");
+      } catch (_) { toast("Fullscreen could not be opened."); }
+      return;
+    }
+    if (target.hasAttribute("data-open-news")) {
+      const item = state.news[Number(target.getAttribute("data-open-news"))];
+      if (item && /^https:\/\//i.test(item.url)) {
+        markNewsRead(item);
+        window.open(item.url, "_blank", "noopener,noreferrer");
+        if (state.route === "/notifications") renderNotifications();
+        if (state.route === "/news") renderNews();
+      }
+      return;
+    }
+    if (target.hasAttribute("data-read-all-news")) {
+      state.news.forEach(markNewsRead);
+      renderNotifications();
+      return;
+    }
+    if (target.hasAttribute("data-refresh-news")) { void loadNews(true); return; }
     if (target.hasAttribute("data-route")) {
       event.preventDefault();
       navigate(target.getAttribute("data-route"));
@@ -2792,6 +3059,9 @@
   document.addEventListener("anidash:downloads-changed", () => {
     if (state.route === "/downloads") renderDownloads();
   });
+  document.addEventListener("keydown", event => {
+    if (event.key === "Escape" && $(".modal-backdrop")) { closeModal(); event.preventDefault(); }
+  });
   document.addEventListener("change", async event => {
     if (event.target.id === "cbz-file-input") {
       const file = event.target.files?.[0];
@@ -2863,6 +3133,33 @@
   });
 
   document.addEventListener("input", event => {
+    if (event.target.id === "settings-filter") {
+      const query = String(event.target.value || "").trim().toLowerCase();
+      const groups = $(".settings-screen .settings-group");
+      const headings = $(".settings-screen .settings-section-label");
+      groups.forEach((group, index) => {
+        const title = String(headings[index]?.textContent || "").toLowerCase();
+        const rows = Array.from(group.querySelectorAll(".preference-row"));
+        let visible = 0;
+        rows.forEach(row => {
+          const matches = !query || title.includes(query) ||
+            String(row.textContent || "").toLowerCase().includes(query);
+          row.hidden = !matches;
+          if (matches) visible++;
+        });
+        group.hidden = visible === 0;
+        if (headings[index]) headings[index].hidden = visible === 0;
+      });
+      return;
+    }
+    if (event.target.id === "video-seek") {
+      const video = $("#anime-video");
+      if (video && Number.isFinite(video.duration) && video.duration > 0) {
+        video.currentTime = Math.max(0, Math.min(video.duration, Number(event.target.value) / 1000 * video.duration));
+        updateVideoControls();
+      }
+      return;
+    }
     if (event.target.id === "episode-filter") {
       state.episodeFilter = event.target.value;
       state.episodePage = 1;

@@ -1,6 +1,6 @@
-const CACHE_NAME = "anidash-watch-shell-v15";
+const CACHE_NAME = "anidash-watch-shell-v16";
 const READER_LIB = "https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js";
-const SHELL = ["/", "/index.html", "/styles.css", "/android-ui.css", "/preferences.css", "/app-parity.css", "/unslop.css", "/library-storage.js", "/anilist-account.js", "/mal-account.js", "/cbz-reader.js", "/app.js", "/manifest.webmanifest", "/icons/anidash-icon.png", "/icons/ui-sprite.svg"];
+const SHELL = ["/", "/index.html", "/styles.css", "/android-ui.css", "/preferences.css", "/app-parity.css", "/unslop.css", "/native-parity.css", "/library-storage.js", "/anilist-account.js", "/mal-account.js", "/cbz-reader.js", "/app.js", "/manifest.webmanifest", "/icons/anidash-icon.png", "/icons/ui-sprite.svg"];
 
 self.addEventListener("install", event => {
   event.waitUntil(caches.open(CACHE_NAME).then(async cache => {
@@ -38,7 +38,7 @@ self.addEventListener("fetch", event => {
   }
   if (url.origin !== self.location.origin || url.pathname.startsWith("/api/")) return;
   const isShellAsset =
-    ["/", "/index.html", "/styles.css", "/android-ui.css", "/preferences.css", "/app-parity.css", "/unslop.css", "/library-storage.js", "/anilist-account.js", "/mal-account.js", "/cbz-reader.js", "/app.js", "/manifest.webmanifest"].includes(url.pathname) ||
+    ["/", "/index.html", "/styles.css", "/android-ui.css", "/preferences.css", "/app-parity.css", "/unslop.css", "/native-parity.css", "/library-storage.js", "/anilist-account.js", "/mal-account.js", "/cbz-reader.js", "/app.js", "/manifest.webmanifest"].includes(url.pathname) ||
     url.pathname.startsWith("/icons/");
   if (!isShellAsset) return;
 
