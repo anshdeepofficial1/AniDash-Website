@@ -1335,7 +1335,7 @@
   function jumpToEpisode(scope) {
     const input = scope === "player" ? $("#player-episode-jump") : $("#episode-jump");
     const query = input ? Number.parseInt(input.value, 10) : Number.NaN;
-    if (!Number.isFinite(query) || query < 1) {
+    if (!Number.isSafeInteger(query) || query < 1) {
       toast("Enter a valid episode number.");
       return;
     }
@@ -1343,21 +1343,35 @@
       state.detailEpisodes,
       scope === "player" ? state.playerEpisodeFilter : state.episodeFilter
     );
-    const index = filtered.findIndex(item => Number(item.number) === query);
-    if (index < 0) {
-      toast("Episode " + query + " was not found in the current source list.");
+    const match = filtered.find(item => Number(item.number) === query);
+    if (!match) {
+      toast("Episode " + query + " is not in the available episode list.");
       return;
     }
     if (scope === "player") {
+      const index = filtered.indexOf(match);
       state.playerEpisodePage = Math.floor(index / PLAYER_EPISODES_PER_PAGE) + 1;
       renderPlayerEpisodeBrowser();
-    } else {
-      state.episodePage = Math.floor(index / DETAIL_EPISODES_PER_PAGE) + 1;
-      renderEpisodeBrowser();
+      return;
     }
+    // A direct jump can cross arc boundaries. Select the verified arc first.
+    const arcs = namedEpisodeArcs();
+    if (state.episodeArcMode === "arcs" && arcs.length) {
+      const target = arcs.find(arc => query >= arc.start && query <= arc.end);
+      if (target) state.selectedArcId = target.id;
+      else state.episodeArcMode = "all";
+    }
+    const arc = activeEpisodeArc(arcs);
+    const displayed = arc
+      ? filtered.filter(item => Number(item.number) >= arc.start && Number(item.number) <= arc.end)
+      : filtered;
+    const index = displayed.findIndex(item => Number(item.number) === query);
+    state.episodePage = Math.floor(Math.max(0,index) / DETAIL_EPISODES_PER_PAGE) + 1;
+    renderEpisodeBrowser();
+    $("#episode-list")?.scrollIntoView?.({ behavior: "smooth", block: "nearest" });
   }
 
-  async function prepareMediaSources(media) {
+    async function prepareMediaSources(media) {
     const matches = await findProviderMatches(media);
 
     // JustAnime's native Android provider uses AniList IDs as its anime IDs.
