@@ -42,11 +42,22 @@
   const DEFAULT_PREFERENCES = {
     themeMode: "light", preferredAudio: "dub", defaultQuality: "Auto",
     autoEnableSubtitles: true, autoSkipIntro: false, showNextEpisodePrompt: true,
-    episodeViewMode: "list", preferredSource: "auto",
-    showMangaTab: false, showNewsSection: true, showNewsNotifications: true,
+    episodeViewMode: "grid", preferredSource: "auto",
+    showMangaTab: false, showNewsSection: false, showNewsNotifications: true,
     trackProgress: true
   };
   store.preferences = { ...DEFAULT_PREFERENCES, ...store.preferences };
+  // Earlier builds saved List as their implicit default. Migrate it once so
+  // existing installations receive the new Grid default. Users can switch back.
+  const GRID_DEFAULT_MIGRATION = "anidash.watch.grid-default.v2";
+  let gridDefaultMigration = false;
+  try {
+    if (!localStorage.getItem(GRID_DEFAULT_MIGRATION)) {
+      store.preferences.episodeViewMode = "grid";
+      localStorage.setItem(GRID_DEFAULT_MIGRATION, "1");
+      gridDefaultMigration = true;
+    }
+  } catch (_) {}
   const setting = key => store.preferences[key];
   function applyPreferences() {
     if (!document.body || !document.body.dataset) return;
@@ -75,6 +86,7 @@
     selectedMatch: null,
     episodePage: 1,
     episodeFilter: "",
+    episodeArcMode: null, selectedArcId: null,
     playerEpisodePage: 1,
     playerEpisodeFilter: "",
     player: null,
@@ -166,6 +178,8 @@
       if (backup && Number(backup.updatedAt || 0) > Number(store.updatedAt || 0)) {
         Object.assign(store, backup);
         store.preferences = { ...DEFAULT_PREFERENCES, ...store.preferences };
+        // Preserve the Grid migration even if an older IndexedDB copy loads.
+        if (gridDefaultMigration) store.preferences.episodeViewMode = "grid";
         persist();
       } else if (!backup || Number(store.updatedAt || 0) >= Number(backup.updatedAt || 0)) {
         // Migrate earlier localStorage-only installations into the recovery DB.
@@ -174,6 +188,10 @@
         }
       }
     } catch (_) {}
+    if (gridDefaultMigration) {
+      store.preferences.episodeViewMode = "grid";
+      persist();
+    }
     applyPreferences();
   }
 
@@ -187,28 +205,64 @@
     window.setTimeout(() => el.remove(), 3200);
   }
 
+  // Public metadata requests share a queue, a short-lived catalogue cache and
+  // the same rate-limit cooldown. Returning Home does not refetch seven pages.
+  const collectionCache = new Map();
+  const collectionPending = new Map();
+  const gqlPending = new Map();
+  const COLLECTION_PREFIX = "anidash.catalog.page.v2.";
+  let gqlQueue = Promise.resolve();
+  let nextRequestAt = 0;
+  let rateLimitedUntil = 0;
+  const delay = ms => new Promise(resolve => window.setTimeout(resolve, ms));
+  function waitNotice(error) {
+    const remaining = Math.max(0, rateLimitedUntil - Date.now());
+    return error?.message || (remaining
+      ? "AniList is busy. Retry in " + Math.ceil(remaining / 1000) + " seconds."
+      : "Catalogue temporarily unavailable.");
+  }
   async function gql(query, variables) {
-    const controller = new AbortController();
-    const timeout = window.setTimeout(() => controller.abort(), 18000);
-    try {
-      const response = await fetch(API, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "Accept": "application/json" },
-        body: JSON.stringify({ query: query, variables: variables || {} }),
-        signal: controller.signal
-      });
-      const body = await response.json();
-      if (!response.ok || body.errors) {
-        const message = body.errors && body.errors[0] && body.errors[0].message;
-        throw new Error(message || "AniList is temporarily unavailable.");
+    const key = JSON.stringify([query, variables || {}]);
+    if (gqlPending.has(key)) return gqlPending.get(key);
+    const request = gqlQueue.then(async () => {
+      if (Date.now() < rateLimitedUntil) {
+        throw new Error("AniList is temporarily busy. Please retry shortly.");
       }
-      return body.data;
-    } catch (error) {
-      if (error.name === "AbortError") throw new Error("AniList request timed out. Please retry.");
-      throw error;
-    } finally {
-      window.clearTimeout(timeout);
-    }
+      const wait = Math.max(0, nextRequestAt - Date.now());
+      if (wait > 0) await delay(wait);
+      nextRequestAt = Date.now() + 540;
+      const controller = new AbortController();
+      const timeout = window.setTimeout(() => controller.abort(), 14500);
+      try {
+        const response = await fetch(API, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Accept": "application/json" },
+          body: JSON.stringify({ query, variables: variables || {} }),
+          signal: controller.signal
+        });
+        const body = await response.json().catch(() => ({}));
+        if (response.status === 429) {
+          const header = Number(response.headers?.get?.("retry-after") || 0);
+          rateLimitedUntil = Date.now() + Math.min(90000,
+            Math.max(5000, Number.isFinite(header) ? header * 1000 : 30000));
+          throw new Error("AniList is receiving too many requests. Cached titles remain available.");
+        }
+        if (!response.ok || body.errors) {
+          const message = body.errors?.[0]?.message || "AniList is temporarily unavailable.";
+          throw new Error(message);
+        }
+        if (!body.data) throw new Error("AniList returned an empty response.");
+        return body.data;
+      } catch (error) {
+        if (error.name === "AbortError") throw new Error("AniList request timed out. Retry shortly.");
+        throw error;
+      } finally {
+        window.clearTimeout(timeout);
+      }
+    });
+    gqlQueue = request.catch(() => {});
+    gqlPending.set(key, request);
+    return request.finally(() => gqlPending.delete(key));
   }
 
   function pageQuery(sort, page, perPage, extra) {
@@ -217,8 +271,37 @@
   }
 
   async function getCollection(sort, page, perPage, extra) {
-    const data = await gql(pageQuery(sort, page || 1, perPage || 18, extra || ""), { page: page || 1, perPage: perPage || 18 });
-    return data.Page;
+    const key = JSON.stringify([sort, page || 1, perPage || 18, extra || ""]);
+    let entry = collectionCache.get(key);
+    if (!entry) {
+      try {
+        entry = JSON.parse(localStorage.getItem(COLLECTION_PREFIX + encodeURIComponent(key)) || "null");
+        if (entry?.data && Number.isFinite(entry.updatedAt)) collectionCache.set(key, entry);
+        else entry = null;
+      } catch (_) { entry = null; }
+    }
+    const age = entry ? Date.now() - entry.updatedAt : Infinity;
+    if (entry && age < 12 * 60_000) return entry.data;
+    if (collectionPending.has(key)) return collectionPending.get(key);
+    if (entry && age < 24 * 60 * 60_000 && Date.now() < rateLimitedUntil) return entry.data;
+    const pending = (async () => {
+      try {
+        const data = await gql(pageQuery(sort, page || 1, perPage || 18, extra || ""), {
+          page: page || 1, perPage: perPage || 18
+        });
+        if (!data?.Page || !Array.isArray(data.Page.media)) throw new Error("Catalogue data is incomplete.");
+        const fresh = { data: data.Page, updatedAt: Date.now() };
+        collectionCache.set(key, fresh);
+        try { localStorage.setItem(COLLECTION_PREFIX + encodeURIComponent(key), JSON.stringify(fresh)); }
+        catch (_) {}
+        return fresh.data;
+      } catch (error) {
+        if (entry && age < 24 * 60 * 60_000) return entry.data;
+        throw error;
+      }
+    })().finally(() => collectionPending.delete(key));
+    collectionPending.set(key, pending);
+    return pending;
   }
 
 
@@ -247,8 +330,14 @@
     return data.Page;
   }
 
-  function showLoading(message) {
-    $("#view").innerHTML = '<section class="loading-state"><div class="loader"></div><p>' + escapeHtml(message || "Loading…") + '</p></section>';
+  function showLoading(_message) {
+    const view = $("#view");
+    if (!view || (typeof view.querySelector === "function" && view.querySelector(".home-hero, .anime-grid, .library-tabs, .native-home-header"))) return;
+    view.innerHTML = '<section class="page-skeleton" aria-label="Loading content" role="status">' +
+      '<div class="skeleton-line medium"></div><div class="skeleton-hero"></div>' +
+      '<div class="skeleton-line short"></div><div class="skeleton-grid">' +
+      Array.from({ length: 6 }, () => '<span class="skeleton-poster"></span>').join("") +
+      '</div></section>';
   }
 
   function card(media, type = "ANIME") {
@@ -452,9 +541,31 @@
   function showSpotlight(index) {
     if (state.route !== "/home" || !state.spotlight?.length) return;
     const items = state.spotlight;
-    state.spotlightIndex = (index + items.length) % items.length;
+    const nextIndex = (index + items.length) % items.length;
+    if (nextIndex === state.spotlightIndex) { scheduleSpotlight(); return; }
+    state.spotlightIndex = nextIndex;
     const panel = $("#spotlight-content");
-    if (panel) panel.innerHTML = spotlightMarkup(items[state.spotlightIndex]);
+    if (panel) {
+      // Preserve a constant-sized viewport and animate between two layers,
+      // instead of replacing the entire hero node and causing a layout snap.
+      const outgoing = panel.querySelector(".spotlight-layer.is-active");
+      panel.querySelectorAll(".spotlight-layer:not(.is-active)").forEach(el => el.remove());
+      const incoming = document.createElement("div");
+      incoming.className = "spotlight-layer is-entering";
+      incoming.innerHTML = spotlightMarkup(items[nextIndex]);
+      panel.appendChild(incoming);
+      window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => {
+          incoming.classList.remove("is-entering");
+          incoming.classList.add("is-active");
+          if (outgoing) {
+            outgoing.classList.remove("is-active");
+            outgoing.classList.add("is-exiting");
+            window.setTimeout(() => outgoing.remove(), 800);
+          }
+        });
+      });
+    }
     $$("[data-spotlight-index]").forEach(el => {
       el.classList.toggle("active", Number(el.getAttribute("data-spotlight-index")) === state.spotlightIndex);
     });
@@ -467,16 +578,18 @@
     if (state.route !== "/home" || !state.spotlight || state.spotlight.length < 2) return;
     state.spotlightTimer = window.setTimeout(() => {
       if (state.route !== "/home") return;
-      if (document.visibilityState === "hidden") { scheduleSpotlight(); return; }
+      if (document.visibilityState === "hidden" || $("#spotlight-content")?.closest(".spotlight-shell")?.matches(":hover")) {
+        scheduleSpotlight(); return;
+      }
       showSpotlight(state.spotlightIndex + 1);
-    }, 2000);
+    }, 2300);
     if (state.spotlightTimer?.unref) state.spotlightTimer.unref();
   }
   function spotlightPanel(items) {
     const first = items[0];
     if (!first) return "";
     return '<div class="spotlight-shell" aria-label="Trending anime carousel">' +
-      '<div id="spotlight-content">' + spotlightMarkup(first) + '</div>' +
+      '<div id="spotlight-content"><div class="spotlight-layer is-active">' + spotlightMarkup(first) + '</div></div>' +
       '<button class="spotlight-control prev" data-spotlight-prev title="Previous trending anime" aria-label="Previous trending anime">' +
         uiIcon("chevron-left") + '</button>' +
       '<button class="spotlight-control next" data-spotlight-next title="Next trending anime" aria-label="Next trending anime">' +
@@ -486,6 +599,7 @@
         '<button data-spotlight-index="' + i + '" class="' + (i===0 ? "active" : "") +
         '" aria-label="Go to trending anime ' + (i+1) + '"></button>').join("") + '</div></div>';
   }
+
   async function renderSection(key, page = 1) {
     const config = SECTIONS[key];
     if (!config) { navigate("/discover"); return; }
@@ -524,131 +638,253 @@
     }
   }
 
-  async function renderHome() {
-    const token = ++state.token;
-    showLoading("Building your anime home…");
+  // Cache the public home feed on the device. Navigation to Notifications,
+  // account, or the player never triggers another seven-request burst.
+  const HOME_STORAGE_KEY = "anidash.watch.catalogue.v3";
+  const HOME_TTL_MS = 12 * 60_000;
+  const HOME_STALE_MS = 48 * 60 * 60_000;
+  let homePending = null;
+  const searchCache = new Map();
+  function savedHome() {
     try {
-      const requests = [
-        getCollection("TRENDING_DESC", 1, 18),
-        getCollection("POPULARITY_DESC", 1, 18),
-        getCollection("SCORE_DESC", 1, 18),
-        getCollection("TRENDING_DESC", 1, 18, ", status: RELEASING"),
-        getCollection("POPULARITY_DESC", 1, 18, ", status: NOT_YET_RELEASED"),
-        getCollection("POPULARITY_DESC", 1, 18, ", format: MOVIE"),
-        getCollection("SCORE_DESC", 1, 18, ", averageScore_greater: 75, popularity_lesser: 35000")
-      ];
-      const settled = await Promise.allSettled(requests);
-      if (token !== state.token) return;
-      const rows = settled.map(result => result.status === "fulfilled" && result.value && Array.isArray(result.value.media)
-        ? result.value.media : []);
-      const [trending, popular, top, airing, upcoming, movies, hidden] = rows;
-      if (![...rows].some(list => list.length)) throw new Error("AniList did not return any anime sections. Please retry.");
-
-      state.home = { trending, popular, top, airing, upcoming, movies, hidden };
-      const spotlightItems = (trending.length ? trending : popular.length ? popular : top).slice(0, 10);
-      state.spotlight = spotlightItems;
-      state.spotlightIndex = 0;
-      const continueItems = Object.values(store.history)
-        .filter(item => item && item.media && item.episode)
-        .sort((a,b) => (b.updatedAt || 0) - (a.updatedAt || 0)).slice(0, 12);
-      const watchlistItems = Object.values(store.watchlist).slice(0, 12);
-
-      const quickLinks = '<div class="home-shortcuts">' +
-        '<button data-route="/discover"><span>◈</span> Discover</button>' +
-        '<button data-route="/search"><span>⌕</span> Search anime</button>' +
-        '<button data-route="/library"><span>♡</span> My watchlist</button>' +
-        '<button data-route="/account">' + uiIcon("user") + ' Account</button>' +
-      '</div>';
-
-      $("#view").innerHTML =
-        '<section class="home-welcome native-home-header"><div id="home-profile-slot">' + profileGreetingMarkup() + '</div>' +
-          '<div class="welcome-actions"><button data-route="/news" aria-label="Anime news">' + uiIcon("news") + '</button>' +
-          '<button class="notification-button" data-route="/notifications" aria-label="Notifications">' + uiIcon("bell") + '<span class="news-badge" data-news-badge hidden></span></button>' +
-          '<button data-route="/settings" aria-label="Settings">' + uiIcon("settings") + '</button></div></section>' +
-        '<div class="trending-label">' + uiIcon("star") + ' Trending anime</div>' +
-        spotlightPanel(spotlightItems) +
-        quickLinks +
-        newsPreview() +
-        resumeShelf(continueItems) +
-        shelf("Currently airing", "Fresh episodes from currently releasing series.", airing.slice(0, 14), sectionUrl("airing")) +
-        shelf("Trending right now", "The series viewers are talking about.", trending.slice(0, 14), sectionUrl("trending")) +
-        shelf("Popular with fans", "Big adventures, favourites and crowd-pleasers.", popular.slice(0, 14), sectionUrl("popular")) +
-        (watchlistItems.length ? shelf("From your watchlist", "Saved anime, ready when you are.", watchlistItems, "/library") : '') +
-        shelf("Coming soon", "Upcoming anime to add to your list.", upcoming.slice(0, 14), sectionUrl("upcoming")) +
-        shelf("Anime movies", "Feature-length stories for your next movie night.", movies.slice(0, 14), sectionUrl("movies")) +
-        shelf("Top rated", "Highly rated titles from the AniList catalogue.", top.slice(0, 14), sectionUrl("top")) +
-        shelf("Hidden gems", "Well-rated series beyond the most popular charts.", hidden.slice(0, 14), sectionUrl("hidden"));
-      scheduleSpotlight();
-      updateNewsBadge();
-      void loadNews();
-    } catch (error) {
-      if (token !== state.token) return;
-      $("#view").innerHTML = '<div class="empty-state"><div class="empty-icon">◌</div><h3>Could not load the catalogue</h3><p>' + escapeHtml(error.message) + '</p><button class="btn btn-primary" data-route="/home">Try again</button></div>';
-    }
+      const entry = JSON.parse(localStorage.getItem(HOME_STORAGE_KEY) || "null");
+      if (entry?.sections && Date.now() - Number(entry.updatedAt || 0) < HOME_STALE_MS)
+        return entry;
+    } catch (_) {}
+    return null;
   }
-
-
-  async function renderDiscover() {
-    const token = ++state.token;
-    showLoading("Opening discovery…");
-    try {
-      const sort = state.discoverSort || "TRENDING_DESC";
-      const data = await getCollection(sort, 1, 30);
-      if (token !== state.token || state.route !== "/discover") return;
-      state.discover = data.media || [];
-      const options = [
-        ["TRENDING_DESC", "Trending"], ["POPULARITY_DESC", "Most popular"], ["SCORE_DESC", "Top rated"]
-      ];
-      const home = state.home;
-      const extraRows = (popular, upcoming) =>
-        shelf("All Time Popular", "", popular, sectionUrl("popular")) +
-        shelf("Upcoming Anime", "", upcoming, sectionUrl("upcoming"));
-      $("#view").innerHTML =
-        pageHead("", "Discover Anime", "Find your next favorite series") +
-        '<button class="discover-search-launch" data-route="/search"><span>⌕</span>Search anime titles…</button>' +
-        shelf(sort === "TRENDING_DESC" ? "Trending Now" : sort === "POPULARITY_DESC" ? "Most Popular" : "Top Rated", "", (data.media || []).slice(0, 14), sectionUrl(sort === "TRENDING_DESC" ? "trending" : sort === "POPULARITY_DESC" ? "popular" : "top")) +
-        '<div id="discover-extras">' + (home ? extraRows(home.popular.slice(0, 12), home.upcoming.slice(0, 12)) : '') + '</div>' +
-        '<section class="section"><div class="section-heading"><h2 class="section-title">Explore anime</h2></div>' +
-        '<div class="toolbar"><select class="select-control" id="discover-sort">' + options.map(o =>
-          '<option value="' + o[0] + '"' + (sort === o[0] ? " selected" : "") + '>' + o[1] + '</option>'
-        ).join("") + '</select></div><div style="height:15px"></div>' +
-        '<div id="discover-grid">' + grid(data.media || []) + '</div></section>';
-      if (!home) {
-        Promise.allSettled([
-          getCollection("POPULARITY_DESC", 1, 14),
-          getCollection("POPULARITY_DESC", 1, 14, ", status: NOT_YET_RELEASED")
-        ]).then(rows => {
-          if (token !== state.token || state.route !== "/discover") return;
-          const popular = rows[0].status === "fulfilled" ? rows[0].value.media || [] : [];
-          const upcoming = rows[1].status === "fulfilled" ? rows[1].value.media || [] : [];
-          const container = $("#discover-extras");
-          if (container) container.innerHTML = extraRows(popular, upcoming);
-        }).catch(() => {});
+  function homeArrays(value) {
+    const data = value && typeof value === "object" ? value : {};
+    const keys = ["trending", "popular", "top", "airing", "upcoming", "movies", "hidden"];
+    return Object.fromEntries(keys.map(key => [key, Array.isArray(data[key]) ? data[key] : []]));
+  }
+  async function fetchHomeCatalogue() {
+    if (homePending) return homePending;
+    homePending = (async () => {
+      try {
+        // A single CDN-cacheable request, shared across visitors.
+        const response = await fetch("/api/catalog?view=home", {
+          headers: { Accept: "application/json" }
+        });
+        const payload = await response.json();
+        if (!response.ok || !payload?.sections) throw new Error(payload?.error || "Catalogue unavailable");
+        const sections = homeArrays(payload.sections);
+        if (!sections.trending.length && !sections.popular.length && !sections.top.length)
+          throw new Error("AniList did not return any anime sections.");
+        return { sections, stale: Boolean(payload.stale), updatedAt: Date.now() };
+      } catch (primaryError) {
+        // Fallback for hosting failures: just two paced AniList calls, never seven.
+        const settled = await Promise.allSettled([
+          getCollection("TRENDING_DESC", 1, 18),
+          getCollection("POPULARITY_DESC", 1, 18)
+        ]);
+        const trending = settled[0].status === "fulfilled" ? settled[0].value?.media || [] : [];
+        const popular = settled[1].status === "fulfilled" ? settled[1].value?.media || [] : [];
+        if (!trending.length && !popular.length) throw primaryError;
+        const pool = [...trending, ...popular].filter((media, i, arr) =>
+          arr.findIndex(other => other.id === media.id) === i
+        );
+        return {
+          sections: homeArrays({
+            trending, popular,
+            top: pool.filter(item => Number(item.averageScore || 0) > 70)
+              .sort((x,y) => (y.averageScore || 0) - (x.averageScore || 0)).slice(0, 14),
+            airing: pool.filter(item => item.status === "RELEASING"),
+            upcoming: pool.filter(item => item.status === "NOT_YET_RELEASED"),
+            movies: pool.filter(item => item.format === "MOVIE")
+          }),
+          stale: true,
+          updatedAt: Date.now()
+        };
       }
+    })().finally(() => { homePending = null; });
+    return homePending;
+  }
+  function setHomeData(entry) {
+    const sections = homeArrays(entry.sections);
+    state.home = sections;
+    state.homeUpdatedAt = Number(entry.updatedAt || Date.now());
+    state.homeStale = Boolean(entry.stale);
+    try {
+      localStorage.setItem(HOME_STORAGE_KEY, JSON.stringify({
+        sections, updatedAt: state.homeUpdatedAt, stale: state.homeStale
+      }));
+    } catch (_) {}
+  }
+  function paintHome() {
+    const home = homeArrays(state.home);
+    const { trending, popular, top, airing, upcoming, movies, hidden } = home;
+    const spotlightItems = (trending.length ? trending : popular.length ? popular : top).slice(0,10);
+    state.spotlight = spotlightItems;
+    state.spotlightIndex = 0;
+    const continueItems = Object.values(store.history)
+      .filter(item => item && item.media && item.episode)
+      .sort((a,b) => (b.updatedAt || 0) - (a.updatedAt || 0)).slice(0, 12);
+    const watchlistItems = Object.values(store.watchlist).slice(0, 12);
+    const shortcuts = '<nav class="home-shortcuts" aria-label="Quick navigation">' +
+      '<button data-route="/discover">' + uiIcon("compass") + ' Discover anime</button>' +
+      '<button data-route="/library">' + uiIcon("library") + ' Your library</button>' +
+      '<button data-route="/history">' + uiIcon("history") + ' Continue watching</button>' +
+      '</nav>';
+    $("#view").innerHTML =
+      '<section class="home-welcome native-home-header"><div id="home-profile-slot">' + profileGreetingMarkup() + '</div>' +
+        '<div class="welcome-actions"><button data-route="/news" aria-label="Anime news">' + uiIcon("news") + '</button>' +
+        '<button class="notification-button" data-route="/notifications" aria-label="Notifications">' + uiIcon("bell") +
+        '<span class="news-badge" data-news-badge hidden></span></button>' +
+        '<button data-route="/settings" aria-label="Settings">' + uiIcon("settings") + '</button></div></section>' +
+      (spotlightItems.length
+        ? '<div class="trending-label">' + uiIcon("star") + ' Trending anime</div>' + spotlightPanel(spotlightItems)
+        : '<div class="catalogue-quiet-error" role="status"><strong>Trending anime is temporarily unavailable.</strong>' +
+          '<button class="btn btn-secondary" data-retry-home>Retry catalogue</button></div>') +
+      (state.homeStale ? '<p class="catalogue-stale-note">Showing saved catalogue results while AniList refreshes.</p>' : '') +
+      shortcuts +
+      resumeShelf(continueItems) +
+      (watchlistItems.length ? shelf("From your watchlist", "Your saved anime", watchlistItems, "/library") : "") +
+      (airing.length ? shelf("Currently airing", "Series releasing now", airing.slice(0,14), sectionUrl("airing")) : "") +
+      (trending.length ? shelf("Trending right now", "", trending.slice(0,14), sectionUrl("trending")) : "") +
+      (popular.length ? shelf("Popular with fans", "", popular.slice(0,14), sectionUrl("popular")) : "") +
+      (upcoming.length ? shelf("Coming soon", "", upcoming.slice(0,14), sectionUrl("upcoming")) : "") +
+      (movies.length ? shelf("Anime movies", "", movies.slice(0,14), sectionUrl("movies")) : "") +
+      (top.length ? shelf("Top rated", "", top.slice(0,14), sectionUrl("top")) : "") +
+      (hidden.length ? shelf("Hidden gems", "", hidden.slice(0,14), sectionUrl("hidden")) : "");
+    scheduleSpotlight();
+    updateNewsBadge();
+    // News is available from the two header buttons, not a Home shelf.
+    void loadNews();
+  }
+  async function renderHome(force = false) {
+    const token = ++state.token;
+    const existing = state.home && Object.values(state.home).some(rows => rows?.length);
+    const stored = savedHome();
+    if (!force && (existing || stored)) {
+      if (!existing) setHomeData(stored);
+      paintHome();
+      // A genuinely fresh local cache should be used without another network call.
+      if (Date.now() - Number(state.homeUpdatedAt || 0) < HOME_TTL_MS) return;
+      // Stale-while-revalidate: keep the page visible even if upstream is blocked.
+      fetchHomeCatalogue().then(entry => {
+        if (token === state.token && state.route === "/home") {
+          setHomeData(entry);
+          paintHome();
+        }
+      }).catch(() => {});
+      return;
+    }
+    if (!force) showLoading("Opening Home");
+    try {
+      const entry = await fetchHomeCatalogue();
+      if (token !== state.token || state.route !== "/home") return;
+      setHomeData(entry);
+      paintHome();
     } catch (error) {
-      if (token !== state.token) return;
-      $("#view").innerHTML = '<div class="empty-state"><h3>Catalogue unavailable</h3><p>' + escapeHtml(error.message) + '</p><button class="btn btn-primary" data-route="/discover">Retry</button></div>';
+      if (token !== state.token || state.route !== "/home") return;
+      if (existing || stored) {
+        if (!existing) setHomeData(stored);
+        state.homeStale = true;
+        paintHome();
+        return;
+      }
+      // Home and saved progress remain usable during an AniList outage.
+      state.home = homeArrays({});
+      state.homeStale = false;
+      paintHome();
     }
   }
 
-  async function renderSearch(term) {
-    const token = ++state.token;
-    state.searchTerm = term || "";
-    $("#view").innerHTML = pageHead("SEARCH", "Search anime", "Search titles using the AniList catalogue.") +
-      '<form id="search-form" class="search-box-large"><span>⌕</span><input id="search-page-input" value="' + escapeHtml(term || "") + '" placeholder="Try Naruto, Frieren, One Piece…" autocomplete="off"><button class="btn btn-primary" type="submit">Search</button></form>' +
-      '<div id="search-results"><div class="empty-state"><div class="empty-icon">⌕</div><h3>What are you in the mood for?</h3><p>Enter an anime title to find matching entries.</p></div></div>';
-    if (!term) return;
+  function discoverSearchMarkup(term) {
+    return '<form id="search-form" class="discover-unified-search" role="search">' +
+      uiIcon("search") + '<input id="search-page-input" type="search" autocomplete="off" value="' +
+      escapeHtml(term || "") + '" placeholder="Search anime titles…" aria-label="Search anime">' +
+      '<button class="btn btn-primary" type="submit">Search</button></form>';
+  }
+  async function searchCatalogue(term) {
+    const key = term.toLowerCase().trim();
+    const prior = searchCache.get(key);
+    if (prior && Date.now() - prior.updatedAt < 10 * 60_000) return prior;
     try {
-      const result = await searchAniList(term, 1);
-      if (token !== state.token) return;
-      state.search = result.media || [];
-      $("#search-results").innerHTML = '<div class="section-heading"><div><h2 class="section-title">Results</h2><p class="section-note">' + state.search.length + ' matching titles</p></div></div>' + grid(state.search);
-    } catch (error) {
-      if (token !== state.token) return;
-      $("#search-results").innerHTML = '<div class="empty-state"><h3>Search could not complete</h3><p>' + escapeHtml(error.message) + '</p></div>';
+      const response = await fetch("/api/catalog?view=search&q=" + encodeURIComponent(term), {
+        headers: { Accept: "application/json" }
+      });
+      const payload = await response.json();
+      if (!response.ok || !Array.isArray(payload?.media)) throw new Error(payload?.error || "Live search unavailable");
+      const entry = { rows: payload.media, stale: Boolean(payload.stale), updatedAt: Date.now() };
+      searchCache.set(key, entry);
+      return entry;
+    } catch (_) {
+      try {
+        const result = await searchAniList(term, 1);
+        const entry = { rows: result?.media || [], stale: false, updatedAt: Date.now() };
+        searchCache.set(key, entry);
+        return entry;
+      } catch (error) {
+        const pool = state.home ? Object.values(state.home).flat() : [];
+        const seen = new Set();
+        const filtered = pool.filter(media => {
+          const value = String(media.id || "");
+          if (!value || seen.has(value)) return false;
+          seen.add(value);
+          return slug([titleOf(media), media.title?.romaji, media.title?.native].join(" "))
+            .includes(slug(term));
+        });
+        if (!filtered.length) throw error;
+        return { rows: filtered.slice(0,24), stale: true, updatedAt: Date.now() };
+      }
     }
-    const input = $("#search-page-input");
-    if (input) input.focus({ preventScroll: true });
+  }
+  async function renderDiscover(term = "", focusSearch = false) {
+    const token = ++state.token;
+    const query = String(term || "").trim();
+    state.discoverTerm = query;
+    const sort = state.discoverSort || "TRENDING_DESC";
+    const options = [["TRENDING_DESC","Trending"],["POPULARITY_DESC","Most popular"],["SCORE_DESC","Top rated"]];
+    $("#view").innerHTML = pageHead("", "Discover anime", "Find your next series") +
+      discoverSearchMarkup(query) +
+      '<div id="discover-results" aria-live="polite"><section class="page-skeleton">' +
+      '<div class="skeleton-line short"></div><div class="skeleton-grid">' +
+      Array.from({ length: 6 }, () => '<span class="skeleton-poster"></span>').join("") + '</div></section></div>';
+    if (focusSearch) $("#search-page-input")?.focus({ preventScroll: true });
+    try {
+      if (query) {
+        const result = await searchCatalogue(query);
+        if (token !== state.token || state.route !== "/discover") return;
+        state.search = result.rows;
+        $("#discover-results").innerHTML =
+          '<div class="section-heading"><div><h2 class="section-title">Search results</h2>' +
+          '<p class="section-note">' + result.rows.length + ' titles' +
+          (result.stale ? ' · showing saved results' : '') + '</p></div></div>' +
+          (result.rows.length ? grid(result.rows) :
+            '<div class="empty-state"><h3>No matching anime found</h3><p>Try another title or spelling.</p></div>');
+        return;
+      }
+      let home = state.home;
+      if (!home || !Object.values(home).some(rows => rows?.length)) {
+        const entry = savedHome() || await fetchHomeCatalogue();
+        if (token !== state.token || state.route !== "/discover") return;
+        setHomeData(entry);
+        home = state.home;
+      }
+      if (token !== state.token || state.route !== "/discover") return;
+      const popular = home.popular || [], trending = home.trending || [], top = home.top || [];
+      const rows = sort === "POPULARITY_DESC" ? popular : sort === "SCORE_DESC" ? top : trending;
+      state.discover = rows;
+      $("#discover-results").innerHTML =
+        '<section class="section"><div class="section-heading"><div><h2 class="section-title">Browse anime</h2>' +
+        '<p class="section-note">Explore by ranking or search by title.</p></div>' +
+        '<select id="discover-sort" class="select-control" aria-label="Sort anime">' +
+        options.map(([value,label]) => '<option value="' + value + '"' + (sort === value ? ' selected' : '') +
+          '>' + label + '</option>').join("") + '</select></div>' +
+        (rows.length ? grid(rows) : '<div class="empty-state"><h3>No anime in this category</h3>' +
+          '<p>Try another sort or search above.</p></div>') + '</section>';
+    } catch (error) {
+      if (token !== state.token || state.route !== "/discover") return;
+      $("#discover-results").innerHTML =
+        '<div class="empty-state"><h3>Catalogue temporarily unavailable</h3><p>' +
+        escapeHtml(waitNotice(error)) + '</p><button class="btn btn-primary" data-retry-discover>Try again</button>' +
+        '<button class="btn btn-quiet" data-route="/library">Open your library</button></div>';
+    }
+  }
+  function renderSearch(term) {
+    navigate("/discover" + (term ? "?q=" + encodeURIComponent(term) : "?focus=search"));
   }
 
 
@@ -713,8 +949,7 @@
     const items = Object.values(store.mangaList).filter(media => media?.id);
     $("#view").innerHTML = pageHead("", "Your Manga Library", "Saved locally and imported from AniList") +
       '<div class="account-actions"><button class="btn btn-secondary" data-route="/manga">' +
-      uiIcon("chevron-left") + ' Discover manga</button><button class="btn btn-secondary" data-route="/downloads">' +
-      uiIcon("download") + ' Offline downloads</button></div>' +
+      uiIcon("chevron-left") + ' Discover manga</button></div>' +
       (items.length ? mangaGrid(items) : '<div class="empty-state"><h3>No saved manga</h3>' +
       '<p>Save a manga from its details page or connect AniList to import your reading list.</p>' +
       '<button class="btn btn-primary" data-route="/manga">Browse manga</button></div>');
@@ -761,8 +996,7 @@
         escapeHtml(query) + '"><button class="btn btn-primary" type="submit">Search</button></form>' +
         '<div class="manga-topline"><div class="feature-chip">' + uiIcon("manga") +
         ' AniList manga catalogue</div><div class="account-actions"><button class="btn btn-secondary" data-route="/manga-library">' +
-        uiIcon("bookmark") + ' Saved</button><button class="btn btn-secondary" data-route="/downloads">' +
-        uiIcon("download") + ' Downloads</button><button class="btn btn-secondary" data-open-cbz>' +
+        uiIcon("bookmark") + ' Saved</button><button class="btn btn-secondary" data-open-cbz>' +
         uiIcon("manga") + ' Import CBZ</button></div></div>' +
         '<input id="cbz-file-input" type="file" accept=".cbz,application/zip" style="display:none">' +
         savedMangaShelf() +
@@ -1049,20 +1283,57 @@
       '</div></div>';
   }
 
+  function namedEpisodeArcs() {
+    return window.AniDashEpisodeArcs?.forMedia?.(state.detail || state.player?.media) || [];
+  }
+  function activeEpisodeArc(arcs) {
+    if (!arcs.length || state.episodeArcMode !== "arcs") return null;
+    const selected = arcs.find(arc => arc.id === state.selectedArcId);
+    if (selected) return selected;
+    const resume = Number(store.history[String(state.detail?.id || "")]?.episode || 1);
+    const matching = arcs.find(arc => resume >= arc.start && resume <= arc.end) || arcs[0];
+    state.selectedArcId = matching.id;
+    return matching;
+  }
+
   function renderEpisodeBrowser() {
     const container = $("#episode-list");
     const pagination = $("#episode-pagination");
     if (!container || !pagination) return;
-    const filtered = matchingEpisodes(state.detailEpisodes, state.episodeFilter);
+    const arcs = namedEpisodeArcs();
+    if (state.episodeArcMode == null) state.episodeArcMode = arcs.length ? "arcs" : "all";
+    if (!arcs.length) state.episodeArcMode = "all";
+    const arc = activeEpisodeArc(arcs);
+    const controls = $("#episode-arc-tabs");
+    if (controls) {
+      controls.innerHTML = state.episodeArcMode === "arcs" && arcs.length ?
+        '<div class="episode-arcs-header"><span>Verified story arcs</span><small>' +
+        arcs.length + ' groups</small></div><div class="episode-arc-scroll" role="group" aria-label="Story arcs">' +
+        arcs.map(group => {
+          const end = group.end >= 9999 ? group.start + "+" : group.start + "–" + group.end;
+          const active = group.id === arc?.id;
+          return '<button class="episode-arc-chip' + (active ? " active" : "") +
+            '" data-episode-arc="' + escapeHtml(group.id) + '" aria-pressed="' + active + '">' +
+            '<strong>' + escapeHtml(group.title) + '</strong><span>Episodes ' + end + '</span></button>';
+        }).join("") + '</div>' : "";
+    }
+    const groupSelector = $("#episode-group-mode");
+    if (groupSelector) groupSelector.value = state.episodeArcMode;
+    const layoutSelector = $("#episode-view-mode");
+    if (layoutSelector) layoutSelector.value = setting("episodeViewMode") || "grid";
+    const base = matchingEpisodes(state.detailEpisodes, state.episodeFilter);
+    const filtered = arc
+      ? base.filter(item => Number(item.number) >= arc.start && Number(item.number) <= arc.end)
+      : base;
     const pageCount = Math.max(1, Math.ceil(filtered.length / DETAIL_EPISODES_PER_PAGE));
     state.episodePage = Math.max(1, Math.min(pageCount, Number(state.episodePage) || 1));
     const start = (state.episodePage - 1) * DETAIL_EPISODES_PER_PAGE;
     container.innerHTML = filtered.slice(start, start + DETAIL_EPISODES_PER_PAGE).map(episodeCard).join("") ||
-      '<div class="empty-state compact-empty">No matching episodes. Try another episode number or title.</div>';
+      '<div class="empty-state compact-empty">No episodes in this range. Try another arc or search.</div>';
     pagination.innerHTML = episodePagerMarkup(filtered.length, state.episodePage, DETAIL_EPISODES_PER_PAGE, "detail");
   }
 
-  function renderPlayerEpisodeBrowser() {
+    function renderPlayerEpisodeBrowser() {
     const container = $("#player-episode-items");
     const pagination = $("#player-episode-pagination");
     if (!container || !pagination || !state.player) return;
@@ -1082,7 +1353,7 @@
   function jumpToEpisode(scope) {
     const input = scope === "player" ? $("#player-episode-jump") : $("#episode-jump");
     const query = input ? Number.parseInt(input.value, 10) : Number.NaN;
-    if (!Number.isFinite(query) || query < 1) {
+    if (!Number.isSafeInteger(query) || query < 1) {
       toast("Enter a valid episode number.");
       return;
     }
@@ -1090,21 +1361,35 @@
       state.detailEpisodes,
       scope === "player" ? state.playerEpisodeFilter : state.episodeFilter
     );
-    const index = filtered.findIndex(item => Number(item.number) === query);
-    if (index < 0) {
-      toast("Episode " + query + " was not found in the current source list.");
+    const match = filtered.find(item => Number(item.number) === query);
+    if (!match) {
+      toast("Episode " + query + " is not in the available episode list.");
       return;
     }
     if (scope === "player") {
+      const index = filtered.indexOf(match);
       state.playerEpisodePage = Math.floor(index / PLAYER_EPISODES_PER_PAGE) + 1;
       renderPlayerEpisodeBrowser();
-    } else {
-      state.episodePage = Math.floor(index / DETAIL_EPISODES_PER_PAGE) + 1;
-      renderEpisodeBrowser();
+      return;
     }
+    // A direct jump can cross arc boundaries. Select the verified arc first.
+    const arcs = namedEpisodeArcs();
+    if (state.episodeArcMode === "arcs" && arcs.length) {
+      const target = arcs.find(arc => query >= arc.start && query <= arc.end);
+      if (target) state.selectedArcId = target.id;
+      else state.episodeArcMode = "all";
+    }
+    const arc = activeEpisodeArc(arcs);
+    const displayed = arc
+      ? filtered.filter(item => Number(item.number) >= arc.start && Number(item.number) <= arc.end)
+      : filtered;
+    const index = displayed.findIndex(item => Number(item.number) === query);
+    state.episodePage = Math.floor(Math.max(0,index) / DETAIL_EPISODES_PER_PAGE) + 1;
+    renderEpisodeBrowser();
+    $("#episode-list")?.scrollIntoView?.({ behavior: "smooth", block: "nearest" });
   }
 
-  async function prepareMediaSources(media) {
+    async function prepareMediaSources(media) {
     const matches = await findProviderMatches(media);
 
     // JustAnime's native Android provider uses AniList IDs as its anime IDs.
@@ -1319,6 +1604,8 @@
     state.selectedMatch = null;
     state.episodePage = 1;
     state.episodeFilter = "";
+    state.episodeArcMode = null;
+    state.selectedArcId = null;
     showLoading("Opening anime…");
     try {
       const media = await getAnime(id);
@@ -1371,7 +1658,11 @@
           '<div class="button-row"><button class="btn btn-primary" data-play-first="' + media.id + '" ' + (episodes.length ? "" : "disabled") + '>▶ Start watching</button><button class="btn btn-secondary" data-watchlist="' + media.id + '">' + (watched ? "✓ In watchlist" : "♡ Add to watchlist") + '</button></div>' +
         '</div></div></div>' +
       '<div class="details-layout"><section class="content-panel"><div class="section-heading"><div><h2 class="panel-title">Episodes</h2><p class="section-note">' + (matches.length ? escapeHtml(sourceInfo) : "Open an episode to check available streams.") + '</p></div><span class="watchlist-badge">' + episodes.length + ' listed</span></div>' +
-        '<div class="episode-toolbar"><input id="episode-filter" class="input-control" style="max-width:180px" placeholder="Search episodes…"><input id="episode-jump" class="input-control episode-jump-input" type="number" min="1" placeholder="EP #"><button class="btn btn-quiet" data-episode-go="detail">Go</button><button class="btn btn-quiet" data-refresh-sources>Retry sources</button></div>' +
+        '<div class="episode-toolbar"><input id="episode-filter" class="input-control" placeholder="Find an episode…" aria-label="Find episode"><input id="episode-jump" class="input-control episode-jump-input" type="number" min="1" placeholder="EP #" aria-label="Jump to episode number"><button class="btn btn-quiet" data-episode-go="detail">Go</button>' +
+        '<select class="select-control episode-view-selector" id="episode-view-mode" aria-label="Episode layout"><option value="grid">Grid</option><option value="list">List</option></select>' +
+        (window.AniDashEpisodeArcs?.forMedia?.(media)?.length ?
+          '<select class="select-control episode-group-selector" id="episode-group-mode" aria-label="Episode grouping"><option value="arcs">Story arcs</option><option value="all">All episodes</option></select>' : '') +
+        '</div><div id="episode-arc-tabs"></div>' +
         '<div id="episode-list" class="episode-list"></div><div id="episode-pagination"></div>' +
         (!episodes.length ? '<div class="notice" style="margin-top:14px">No episodes are listed yet. Refresh the episode list.</div>' : '') +
         '</section><aside class="content-panel"><h2 class="panel-title">About this anime</h2><div class="info-list">' +
@@ -2509,7 +2800,7 @@
         prefSelect("themeMode", { label:"Theme mode", values:[["light","Light"],["dark","Dark"],["system","Follow device"]] }, "Choose a light, dark or system-matched design.") +
         prefSelect("episodeViewMode", { label:"Episode layout", values:[["list","List"],["grid","Grid"]] }, "How episodes appear on the anime details screen.") +
         prefToggle("showMangaTab", "Show Manga navigation", "Off by default; enable Manga as an optional tab.") +
-        prefToggle("showNewsSection", "News on Home", "Show real anime headlines on your homepage.")) +
+        "") +
       settingsGroup("News & notifications",
         prefToggle("showNewsNotifications", "In-app news notifications", "Unread anime headlines in the local inbox; not system push.") +
         '<div class="preference-row"><div><h3 class="preference-title">Notification inbox</h3><p class="preference-help">View and mark headlines read on this device.</p></div><button class="btn btn-quiet" data-route="/notifications">Open inbox</button></div>') +
@@ -2586,13 +2877,16 @@
     document.body.dataset.view = current.slice(1);
     updateActiveNav(current);
     if (current === "/home") return renderHome();
-    if (current === "/discover") return renderDiscover();
+    if (current === "/discover") {
+      const params = new URLSearchParams(hash.split("?")[1] || "");
+      return renderDiscover(params.get("q") || "", params.has("focus"));
+    }
     if (current === "/manga") {
       const params = new URLSearchParams(hash.split("?")[1] || "");
       return renderManga(params.get("q") || "");
     }
     if (current === "/manga-library") return renderSavedManga();
-    if (current === "/downloads") return renderDownloads();
+    if (current === "/downloads") { navigate("/library"); return; }
     if (current === "/manga-section" && parts[1]) {
       const params = new URLSearchParams(hash.split("?")[1] || "");
       return renderMangaSection(parts[1], Math.max(1, Number(params.get("page") || 1)));
@@ -2604,7 +2898,8 @@
     }
     if (current === "/search") {
       const params = new URLSearchParams(hash.split("?")[1] || "");
-      return renderSearch(params.get("q") || "");
+      navigate("/discover" + (params.get("q") ? "?q=" + encodeURIComponent(params.get("q")) : "?focus=search"));
+      return;
     }
     if (current === "/library") return renderLibrary();
     if (current === "/history") return renderHistory();
@@ -2618,13 +2913,15 @@
   }
 
   function navigate(path) {
-    location.hash = "#" + path;
+    const next = "#" + path;
+    if (location.hash === next) { void route(); return; }
+    location.hash = next;
   }
 
   async function submitSearch(term) {
     const value = String(term || "").trim();
     if (!value) return;
-    navigate("/search?q=" + encodeURIComponent(value));
+    navigate("/discover?q=" + encodeURIComponent(value));
   }
 
   document.addEventListener("click", async event => {
@@ -2685,6 +2982,8 @@
       return;
     }
     if (target.hasAttribute("data-refresh-news")) { void loadNews(true); return; }
+    if (target.hasAttribute("data-retry-home")) { void renderHome(true); return; }
+    if (target.hasAttribute("data-retry-discover")) { void renderDiscover(state.discoverTerm || ""); return; }
     if (target.hasAttribute("data-route")) {
       event.preventDefault();
       navigate(target.getAttribute("data-route"));
@@ -2930,6 +3229,13 @@
       }
       return;
     }
+    if (target.hasAttribute("data-episode-arc")) {
+      state.selectedArcId = target.getAttribute("data-episode-arc");
+      state.episodeArcMode = "arcs";
+      state.episodePage = 1;
+      renderEpisodeBrowser();
+      return;
+    }
     if (target.hasAttribute("data-episode-go")) {
       jumpToEpisode(target.getAttribute("data-episode-go"));
       return;
@@ -3128,7 +3434,22 @@
     }
     if (event.target.id === "discover-sort") {
       state.discoverSort = event.target.value;
-      renderDiscover();
+      renderDiscover(state.discoverTerm || "");
+      return;
+    }
+    if (event.target.id === "episode-view-mode") {
+      store.preferences.episodeViewMode = event.target.value === "list" ? "list" : "grid";
+      persist();
+      applyPreferences();
+      renderEpisodeBrowser();
+      return;
+    }
+    if (event.target.id === "episode-group-mode") {
+      state.episodeArcMode = event.target.value === "arcs" ? "arcs" : "all";
+      state.selectedArcId = null;
+      state.episodePage = 1;
+      renderEpisodeBrowser();
+      return;
     }
   });
 
