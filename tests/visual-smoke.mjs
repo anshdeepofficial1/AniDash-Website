@@ -361,10 +361,26 @@ try {
   streamingPage.on("pageerror", err => errors.push(err.message));
   await streamingPage.goto(address + "/watch/21/2", {waitUntil:"domcontentloaded"});
   await streamingPage.locator("#anime-video").waitFor({timeout:15000});
-  await streamingPage.waitForFunction(() => {
-    const video = document.getElementById("anime-video");
-    return !!video && video.currentSrc.includes("fixture.anidash.test");
-  }, null, {timeout:12000});
+  try {
+    await streamingPage.waitForFunction(() => {
+      const video = document.getElementById("anime-video");
+      return !!video && (video.currentSrc || video.getAttribute("src") || "").includes("fixture.anidash.test");
+    }, null, {timeout:12000});
+  } catch (error) {
+    console.log("Streaming race diagnostic", JSON.stringify(await streamingPage.evaluate(() => {
+      const video = document.getElementById("anime-video");
+      const embed = document.getElementById("anime-embed");
+      return {
+        src: video?.getAttribute("src"), currentSrc: video?.currentSrc,
+        videoError: video?.error?.code, readyState: video?.readyState, networkState: video?.networkState,
+        embedSrc: embed?.getAttribute("src"), embedHidden: embed?.hidden,
+        streamButtons: Array.from(document.querySelectorAll("[data-stream]")).map(x=>x.textContent),
+        overlay: document.getElementById("player-overlay")?.textContent,
+        status: document.getElementById("stream-status")?.textContent
+      };
+    })));
+    throw error;
+  }
   const playbackStatus = await streamingPage.evaluate(() => ({
     source: document.getElementById("anime-video").currentSrc,
     embeddedHidden: document.getElementById("anime-embed").hidden,
