@@ -2297,7 +2297,6 @@
       settingsGroup("Video Player", 
         prefSelect("preferredAudio", { label:"Preferred audio", values:[["dub","English DUB"],["sub","Original SUB"]] }, "Default audio language when a source supports it.") +
         prefSelect("defaultQuality", { label:"Preferred quality", values:[["Auto","Auto (recommended)"],["1080p","1080p"],["720p","720p"],["480p","480p"],["360p","360p"]] }, "Choose the closest stream quality actually offered by a source.") +
-        prefSelect("preferredSource", { label:"Priority source", values:[["auto","Automatic"],["justanime","JustAnime"],["hianime","HiAnime (legacy)"],["anikoto","AniKoto"]] }, "Sets which provider to try first; fallback providers remain available.") +
         prefToggle("autoEnableSubtitles", "Auto-enable subtitles", "Enable available subtitle tracks when playback begins.") +
         prefToggle("autoSkipIntro", "Auto-skip intros", "Skip verified intro time ranges when providers supply AniSkip timing.") +
         prefToggle("showNextEpisodePrompt", "Next episode prompt", "Offer the next episode when the current video finishes.")) +
@@ -2312,7 +2311,7 @@
         '<div class="preference-row"><div><h3 class="preference-title">Clear local watchlist</h3><p class="preference-help">Removes local titles only; AniList data will not be deleted.</p></div><button class="btn btn-quiet" data-clear-watchlist>Clear</button></div>') +
       settingsGroup("App & support",
         '<div class="preference-row"><div><h3 class="preference-title">Install AniDash</h3><p class="preference-help">Use the web app on an iPhone, Android phone or desktop.</p></div><button class="btn btn-quiet" data-install>Install guide</button></div>' +
-        '<div class="preference-row"><div><h3 class="preference-title">Sources & troubleshooting</h3><p class="preference-help">View JustAnime, HiAnime and AniKoto playback availability information.</p></div><button class="btn btn-quiet" data-open-sources>View sources</button></div>' +
+        '<div class="preference-row"><div><h3 class="preference-title">Playback troubleshooting</h3><p class="preference-help">Stream options appear after AniDash resolves a supported media link.</p></div><button class="btn btn-quiet" data-open-sources>How playback works</button></div>' +
         '<div class="preference-row"><div><h3 class="preference-title">About</h3><p class="preference-help">AniDash Watch PWA · Android-inspired UI. Native downloads, OS permissions, Android notifications and AniCORE are not implemented on the website.</p></div><a class="btn btn-quiet" href="https://github.com/anshdeepofficial1/AniDash-Website" target="_blank" rel="noopener">GitHub</a></div>') +
       '<p class="settings-footnote">Preferences are saved on this device. Logging into AniList syncs anime lists and optional watched-episode progress, but cannot transfer settings or exact video timestamps between browsers.</p></div>';
   }
@@ -2328,11 +2327,9 @@
   }
 
   function openSourcesModal() {
-    const providers = BUILTIN_PROVIDERS;
-    openModal('<div class="modal-head"><div><div class="eyebrow">ANIDASH BUILT-IN PROVIDERS</div><h2>Three native anime sources</h2><p>These sources are built into AniDash Watch. Their APIs are called through this website’s backend; viewers do not need to install or import extensions.</p></div><button class="close-modal" data-close>×</button></div>' +
-      '<div class="settings-grid">' + providers.map(provider =>
-        '<section class="settings-card"><div class="eyebrow">' + escapeHtml(provider.language) + '</div><h3>' + escapeHtml(provider.name) + '</h3><p>' + escapeHtml(provider.description) + '</p></section>'
-      ).join("") + '</div><div class="notice" style="margin-top:14px">A source can occasionally be unavailable when its upstream website or API is down. AniDash reports that failure instead of pretending a stream is ready.</div><div class="modal-actions"><button class="btn btn-primary" data-close>Done</button></div>');
+    openModal('<div class="modal-head"><div><h2>How playback works</h2><p>AniDash checks media sources automatically when you open an episode. Stream options appear only after a media link is resolved.</p></div><button class="close-modal" data-close aria-label="Close">×</button></div>' +
+      '<div class="account-info"><strong>Playback unavailable?</strong><p>Retry playback, switch to subtitled audio, or open another episode. Some titles do not have English audio available.</p></div>' +
+      '<div class="modal-actions"><button class="btn btn-primary" data-close>Done</button></div>');
   }
 
   function openInstallGuide() {
