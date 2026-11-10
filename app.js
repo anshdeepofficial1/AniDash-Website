@@ -359,7 +359,7 @@
   }
   function updateNewsBadge() {
     const count = unreadNewsCount();
-    $("[data-news-badge]").forEach(el => {
+    $$("[data-news-badge]").forEach(el => {
       el.textContent = count > 9 ? "9+" : String(count);
       el.hidden = count === 0;
     });
