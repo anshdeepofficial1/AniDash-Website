@@ -250,6 +250,7 @@ function normaliseSources(req, rawSources, category, label, inheritedHeaders = {
       }),
       originalUrl: url,
       quality: String(item?.quality || "Auto"),
+      server: label === "hd-1" ? "HD-1" : label === "hd-2" ? "HD-2" : label,
       type: String(item?.type || label),
       isM3U8,
       isDub: category === "dub"
