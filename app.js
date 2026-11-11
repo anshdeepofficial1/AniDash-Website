@@ -3002,7 +3002,7 @@
   }
 
   function updateActiveNav(route) {
-    const active = route === "/watch" || route === "/section" ? "/discover" :
+    const active = route === "/section" ? "/discover" :
       route === "/manga-library" ? "/manga" : route;
     $$("[data-route]").forEach(item => {
       const value = item.getAttribute("data-route");
