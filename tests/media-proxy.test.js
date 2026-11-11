@@ -65,3 +65,39 @@ test("unreachable media hosts return upstream 502, not misleading bad request 40
     globalThis.fetch = oldFetch;
   }
 });
+
+
+test("Gigi's verified redirect to vidcache.net stays within the safe host list", async () => {
+  const oldFetch = globalThis.fetch;
+  const original = "https://www.animegg.org/watch/394.mp4";
+  const redirected = "https://cdn.vidcache.net/videos/394.mp4";
+  const requests = [];
+  globalThis.fetch = async url => {
+    requests.push(String(url));
+    if (String(url) === original) {
+      return {
+        status: 302, ok: false,
+        headers: { get: key => key === "location" ? redirected : null }
+      };
+    }
+    assert.equal(String(url), redirected);
+    return {
+      status: 206, ok: true, url: redirected,
+      headers: { get: key => key === "content-type" ? "video/mp4" : null },
+      body: null
+    };
+  };
+  try {
+    const req = request(original);
+    req.query.hls = "0";
+    req.method = "HEAD";
+    req.headers.range = "bytes=0-0";
+    const res = response();
+    await mediaProxy(req, res);
+    assert.equal(res.statusCode, 206);
+    assert.equal(res.headers["content-type"], "video/mp4");
+    assert.deepEqual(requests, [original, redirected]);
+  } finally {
+    globalThis.fetch = oldFetch;
+  }
+});
