@@ -2359,7 +2359,7 @@
         const rawName = String(stream.server || stream.name || stream.serverName ||
           stream.type || "").trim();
         const aliases = {
-          megaplay: "Momo", zokoanime: "Zoko", animegg: "Gigi",
+          megaplay: "MegaPlay", zokoanime: "Zoko", animegg: "Gigi",
           anineko: "Neko", "hd-1": "HD-1", "hd-2": "HD-2"
         };
         const generic = /^(?:justanime|hianime|anikoto|source|server|auto|embed|iframe|hls|mp4|video|direct)$/i;
