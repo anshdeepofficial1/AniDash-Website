@@ -62,3 +62,22 @@ jobs:
           name: anidash-ui-smoke
           path: test-artifacts/*.png
           if-no-files-found: ignore
+
+
+  live-stream:
+    name: Real upstream episode 394 DUB diagnostic
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    # Real upstream availability is not under this repository's control.
+    # Diagnose failures without making deterministic UI tests falsely fail.
+    continue-on-error: true
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Probe live server discovery
+        run: node tests/live-provider-check.mjs
