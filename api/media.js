@@ -181,24 +181,50 @@ export default async function handler(req, res) {
   try {
     const requested = safeTarget(req.query.url);
     const context = proxyContext(requested);
-    const usesExternalProxy = context.original !== null;
-    const target = requested;
-    const playbackHeaders = usesExternalProxy
-      ? context.headers
-      : sanitisePlaybackHeaders(req.query.headers);
-    const upstream = await fetchAllowed(target, req, playbackHeaders, usesExternalProxy);
+    const original = context.original;
+    const playbackHeaders = original ? context.headers : sanitisePlaybackHeaders(req.query.headers);
+    let target = requested;
+    let usesExternalProxy = original !== null;
+    let upstream;
+
+    // The remote Neko relay is a useful fallback, not a single point of
+    // failure. If that relay fails from the current region, retry the original
+    // vetted host directly with its real Referer/Origin headers.
+    async function tryDirectOrigin() {
+      if (!original) return false;
+      const response = await fetchAllowed(original, req, playbackHeaders, false);
+      if (!response.ok && response.status !== 206) return false;
+      upstream = response;
+      target = original;
+      usesExternalProxy = false;
+      return true;
+    }
+    try {
+      upstream = await fetchAllowed(target, req, playbackHeaders, usesExternalProxy);
+    } catch (error) {
+      if (!original) throw error;
+      const worked = await tryDirectOrigin();
+      if (!worked) throw error;
+    }
     if (!upstream.ok && upstream.status !== 206) {
-      return res.status(upstream.status).end();
+      if (!usesExternalProxy || !(await tryDirectOrigin().catch(() => false))) {
+        return res.status(upstream.status).end();
+      }
     }
 
     const contentType = String(upstream.headers.get("content-type") || "").toLowerCase();
-    const originalTarget = context.original || target;
+    const originalTarget = original || target;
     const isPlaylist = req.query.hls === "1" ||
       contentType.includes("mpegurl") ||
       /\.m3u8(?:$|\?)/i.test(originalTarget.pathname + originalTarget.search);
 
     if (isPlaylist) {
-      const body = await upstream.text();
+      let body = await upstream.text();
+      if (!body.trim().startsWith("#EXTM3U") && usesExternalProxy) {
+        // Some relays return a success status with an HTML challenge page.
+        // The direct origin may still return a valid manifest.
+        if (await tryDirectOrigin().catch(() => false)) body = await upstream.text();
+      }
       if (!body.trim().startsWith("#EXTM3U")) {
         return res.status(502).json({ error: "The upstream did not return a valid HLS playlist" });
       }
@@ -206,10 +232,9 @@ export default async function handler(req, res) {
       res.setHeader("Cache-Control", "private, no-store");
       res.setHeader("Access-Control-Allow-Origin", "*");
       res.setHeader("Access-Control-Allow-Headers", "Range, Content-Type");
-      const playlistBase = context.original || new URL(upstream.url || target.toString());
-      const headersToForward = context.original ? context.headers : playbackHeaders;
+      const playlistBase = usesExternalProxy ? original : new URL(upstream.url || target.toString());
       return res.status(200).send(
-        rewritePlaylist(body, playlistBase, getPublicBase(req), headersToForward, usesExternalProxy)
+        rewritePlaylist(body, playlistBase, getPublicBase(req), playbackHeaders, usesExternalProxy)
       );
     }
 
@@ -226,7 +251,8 @@ export default async function handler(req, res) {
     return pipeBody(upstream, res);
   } catch (error) {
     const status = /allow-list|invalid URL|protocol/i.test(error?.message || "") ? 403
-      : error?.name === "TimeoutError" || error?.name === "AbortError" ? 504 : 400;
+      : error?.name === "TimeoutError" || error?.name === "AbortError" ? 504
+      : 502;
     return res.status(status).json({ error: error?.message || "Media proxy failed" });
   }
 }
