@@ -5,6 +5,7 @@ const ALLOWED_HOSTS = new Set([
   "megaplay.buzz",
   "zokoanime.video",
   "animegg.org",
+  "vidcache.net",
   "kwik.cx",
   "kwik.si",
   "kwik.to",
@@ -53,11 +54,19 @@ function headersFor(target, req, custom = {}) {
   const origin = custom.origin || custom.Origin || (() => {
     try { return new URL(referer).origin; } catch { return "https://" + target.hostname; }
   })();
+  const isNexabloom = target.hostname === "nexabloom.top" ||
+    target.hostname.endsWith(".nexabloom.top");
   const headers = {
-    Accept: custom.accept || custom.Accept || "*/*",
+    // Nexabloom serves a real M3U8 to desktop browser fetches, while mobile
+    // Android UA / generic Accept can receive a non-playlist HTML response.
+    Accept: req.query?.hls === "1"
+      ? "application/vnd.apple.mpegurl,application/x-mpegURL,*/*"
+      : (custom.accept || custom.Accept || "*/*"),
     Origin: origin,
     Referer: referer,
-    "User-Agent": custom["user-agent"] || custom["User-Agent"] || req.headers["user-agent"] || "Mozilla/5.0 AniDash-Web"
+    "User-Agent": isNexabloom
+      ? "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36"
+      : (custom["user-agent"] || custom["User-Agent"] || req.headers["user-agent"] || "Mozilla/5.0 AniDash-Web")
   };
   if (req.headers.range) headers.Range = req.headers.range;
   return headers;
