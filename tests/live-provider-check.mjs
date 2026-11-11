@@ -2,6 +2,7 @@
 // This is intentionally separate from deterministic unit tests: third-party
 // hosts may fail from CI due to geo-blocks, anti-bot challenges or outages.
 import justAnime from "../api/justanime.js";
+import mediaProxy from "../api/media.js";
 
 const mediaId = "21";   // One Piece (AniList)
 const episode = "394";
@@ -33,3 +34,37 @@ console.log(JSON.stringify({
   failure: res.statusCode !== 200 ? String(res.body?.error || "Upstream unavailable").slice(0, 350) : null
 }, null, 2));
 if (res.statusCode !== 200 || sources.length === 0) process.exitCode = 1;
+
+// A successful resolver response does not prove that the HLS playlist proxy
+// can retrieve the media. Check one returned stream with the same code Vercel
+// executes, without reading or logging copyrighted video bytes.
+const hlsCandidate = sources.find(item => item.isM3U8 && String(item.url || "").includes("/api/media?"));
+if (hlsCandidate) {
+  const proxy = new URL(hlsCandidate.url);
+  const mediaReq = {
+    method: "HEAD",
+    query: Object.fromEntries(proxy.searchParams.entries()),
+    headers: { ...req.headers, range: "bytes=0-0" }
+  };
+  const mediaRes = {
+    statusCode: 200, headers: {}, body: null,
+    setHeader(k,v) { this.headers[k.toLowerCase()] = v; },
+    status(k) { this.statusCode = k; return this; },
+    json(v) { this.body = v; return this; },
+    send(v) { this.body = v; return this; },
+    end() { return this; }
+  };
+  await mediaProxy(mediaReq, mediaRes);
+  const isPlaylist = String(mediaRes.headers["content-type"] || "").includes("mpegurl");
+  const validPlaylist = isPlaylist && String(mediaRes.body || "").startsWith("#EXTM3U");
+  console.log(JSON.stringify({
+    mediaProbe: "HLS manifest",
+    status: mediaRes.statusCode,
+    contentType: String(mediaRes.headers["content-type"] || "none"),
+    validPlaylist
+  }));
+  if (mediaRes.statusCode !== 200 || !validPlaylist) process.exitCode = 1;
+} else {
+  console.log("HLS manifest probe skipped: no proxied HLS source was returned.");
+}
+
