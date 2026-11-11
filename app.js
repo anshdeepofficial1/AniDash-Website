@@ -588,7 +588,8 @@
   function spotlightPanel(items) {
     const first = items[0];
     if (!first) return "";
-    return '<div class="spotlight-shell" aria-label="Trending anime carousel">' +
+    return '<div class="premium-spotlight">' +
+      '<div class="spotlight-shell" aria-label="Trending anime carousel">' +
       '<div id="spotlight-content"><div class="spotlight-layer is-active">' + spotlightMarkup(first) + '</div></div>' +
       '<button class="spotlight-control prev" data-spotlight-prev title="Previous trending anime" aria-label="Previous trending anime">' +
         uiIcon("chevron-left") + '</button>' +
@@ -597,7 +598,13 @@
       '<div class="spotlight-count" id="spotlight-count">1 / ' + items.length + '</div>' +
       '<div class="spotlight-dots">' + items.map((_,i) =>
         '<button data-spotlight-index="' + i + '" class="' + (i===0 ? "active" : "") +
-        '" aria-label="Go to trending anime ' + (i+1) + '"></button>').join("") + '</div></div>';
+        '" aria-label="Go to trending anime ' + (i+1) + '"></button>').join("") + '</div></div>' +
+      '<div class="spotlight-peeks" role="group" aria-label="Browse trending anime">' + items.map((media,i) =>
+        '<button class="spotlight-peek' + (i===0 ? ' active' : '') + '" data-spotlight-index="' + i +
+        '" title="' + escapeHtml(titleOf(media)) + '" aria-label="Trending ' + (i+1) + ': ' +
+        escapeHtml(titleOf(media)) + '"><img src="' + escapeHtml(imageOf(media)) +
+        '" alt="" loading="lazy" referrerpolicy="no-referrer"><span>' + (i+1) + '</span></button>'
+      ).join("") + '</div></div>';
   }
 
   async function renderSection(key, page = 1) {
@@ -1256,7 +1263,7 @@
   }
 
   const DETAIL_EPISODES_PER_PAGE = 50;
-  const PLAYER_EPISODES_PER_PAGE = 30;
+  const PLAYER_EPISODES_PER_PAGE = 100;
 
   function matchingEpisodes(items, query) {
     const term = slug(query || "");
@@ -1339,15 +1346,46 @@
     if (!container || !pagination || !state.player) return;
     const filtered = matchingEpisodes(state.detailEpisodes, state.playerEpisodeFilter);
     const pageCount = Math.max(1, Math.ceil(filtered.length / PLAYER_EPISODES_PER_PAGE));
+    const selectedIndex = filtered.findIndex(item => Number(item.number) === Number(state.player.episode.number));
+    if (!state.playerEpisodeManualPage && selectedIndex >= 0) {
+      state.playerEpisodePage = Math.floor(selectedIndex / PLAYER_EPISODES_PER_PAGE) + 1;
+    }
     state.playerEpisodePage = Math.max(1, Math.min(pageCount, Number(state.playerEpisodePage) || 1));
-    const start = (state.playerEpisodePage - 1) * PLAYER_EPISODES_PER_PAGE;
-    container.innerHTML = filtered.slice(start, start + PLAYER_EPISODES_PER_PAGE).map(episode =>
-      '<button class="player-episode' + (Number(episode.number) === Number(state.player.episode.number) ? " active" : "") +
-      '" data-player-episode="' + episode.number + '"><span class="player-episode-number">' + episode.number + '</span>' +
-      (episode.thumbnail ? '<img class="player-episode-thumb" src="' + escapeHtml(episode.thumbnail) + '" alt="" loading="lazy" referrerpolicy="no-referrer">' : '') +
-      '<span class="player-episode-title">' + escapeHtml(episode.title || ("Episode " + episode.number)) + '</span></button>'
-    ).join("") || '<div class="compact-empty">No matching episodes.</div>';
-    pagination.innerHTML = episodePagerMarkup(filtered.length, state.playerEpisodePage, PLAYER_EPISODES_PER_PAGE, "player");
+    const page = state.playerEpisodePage;
+    const start = (page - 1) * PLAYER_EPISODES_PER_PAGE;
+    const visible = filtered.slice(start, start + PLAYER_EPISODES_PER_PAGE);
+    const range = $("#player-episode-range");
+    if (range) {
+      range.innerHTML = Array.from({ length: pageCount }, (_, index) => {
+        const first = index * PLAYER_EPISODES_PER_PAGE + 1;
+        const last = Math.min(filtered.length, (index + 1) * PLAYER_EPISODES_PER_PAGE);
+        return '<option value="' + (index + 1) + '"' +
+          (index + 1 === page ? " selected" : "") + '>' + first + '–' + last + '</option>';
+      }).join("");
+      range.disabled = pageCount === 1;
+    }
+    container.innerHTML = visible.map(episode => {
+      const active = Number(episode.number) === Number(state.player.episode.number);
+      const label = 'Episode ' + episode.number + (episode.title ? ': ' + episode.title : '');
+      return '<button class="player-episode' + (active ? " active" : "") +
+        '" data-player-episode="' + escapeHtml(episode.number) +
+        '" title="' + escapeHtml(label) + '" aria-label="' + escapeHtml(label) +
+        '"' + (active ? ' aria-current="true"' : '') + '>' +
+        '<span class="player-episode-number">' + escapeHtml(episode.number) + '</span>' +
+        '</button>';
+    }).join("") || '<div class="compact-empty">No matching episodes.</div>';
+    pagination.innerHTML = '<div class="player-page-nav">' +
+      '<button class="btn btn-quiet" data-episode-page="prev" data-episode-scope="player"' +
+        (page === 1 ? ' disabled' : '') + '>← Previous</button>' +
+      '<span>' + (filtered.length ? (start + 1) + '–' + Math.min(start + PLAYER_EPISODES_PER_PAGE, filtered.length) +
+        ' of ' + filtered.length : 'No episodes') + '</span>' +
+      '<button class="btn btn-quiet" data-episode-page="next" data-episode-scope="player"' +
+        (page >= pageCount ? ' disabled' : '') + '>Next →</button></div>';
+    // Scroll inside the episode grid, never jump the whole watch page.
+    const activeButton = container.querySelector?.(".player-episode.active");
+    if (activeButton && container.clientHeight && Number.isFinite(activeButton.offsetTop)) {
+      container.scrollTop = Math.max(0, activeButton.offsetTop - container.offsetTop - container.clientHeight / 2);
+    }
   }
 
   function jumpToEpisode(scope) {
@@ -1904,7 +1942,8 @@
   }
 
   function playerEpisodeItems() {
-    return '<div class="player-episode-tools"><input id="player-episode-filter" class="input-control" placeholder="Find episode…"><input id="player-episode-jump" class="input-control episode-jump-input" type="number" min="1" placeholder="EP #"><button class="btn btn-quiet" data-episode-go="player">Go</button></div>' +
+    return '<div class="player-range-head"><label for="player-episode-range">Episode range</label><select id="player-episode-range" class="input-control" aria-label="Select episode range"></select></div>' +
+      '<div class="player-episode-tools"><input id="player-episode-filter" class="input-control" type="search" placeholder="Find episode…" aria-label="Search episodes"><input id="player-episode-jump" class="input-control episode-jump-input" type="number" min="1" placeholder="EP #" aria-label="Jump to episode number"><button class="btn btn-quiet" data-episode-go="player">Go</button></div>' +
       '<div id="player-episode-items"></div><div id="player-episode-pagination"></div>';
   }
 
@@ -1946,6 +1985,8 @@
     player.episode = episode;
     player.needsProviderRetry = false;
     if (changedEpisode) {
+      state.playerEpisodeManualPage = false;
+      state.playerEpisodeFilter = "";
       player.failedProviders = [];
       player.streams = [];
       player.embeds = [];
@@ -2019,13 +2060,13 @@
     const episodeIndex = state.detailEpisodes.findIndex(item => Number(item.number) === Number(episode.number));
     const hasPrev = episodeIndex > 0;
     const hasNext = episodeIndex >= 0 && episodeIndex < state.detailEpisodes.length - 1;
-    $("#view").innerHTML = '<div class="player-page"><div class="player-topline"><button class="back-button" data-anime="' + media.id + '" aria-label="Back to anime">←</button><div><h1>' + escapeHtml(titleOf(media)) + '</h1><p>Episode ' + escapeHtml(episode.number) + ' · <span id="player-episode-heading">' + escapeHtml(episode.title) + '</span></p></div></div>' +
-      '<div class="player-layout"><section><div class="video-frame"><video id="anime-video" controls playsinline webkit-playsinline preload="metadata"></video><iframe id="anime-embed" title="Episode stream" allow="autoplay; fullscreen; picture-in-picture; encrypted-media" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen hidden></iframe><div class="video-ui" id="video-ui" hidden><div class="video-ui-top"><span>' + escapeHtml(titleOf(media)) + ' · Episode ' + escapeHtml(episode.number) + '</span></div><div class="video-ui-bottom"><input class="video-seek" id="video-seek" type="range" min="0" max="1000" value="0" aria-label="Seek position"><div class="video-ui-buttons"><button data-player-toggle aria-label="Play or pause">' + uiIcon("play") + '</button><button data-player-jump="-10" aria-label="Back 10 seconds">−10</button><button data-player-jump="10" aria-label="Forward 10 seconds">+10</button><span id="video-clock" class="video-timecode">00:00 / --:--</span><span class="video-ui-spacer"></span><button data-player-speed aria-label="Playback speed">1×</button><button data-player-fullscreen aria-label="Fullscreen">' + uiIcon("expand") + '</button></div></div></div><div class="player-overlay" id="player-overlay" role="status"><div class="player-mini-loader"></div><strong>Opening episode…</strong></div></div>' +
+    $("#view").innerHTML = '<div class="player-page"><div class="player-topline"><button class="back-button" data-anime="' + media.id + '" aria-label="Back to anime">←</button><div class="player-title-group"><span class="watching-eyebrow">NOW WATCHING <span class="watching-dot"></span> EPISODE ' + escapeHtml(episode.number) + '</span><h1>' + escapeHtml(titleOf(media)) + '</h1><p id="player-episode-heading">' + escapeHtml(episode.title) + '</p></div></div>' +
+      '<div class="player-layout"><section class="player-main"><div class="video-frame"><video id="anime-video" controls playsinline webkit-playsinline preload="metadata"></video><iframe id="anime-embed" title="Episode stream" allow="autoplay; fullscreen; picture-in-picture; encrypted-media" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen hidden></iframe><div class="video-ui" id="video-ui" hidden><div class="video-ui-top"><span>' + escapeHtml(titleOf(media)) + ' · Episode ' + escapeHtml(episode.number) + '</span></div><div class="video-ui-bottom"><input class="video-seek" id="video-seek" type="range" min="0" max="1000" value="0" aria-label="Seek position"><div class="video-ui-buttons"><button data-player-toggle aria-label="Play or pause">' + uiIcon("play") + '</button><button data-player-jump="-10" aria-label="Back 10 seconds">−10</button><button data-player-jump="10" aria-label="Forward 10 seconds">+10</button><span id="video-clock" class="video-timecode">00:00 / --:--</span><span class="video-ui-spacer"></span><button data-player-speed aria-label="Playback speed">1×</button><button data-player-fullscreen aria-label="Fullscreen">' + uiIcon("expand") + '</button></div></div></div><div class="player-overlay" id="player-overlay" role="status"><div class="player-mini-loader"></div><strong>Opening episode…</strong></div></div>' +
       '<div class="player-under"><div><h2 id="player-episode-inline-title">' + escapeHtml(episode.title) + '</h2><p>' + escapeHtml(titleOf(media)) + ' · Episode ' + escapeHtml(episode.number) + '</p></div><div class="player-controls"><button class="btn btn-quiet" data-prev ' + (hasPrev ? "" : "disabled") + '>← Previous</button><button class="btn btn-quiet" data-next ' + (hasNext ? "" : "disabled") + '>Next →</button></div></div>' +
-      '<div class="button-row" style="margin-top:14px" id="skip-buttons"></div></section>' +
-      '<aside class="player-sidebar"><div class="player-panel player-audio-panel"><div class="player-panel-head"><h3>Audio language</h3><span class="stream-state" id="stream-status" role="status">Checking streams</span></div><div class="source-row" id="category-pills" role="group" aria-label="Audio language"><button class="source-pill' + (player.category === "sub" ? " active" : "") + '" data-category="sub" aria-pressed="' + (player.category === "sub") + '">Subtitled</button><button class="source-pill' + (player.category !== "sub" ? " active" : "") + '" data-category="dub" aria-pressed="' + (player.category !== "sub") + '">English dub</button></div></div>' +
-      '<div class="player-panel player-stream-panel" id="available-streams-panel" hidden><div class="player-panel-head"><h3>Available streams</h3><span class="stream-hint">Resolved links only</span></div><div class="source-row" id="quality-pills" role="group" aria-label="Available streams"></div><button class="btn btn-secondary" id="next-stream-button" data-next-stream hidden>Try another stream</button></div>' +
-      '<div class="player-panel"><h3>Episode list</h3><div class="player-episode-list">' + playerEpisodeItems() + '</div></div>' +
+      '<div class="button-row" style="margin-top:14px" id="skip-buttons"></div>' +
+      '<div class="player-source-stack"><div class="player-panel player-audio-panel"><div class="player-panel-head"><h3>Audio language</h3><span class="stream-state" id="stream-status" role="status">Checking streams</span></div><div class="source-row" id="category-pills" role="group" aria-label="Audio language"><button class="source-pill' + (player.category === "sub" ? " active" : "") + '" data-category="sub" aria-pressed="' + (player.category === "sub") + '">Subtitled</button><button class="source-pill' + (player.category !== "sub" ? " active" : "") + '" data-category="dub" aria-pressed="' + (player.category !== "sub") + '">English dub</button></div></div>' +
+      '<div class="player-panel player-stream-panel" id="available-streams-panel" hidden><div class="player-panel-head"><h3>Playback sources</h3><span class="stream-hint">Available sources only</span></div><div class="source-row" id="quality-pills" role="group" aria-label="Available streams"></div><button class="btn btn-secondary" id="next-stream-button" data-next-stream hidden>Try another stream</button></div>' +
+      '</div></section><aside class="player-sidebar"><div class="player-panel player-episodes-panel"><div class="player-panel-head"><h3>Episodes</h3><span class="episode-current-badge">EP ' + escapeHtml(episode.number) + '</span></div><div class="player-episode-list">' + playerEpisodeItems() + '</div></div>' +
       '</aside></div></div>';
     renderPlayerEpisodeBrowser();
     updateActiveNav("/watch");
@@ -2321,7 +2362,8 @@
     if (qualities) {
       qualities.innerHTML = candidates.map((stream, index) => {
         const quality = /(?:^|[^0-9])(2160|1440|1080|720|480|360)\s*p(?:[^0-9]|$)/i.exec(String(stream.quality || ""));
-        const label = "Stream " + (index + 1) + (quality ? " · " + quality[1] + "p" : "");
+        const providerName = ({ justanime: "JustAnime", hianime: "HiAnime", anikoto: "AniKoto" }[player.match?.provider?.id] || "Source");
+        const label = providerName + (quality ? " · " + quality[1] + "p" : "") + (candidates.length > 1 ? " · " + (index + 1) : "");
         return '<button class="source-pill' + (index === Number(player.candidateIndex || 0) ? " active" : "") +
           '" data-stream="' + index + '" aria-pressed="' + (index === Number(player.candidateIndex || 0)) + '">' + escapeHtml(label) + '</button>';
       }).join("");
@@ -3377,6 +3419,7 @@
       else if (action === "last") page = pageCount;
       page = Math.max(1, Math.min(pageCount, page));
       if (scope === "player") {
+        state.playerEpisodeManualPage = true;
         state.playerEpisodePage = page;
         renderPlayerEpisodeBrowser();
       } else {
@@ -3494,6 +3537,12 @@
     if (event.key === "Escape" && $(".modal-backdrop")) { closeModal(); event.preventDefault(); }
   });
   document.addEventListener("change", async event => {
+    if (event.target.id === "player-episode-range") {
+      state.playerEpisodeManualPage = true;
+      state.playerEpisodePage = Math.max(1, Number(event.target.value) || 1);
+      renderPlayerEpisodeBrowser();
+      return;
+    }
     if (event.target.id === "cbz-file-input") {
       const file = event.target.files?.[0];
       if (file && window.AniDashCBZ) {
@@ -3614,6 +3663,7 @@
     if (event.target.id === "player-episode-filter") {
       state.playerEpisodeFilter = event.target.value;
       state.playerEpisodePage = 1;
+      state.playerEpisodeManualPage = true;
       renderPlayerEpisodeBrowser();
     }
   });
