@@ -45,7 +45,7 @@ for (const candidate of sources.slice(0, 6)) {
   const mediaReq = {
     method: "HEAD",
     query: Object.fromEntries(proxy.searchParams.entries()),
-    headers: { ...req.headers, range: "bytes=0-0" }
+    headers: { ...req.headers, ...(candidate.isM3U8 ? {} : { range: "bytes=0-0" }) }
   };
   const mediaRes = {
     statusCode: 200, headers: {}, body: null,
