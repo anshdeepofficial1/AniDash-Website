@@ -61,7 +61,9 @@ if (hlsCandidate) {
     mediaProbe: "HLS manifest",
     status: mediaRes.statusCode,
     contentType: String(mediaRes.headers["content-type"] || "none"),
-    validPlaylist
+    validPlaylist,
+    sourceHost: (() => { try { return new URL(hlsCandidate.originalUrl).hostname; } catch { return "invalid"; } })(),
+    proxyError: mediaRes.statusCode !== 200 ? String(mediaRes.body?.error || "Upstream error").slice(0, 200) : null
   }));
   if (mediaRes.statusCode !== 200 || !validPlaylist) process.exitCode = 1;
 } else {
