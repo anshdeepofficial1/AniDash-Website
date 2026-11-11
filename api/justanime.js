@@ -314,7 +314,11 @@ function normalizeBlock(payload, endpoint, category, req) {
   const serverName = endpoint.includes("megaplay") ? "Momo"
     : endpoint.includes("zokoanime") ? "Zoko"
     : endpoint.includes("anineko") ? "Neko"
-    : endpoint.includes("animegg") ? "Gigi" : "JustAnime";
+    : endpoint.includes("animegg") ? "Gigi" : "Auto";
+  const serverId = endpoint.includes("megaplay") ? "megaplay"
+    : endpoint.includes("zokoanime") ? "zokoanime"
+    : endpoint.includes("anineko") ? "anineko"
+    : endpoint.includes("animegg") ? "animegg" : "auto";
 
   const referer = endpoint.includes("megaplay") ? "https://megaplay.buzz/"
     : endpoint.includes("zoko") ? "https://zokoanime.video/"
@@ -333,6 +337,8 @@ function normalizeBlock(payload, endpoint, category, req) {
       }),
       originalUrl: url,
       quality: String(item?.quality || "Auto"),
+      server: serverName,
+      serverId,
       type: serverName,
       isM3U8,
       isDub: actualCategory === "dub"
@@ -347,6 +353,7 @@ function normalizeBlock(payload, endpoint, category, req) {
 
   return {
     server: serverName,
+    serverId,
     sources,
     tracks,
     intro: intro && Number(intro.end) > Number(intro.start) ? intro : null,
@@ -393,19 +400,70 @@ async function streams(req, animeId, episode, server, category) {
   }
 
   if (explicit !== "auto" && explicit !== "default") {
-    return tryEndpoint(endpoints[0]);
+    const selected = await tryEndpoint(endpoints[0]);
+    return {
+      ...selected,
+      servers: [{ id: selected.serverId, name: selected.server }]
+    };
   }
 
-  // Android uses a small concurrent race with fallback hosts. The web serverless
-  // route races the same fixed endpoints so a slow first host does not consume
-  // the whole function timeout.
-  try {
-    return await Promise.any(endpoints.map(tryEndpoint));
-  } catch (error) {
-    const reasons = Array.isArray(error?.errors) ? error.errors : [];
-    const detail = reasons.map(item => item?.message).filter(Boolean).slice(0, 2).join("; ");
-    throw new Error("No playable " + cleanCategory.toUpperCase() + " stream was returned by JustAnime" + (detail ? ": " + detail : ""));
+  // A successful *single* server is not a list of available servers.
+  // Resolve the independent endpoints concurrently and collect the ones which
+  // really returned a stream for the requested audio language. Do not show a
+  // server just because its ID exists in SERVER_OPTIONS.
+  const results = new Array(endpoints.length);
+  const requests = endpoints.map((endpoint, index) =>
+    tryEndpoint(endpoint).then(
+      value => { results[index] = { value }; },
+      error => { results[index] = { error: error?.message || String(error) }; }
+    )
+  );
+  const allFinished = Promise.all(requests);
+  // A brief discovery window gives fast mirrors a chance to appear without
+  // forcing the user to wait for every unreachable upstream.
+  await Promise.race([
+    allFinished,
+    new Promise(resolve => setTimeout(resolve, 4200))
+  ]);
+  if (!results.some(result => result?.value?.sources?.length)) {
+    // No quick response? Continue trying until every bounded request settles.
+    await allFinished;
   }
+
+  const successful = results.map(result => result?.value).filter(value => value?.sources?.length);
+  if (!successful.length) {
+    const detail = results.filter(result => result?.error).map(result => result.error).slice(0, 2).join("; ");
+    throw new Error("No " + cleanCategory.toUpperCase() + " streams were returned by available servers" +
+      (detail ? ": " + detail : ""));
+  }
+
+  // One endpoint can mirror another URL. Keep distinct stream URLs and avoid
+  // offering the same stream several times under different labels.
+  const seen = new Set();
+  const sources = [];
+  for (const group of successful) {
+    for (const source of group.sources) {
+      const identity = String(source.originalUrl || source.url || "");
+      if (!identity || seen.has(identity)) continue;
+      seen.add(identity);
+      sources.push(source);
+    }
+  }
+  const servers = [...new Map(successful.map(group => [
+    group.serverId,
+    { id: group.serverId, name: group.server }
+  ])).values()];
+  const first = successful[0];
+  return {
+    server: first.server,
+    sources,
+    tracks: successful.flatMap(group => group.tracks || [])
+      .filter((track, index, rows) => rows.findIndex(row => row.url === track.url) === index),
+    intro: successful.find(group => group.intro)?.intro || null,
+    outro: successful.find(group => group.outro)?.outro || null,
+    servers,
+    category: cleanCategory
+  };
 }
 
 export default async function handler(req, res) {
@@ -430,7 +488,13 @@ export default async function handler(req, res) {
     }
     if (action === "servers") {
       const category = req.query.category === "dub" ? "dub" : "sub";
-      return send(res, 200, { servers: SERVER_OPTIONS[category], category });
+      const animeId = String(req.query.id || "");
+      const episode = String(req.query.episode || req.query.episodeId || "");
+      if (!animeId || !episode) {
+        return send(res, 400, { error: "Anime ID and episode are required to verify available servers" });
+      }
+      const resolved = await streams(req, animeId, episode, "auto", category);
+      return send(res, 200, { servers: resolved.servers, category }, "no-store");
     }
     if (action === "streams") {
       const animeId = String(req.query.id || "");

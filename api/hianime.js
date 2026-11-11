@@ -193,9 +193,9 @@ async function servers(animeId, episodeId, category) {
       const id = String(item?.serverName || item?.serverId || "");
       return { id, name: id ? id.toUpperCase() : "Server" };
     }).filter(item => item.id);
-    return { servers: result.length ? result : fallbackServers(), category: key };
+    return { servers: result, category: key };
   } catch (_) {
-    return { servers: fallbackServers(), category: key };
+    return { servers: [], category: key };
   }
 }
 function fallbackServers() {
@@ -250,6 +250,7 @@ function normaliseSources(req, rawSources, category, label, inheritedHeaders = {
       }),
       originalUrl: url,
       quality: String(item?.quality || "Auto"),
+      server: String(item?.serverName || item?.server || (label === "hd-1" ? "HD-1" : label === "hd-2" ? "HD-2" : label)),
       type: String(item?.type || label),
       isM3U8,
       isDub: category === "dub"
@@ -281,7 +282,7 @@ async function streams(req, animeId, episodeId, anilistId, serverName, category)
       return {
         sources,
         tracks: normaliseTracks(data.tracks || data.subtitles),
-        servers: fallbackServers(),
+        servers: [{ id: server, name: server === "hd-1" ? "HD-1" : server === "hd-2" ? "HD-2" : server }],
         intro: data.intro || null,
         outro: data.outro || null
       };
@@ -313,7 +314,7 @@ async function streams(req, animeId, episodeId, anilistId, serverName, category)
       return {
         sources: parsed,
         tracks: normaliseTracks(data.subtitles || data.tracks),
-        servers: fallbackServers(),
+        servers: [{ id: path, name: path.startsWith("aniwave") ? "AniWave" : path.startsWith("hianime") ? "HD-2" : "MegaPlay" }],
         intro: data.intro || null,
         outro: data.outro || null
       };

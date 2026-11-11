@@ -165,3 +165,37 @@ test("episode 394 opens in the 301–400 range and highlights the current chip",
     media.episodes = prior;
   }
 });
+
+
+test("player names each returned server rather than the adapter that fetched it", () => {
+  const start = source.indexOf("  function renderPlayerOptions() {");
+  const end = source.indexOf("\n  function fallbackToNextProvider(", start);
+  assert.ok(start > -1 && end > start, "resolver option renderer must exist");
+  const fragment = source.slice(start, end);
+  const elements = new Map();
+  const $ = selector => {
+    if (!elements.has(selector)) {
+      elements.set(selector, { innerHTML: "", textContent: "", hidden: false });
+    }
+    return elements.get(selector);
+  };
+  const sandbox = {
+    $, escapeHtml: value => String(value),
+    state: { player: {
+      match: { provider: { id: "justanime" } },
+      candidateIndex: 0, intro: null, outro: null,
+      candidates: [
+        { server: "Momo", quality: "1080p" },
+        { server: "Gigi", quality: "720p" },
+        { name: "MegaPlay", type: "embed" }
+      ]
+    } }
+  };
+  vm.runInNewContext(fragment + "\nrenderPlayerOptions();", sandbox);
+  const labels = elements.get("#quality-pills").innerHTML;
+  assert.match(labels, /Momo · 1080p/);
+  assert.match(labels, /Gigi · 720p/);
+  assert.match(labels, /MegaPlay/);
+  assert.doesNotMatch(labels, /JustAnime|HiAnime|AniKoto|Stream 1/);
+  assert.equal(elements.get("#available-streams-panel").hidden, false);
+});

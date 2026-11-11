@@ -2176,29 +2176,14 @@
           : "No English " + category.toUpperCase() + " stream was returned.");
       }
 
-      const fallbackServers = provider.id === "justanime"
-        ? [
-            { id: "auto", name: "Automatic (Best available)" },
-            { id: "megaplay", name: "Momo (HLS)" },
-            { id: "zokoanime", name: "Zoko (HLS)" },
-            { id: "animegg", name: "Gigi (MP4)" },
-            { id: "anineko", name: "Neko (HLS)" }
-          ]
-        : provider.id === "anikoto"
-        ? [{ id: "anikoto", name: "AniKoto direct embeds" }]
-        : [
-            { id: "hd-1", name: "AniWave • HLS" },
-            { id: "hd-2", name: "HiAnime HD-2" },
-            { id: "megaplay", name: "MegaPlay" }
-          ];
+      // Do not claim generic server options are available until they have
+      // returned a stream. The source API returns the verified server list.
 
       return {
         match,
         episode,
         selectedServer,
-        servers: extractArray(payload, ["servers", "serverList", "data.servers"]).length
-          ? extractArray(payload, ["servers", "serverList", "data.servers"])
-          : fallbackServers,
+        servers: extractArray(payload, ["servers", "serverList", "data.servers"]),
         streams,
         embeds: embeds.map(item => ({
           ...item,
@@ -2369,8 +2354,21 @@
     if (qualities) {
       qualities.innerHTML = candidates.map((stream, index) => {
         const quality = /(?:^|[^0-9])(2160|1440|1080|720|480|360)\s*p(?:[^0-9]|$)/i.exec(String(stream.quality || ""));
-        const providerName = ({ justanime: "JustAnime", hianime: "HiAnime", anikoto: "AniKoto" }[player.match?.provider?.id] || "Source");
-        const label = providerName + (quality ? " · " + quality[1] + "p" : "") + (candidates.length > 1 ? " · " + (index + 1) : "");
+        // The upstream resolver (not the catalogue/provider adapter) owns the
+        // server name. Never expose JustAnime, HiAnime or AniKoto as a button.
+        const rawName = String(stream.server || stream.name || stream.serverName ||
+          stream.type || "").trim();
+        const aliases = {
+          megaplay: "MegaPlay", zokoanime: "Zoko", animegg: "Gigi",
+          anineko: "Neko", "hd-1": "HD-1", "hd-2": "HD-2"
+        };
+        const generic = /^(?:justanime|hianime|anikoto|source|server|auto|embed|iframe|hls|mp4|video|direct)$/i;
+        const serverName = aliases[rawName.toLowerCase()] ||
+          (rawName && !generic.test(rawName) ? rawName : "Server " + (index + 1));
+        const label = serverName + (quality ? " · " + quality[1] + "p" : "") +
+          (candidates.filter(candidate =>
+            String(candidate.server || candidate.name || candidate.type || "").toLowerCase() === rawName.toLowerCase()
+          ).length > 1 ? " · " + (index + 1) : "");
         return '<button class="source-pill' + (index === Number(player.candidateIndex || 0) ? " active" : "") +
           '" data-stream="' + index + '" aria-pressed="' + (index === Number(player.candidateIndex || 0)) + '">' + escapeHtml(label) + '</button>';
       }).join("");
