@@ -148,3 +148,62 @@ test("built-in provider routes retain episode and playback fallbacks", async () 
     globalThis.fetch = originalFetch;
   }
 });
+
+
+test("automatic server discovery lists only real DUB responses with source identity", async () => {
+  const oldFetch = globalThis.fetch;
+  const requested = [];
+  try {
+    globalThis.fetch = async input => {
+      const url = String(input);
+      requested.push(url);
+      if (url.includes("/watch/21/episode/394/megaplay")) {
+        return makeFetchResponse({ dub: {
+          sources: [{ url: "https://megaplay.buzz/one-piece-394.m3u8", quality: "1080p" }]
+        } });
+      }
+      if (url.includes("/watch/21/episode/394/animegg")) {
+        return makeFetchResponse({ dub: {
+          sources: [{ url: "https://animegg.org/one-piece-394.mp4", quality: "720p" }]
+        } });
+      }
+      if (url.includes("/watch/21/episode/394/anineko/dub")) {
+        return makeFetchResponse({
+          sources: [{ url: "https://neko.justanime.to/one-piece-394.m3u8", isM3U8: true, quality: "Auto" }]
+        });
+      }
+      if (url.includes("/watch/21/episode/394/")) {
+        return makeFetchResponse({ sub: {
+          sources: [{ url: "https://zokoanime.video/sub-only-394.m3u8" }]
+        } });
+      }
+      if (url.includes("/watch/21/episode/394")) {
+        return makeFetchResponse({ sub: {
+          sources: [{ url: "https://zokoanime.video/sub-only-394.m3u8" }]
+        } });
+      }
+      throw new Error("Unexpected resolver call: " + url);
+    };
+
+    const result = await invoke(justAnime, {
+      action: "streams", id: "21", episode: "394", category: "dub", server: "auto"
+    });
+    assert.equal(result.statusCode, 200);
+    assert.deepEqual(result.body.servers.map(item => item.name), ["Momo", "Gigi", "Neko"]);
+    assert.deepEqual(result.body.sources.map(item => item.server), ["Momo", "Gigi", "Neko"]);
+    assert.deepEqual(result.body.sources.map(item => item.isDub), [true, true, true]);
+    assert.equal(result.body.sources.length, 3, "duplicate Neko HD paths must not duplicate the same URL");
+    assert.ok(result.body.sources.every(item => item.url.includes("/api/media?")));
+    assert.ok(requested.some(url => url.includes("animegg")), "auto must actually try Gigi");
+    assert.ok(requested.some(url => url.includes("anineko/dub")), "auto must actually try Neko");
+    assert.ok(!result.body.sources.some(item => item.originalUrl.includes("sub-only")));
+  } finally {
+    globalThis.fetch = oldFetch;
+  }
+});
+
+test("server listings require an episode and are verified, not hard-coded promises", async () => {
+  const result = await invoke(justAnime, { action: "servers", category: "dub" });
+  assert.equal(result.statusCode, 400);
+  assert.match(result.body.error, /episode/i);
+});
