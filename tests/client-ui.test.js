@@ -134,3 +134,34 @@ test("player appears before stream resolution and DUB/SUB switching does not thr
     preventDefault() {}
   }));
 });
+
+
+test("premium player keeps episodes, language and sources in distinct regions", async () => {
+  const browser = createBrowser("#/watch/21/2");
+  await flushUI();
+  const html = browser.getElement("#view").innerHTML;
+  assert.match(html, /class="player-main"/);
+  assert.match(html, /class="player-source-stack"/);
+  assert.match(html, /class="player-panel player-episodes-panel"/);
+  assert.match(html, /id="player-episode-range"/);
+  assert.match(html, /id="category-pills"/);
+  assert.match(html, /id="available-streams-panel" hidden/);
+  assert.match(browser.getElement("#player-episode-items").innerHTML, /data-player-episode="2"/);
+});
+
+test("episode 394 opens in the 301–400 range and highlights the current chip", async () => {
+  const prior = media.episodes;
+  media.episodes = 450;
+  try {
+    const browser = createBrowser("#/watch/21/394");
+    await flushUI();
+    const rangeHtml = browser.getElement("#player-episode-range").innerHTML;
+    const gridHtml = browser.getElement("#player-episode-items").innerHTML;
+    assert.match(rangeHtml, /value="4" selected>301–400/);
+    assert.match(gridHtml, /class="player-episode active" data-player-episode="394"/);
+    assert.match(browser.getElement("#player-episode-pagination").innerHTML, /301–400 of 450/);
+    assert.doesNotMatch(gridHtml, /player-episode-title/);
+  } finally {
+    media.episodes = prior;
+  }
+});
