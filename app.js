@@ -1407,7 +1407,14 @@
     if (scope === "player") {
       const index = filtered.indexOf(match);
       state.playerEpisodePage = Math.floor(index / PLAYER_EPISODES_PER_PAGE) + 1;
-      renderPlayerEpisodeBrowser();
+      state.playerEpisodeManualPage = false;
+      if (state.player && Number(state.player.episode.number) !== query) {
+        const oldVideo = $("#anime-video");
+        if (oldVideo) { savePlaybackProgress(oldVideo, false, true); oldVideo.pause(); }
+        navigate("/watch/" + state.player.media.id + "/" + query);
+      } else {
+        renderPlayerEpisodeBrowser();
+      }
       return;
     }
     // A direct jump can cross arc boundaries. Select the verified arc first.
