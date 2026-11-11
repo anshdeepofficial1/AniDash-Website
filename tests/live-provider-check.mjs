@@ -35,12 +35,13 @@ console.log(JSON.stringify({
 }, null, 2));
 if (res.statusCode !== 200 || sources.length === 0) process.exitCode = 1;
 
-// A successful resolver response does not prove that the HLS playlist proxy
-// can retrieve the media. Check one returned stream with the same code Vercel
-// executes, without reading or logging copyrighted video bytes.
-const hlsCandidate = sources.find(item => item.isM3U8 && String(item.url || "").includes("/api/media?"));
-if (hlsCandidate) {
-  const proxy = new URL(hlsCandidate.url);
+// Resolve link metadata and probe each returned media response, not just the
+// first mirror. A broken HLS host should not conceal a healthy MP4 fallback.
+// Use HEAD in AniDash's proxy to avoid sending video bytes to CI.
+let mediaReady = false;
+for (const candidate of sources.slice(0, 6)) {
+  if (!String(candidate.url || "").includes("/api/media?")) continue;
+  const proxy = new URL(candidate.url);
   const mediaReq = {
     method: "HEAD",
     query: Object.fromEntries(proxy.searchParams.entries()),
@@ -55,18 +56,21 @@ if (hlsCandidate) {
     end() { return this; }
   };
   await mediaProxy(mediaReq, mediaRes);
-  const isPlaylist = String(mediaRes.headers["content-type"] || "").includes("mpegurl");
-  const validPlaylist = isPlaylist && String(mediaRes.body || "").startsWith("#EXTM3U");
+  const kind = candidate.isM3U8 ? "HLS" : "MP4";
+  const contentType = String(mediaRes.headers["content-type"] || "").toLowerCase();
+  const validPlaylist = !candidate.isM3U8 || (
+    contentType.includes("mpegurl") && String(mediaRes.body || "").startsWith("#EXTM3U")
+  );
+  const validMedia = (mediaRes.statusCode === 200 || mediaRes.statusCode === 206) &&
+    validPlaylist && (candidate.isM3U8 || /video|octet-stream/.test(contentType));
+  mediaReady ||= validMedia;
   console.log(JSON.stringify({
-    mediaProbe: "HLS manifest",
-    status: mediaRes.statusCode,
-    contentType: String(mediaRes.headers["content-type"] || "none"),
-    validPlaylist,
-    sourceHost: (() => { try { return new URL(hlsCandidate.originalUrl).hostname; } catch { return "invalid"; } })(),
-    proxyError: mediaRes.statusCode !== 200 ? String(mediaRes.body?.error || "Upstream error").slice(0, 200) : null
+    mediaProbe: String(candidate.server || candidate.type || "server"),
+    kind, status: mediaRes.statusCode,
+    contentType: contentType || "none",
+    validMedia,
+    sourceHost: (() => { try { return new URL(candidate.originalUrl).hostname; } catch { return "invalid"; } })(),
+    proxyError: mediaRes.statusCode >= 400 ? String(mediaRes.body?.error || "Upstream error").slice(0, 150) : null
   }));
-  if (mediaRes.statusCode !== 200 || !validPlaylist) process.exitCode = 1;
-} else {
-  console.log("HLS manifest probe skipped: no proxied HLS source was returned.");
 }
-
+if (!mediaReady) process.exitCode = 1;
