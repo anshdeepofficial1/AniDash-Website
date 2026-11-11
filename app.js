@@ -2303,6 +2303,18 @@
       return found ? Number(found[1]) : 0;
     };
     const rankedStreams = [...winner.streams].sort((a, b) => {
+      // Auto mode prioritizes a direct MP4 path over an unverified HLS relay.
+      // In the live One Piece 394 check Gigi MP4 returned a valid range, while
+      // Momo HLS required an unavailable/challenged upstream playlist.
+      // Explicit 720p/1080p settings still take priority over this heuristic.
+      const directlyPlayable = stream =>
+        stream.isM3U8 !== true &&
+        (/\.mp4(?:$|[?#])/i.test(String(stream.originalUrl || "")) ||
+         /^(?:gigi|kwik)$/i.test(String(stream.server || stream.type || "")));
+      if (!Number.isFinite(targetPixels)) {
+        const pa = directlyPlayable(a), pb = directlyPlayable(b);
+        if (pa !== pb) return pa ? -1 : 1;
+      }
       const qa = qualityPixels(a);
       const qb = qualityPixels(b);
       if (Number.isFinite(targetPixels)) {
