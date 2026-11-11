@@ -73,4 +73,46 @@ for (const candidate of sources.slice(0, 6)) {
     proxyError: mediaRes.statusCode >= 400 ? String(mediaRes.body?.error || "Upstream error").slice(0, 150) : null
   }));
 }
+
+// Diagnose redirect hosts and manifest format without logging signed URLs
+// or fetching video bytes. These are upstream facts, not mocked availability.
+for (const candidate of sources.slice(0, 4)) {
+  try {
+    const source = new URL(candidate.originalUrl);
+    const hls = candidate.isM3U8 === true;
+    const referer = /gigi/i.test(String(candidate.server)) ?
+      "https://www.animegg.org/" : "https://megaplay.buzz/";
+    const response = await fetch(source, {
+      method: hls ? "GET" : "HEAD", redirect: "manual",
+      headers: {
+        Referer: referer,
+        Origin: new URL(referer).origin,
+        Accept: hls ? "application/vnd.apple.mpegurl,*/*" : "*/*",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/133.0.0.0 Safari/537.36"
+      },
+      signal: AbortSignal.timeout(4500)
+    });
+    const redirectTo = response.headers.get("location");
+    const redirectHost = redirectTo
+      ? new URL(redirectTo, source).hostname : null;
+    const type = String(response.headers.get("content-type") || "").toLowerCase();
+    const text = hls && response.ok && /text|mpegurl|json/.test(type)
+      ? await response.text() : "";
+    console.log(JSON.stringify({
+      upstreamProbe: String(candidate.server || "server"),
+      sourceHost: source.hostname,
+      status: response.status,
+      type,
+      redirectHost,
+      manifest: text.startsWith("#EXTM3U"),
+      textHint: text && !text.startsWith("#EXTM3U") ? text.slice(0, 55).replace(/https?:\/\/\S+/g, "[url]") : null
+    }));
+  } catch (error) {
+    console.log(JSON.stringify({
+      upstreamProbe: String(candidate.server || "server"),
+      networkError: String(error?.message || error).slice(0, 100)
+    }));
+  }
+}
+
 if (!mediaReady) process.exitCode = 1;
