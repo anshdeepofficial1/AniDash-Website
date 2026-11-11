@@ -68,7 +68,9 @@ function headersFor(target, req, custom = {}) {
       ? "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36"
       : (custom["user-agent"] || custom["User-Agent"] || req.headers["user-agent"] || "Mozilla/5.0 AniDash-Web")
   };
-  if (req.headers.range) headers.Range = req.headers.range;
+  // HLS manifest requests must be complete text; a 0–0 byte range would
+  // truncate #EXTM3U and make a healthy playlist look broken.
+  if (req.headers.range && req.query?.hls !== "1") headers.Range = req.headers.range;
   return headers;
 }
 
