@@ -98,6 +98,7 @@ export function HomeScreen() {
 
     const homeItems = React.useMemo(() => {
         let ret = !!_homeItems?.length ? _homeItems : DEFAULT_HOME_ITEMS
+        if (width < 1024 && ret[0]?.type !== "discover-header") ret = [{id:"mobile-trending",type:"discover-header",schemaVersion:1} as Models_HomeItem,...ret.filter(n=>n.type!=="discover-header")]
         // replace anime-continue-watching-header with anime-continue-watching on mobile
         if (width < 1024 && ret[0]?.type === "anime-continue-watching-header") {
             if (ret.find(n => n.type === "anime-continue-watching")) {
@@ -160,7 +161,7 @@ export function HomeScreen() {
                 <React.Fragment>
                     <DiscoverPageHeader />
                     <div className="h-0 visibility-hidden pointer-events-none opacity-0">
-                        {/*{discoverHeaderType === "anime" && <DiscoverTrending />}*/}
+                        {discoverHeaderType === "anime" && <DiscoverTrending />}
                         {discoverHeaderType === "manga" && <DiscoverTrendingCountry country="JP" forDiscoverHeader />}
                     </div>
                 </React.Fragment>

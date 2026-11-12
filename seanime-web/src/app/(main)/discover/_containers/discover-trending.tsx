@@ -45,16 +45,17 @@ export function DiscoverTrending() {
             setHeaderIsTransitioning(true)
             setTimeout(() => {
                 setRandomNumber(p => {
-                    return p < 11 ? p + 1 : 0
+                    const count=Math.min(10,data?.Page?.media?.filter(Boolean).filter(n=>n.status!=="NOT_YET_RELEASED").length||1)
+                    return (p+1)%count
                 })
                 setHeaderIsTransitioning(false)
-            }, 900)
-        }, 12000)
+            }, 350)
+        }, 2500)
         if (isHoveringHeader) {
             clearInterval(t.current)
         }
         return () => { if (t.current) clearInterval(t.current) }
-    }, [isHoveringHeader, clickedHeaderDot])
+    }, [isHoveringHeader, clickedHeaderDot, data])
 
     // Update randomNumber when animeRandomNumber changes from outside
     useEffect(() => {
@@ -71,7 +72,7 @@ export function DiscoverTrending() {
     React.useEffect(() => {
         if (!firedRef.current && data) {
             const mediaItems = data?.Page?.media?.filter(Boolean)?.filter(n => n.status !== "NOT_YET_RELEASED") || []
-            setAnimeTotalItems(mediaItems.length)
+            setAnimeTotalItems(Math.min(10,mediaItems.length))
             const random = mediaItems[randomNumber]
             if (random) {
                 setRandomTrendingAtom(random)

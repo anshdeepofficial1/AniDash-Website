@@ -176,10 +176,15 @@ export function MediaEntryCard<T extends "anime" | "manga">(props: MediaEntryCar
 
     const { setPlayNext } = usePlayNext()
     const handleWatchButtonClicked = React.useCallback(() => {
+        if (serverStatus?.os === "browser") {
+            const next = Math.min((media as AL_BaseAnime)?.episodes || Number.MAX_SAFE_INTEGER, Math.max(1, (listData?.progress || 0) + 1));
+            router.push(`/entry?id=${mediaId}&episode=${media.format === "MOVIE" ? 1 : next}`)
+            return
+        }
         setPlayNext(mediaId, () => {
             router.push(ANIME_LINK)
         })
-    }, [mediaId, ANIME_LINK, setPlayNext, router])
+    }, [mediaId, ANIME_LINK, setPlayNext, router, serverStatus?.os, media, listData?.progress])
 
     const onPopupMouseEnter = React.useCallback(() => {
         setActionPopupHover(mediaId)
@@ -228,8 +233,9 @@ export function MediaEntryCard<T extends "anime" | "manga">(props: MediaEntryCar
     }, [])
 
     const handlePreviewClick = React.useCallback(() => {
+        if (serverStatus?.os === "browser") {router.push(link);return}
         setPreviewModalMediaId(mediaId, type)
-    }, [mediaId, type, setPreviewModalMediaId])
+    }, [mediaId, type, setPreviewModalMediaId, serverStatus?.os, router, link])
 
     const handleAddToPlaylistClick = React.useCallback(() => {
         selectMediaAndOpenEditor(mediaId)
