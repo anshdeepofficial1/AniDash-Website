@@ -1,0 +1,109 @@
+name: Import and verify Seanime replacement
+on:
+  push:
+    branches: [migration/seanime-replacement]
+    paths: ['.github/workflows/import-seanime.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: seanime-replacement
+  cancel-in-progress: false
+jobs:
+  import:
+    if: github.ref == 'refs/heads/migration/seanime-replacement'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: migration/seanime-replacement
+      - name: Import pinned upstream and replace old UI
+        shell: bash
+        run: |
+          set -euo pipefail
+          if test -f .seanime-imported; then
+            echo "Already imported"
+            exit 0
+          fi
+          upstream="$RUNNER_TEMP/seanime-upstream"
+          mkdir -p "$upstream"
+          git -C "$upstream" init
+          git -C "$upstream" remote add origin https://github.com/5rahim/seanime.git
+          git -C "$upstream" fetch --depth=1 origin 4bdff7b27b6c043dc87c0ccad3ead54596133a05
+          git -C "$upstream" checkout --detach FETCH_HEAD
+          test "$(git -C "$upstream" rev-parse HEAD)" = 4bdff7b27b6c043dc87c0ccad3ead54596133a05
+          cp icons/anidash-icon.png "$RUNNER_TEMP/anidash-icon.png"
+          # Retire the old site on this migration branch only. Main remains the rollback.
+          git rm -r -- android-ui.css anilist-account.js api app-parity.css app.js catalog-polish.css cbz-reader.js episode-arcs.js icons index.html library-storage.js mal-account.js manifest.webmanifest native-parity.css package.json preferences.css premium-desktop.css styles.css sw.js tests unslop.css vercel.json README.md
+          git archive --format=tar HEAD >/dev/null
+          git -C "$upstream" archive HEAD | tar -xf - --exclude=.github
+          python -m pip install --quiet pillow
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          from PIL import Image
+          root = Path('seanime-web')
+          icon = Image.open(Path(os.environ['RUNNER_TEMP']) / 'anidash-icon.png').convert('RGBA')
+          public = root / 'public'
+          icon.save(public / 'seanime-logo.png')
+          icon.save(public / 'anidash-logo.png')
+          for name, size in [('android-chrome-192x192.png',192),('android-chrome-512x512.png',512),('apple-icon.png',180)]:
+              icon.resize((size,size), Image.Resampling.LANCZOS).save(public / 'icons' / name)
+          icon.save(public / 'icons' / 'favicon.ico', sizes=[(16,16),(32,32),(48,48)])
+          manifest = public / 'manifest.json'
+          data = json.loads(manifest.read_text())
+          data.update(name='AniDash', short_name='AniDash', description='AniDash — Anime, without the noise.')
+          manifest.write_text(json.dumps(data, indent=2) + '\n')
+          for path in [root/'index.html',root/'rsbuild.config.ts']:
+              content = path.read_text().replace('Seanime','AniDash').replace('Self-hosted, user-friendly media server for anime and manga.','AniDash — Anime, without the noise.')
+              path.write_text(content)
+          # Replace presentation text, not protocol names, types, identifiers or upstream links.
+          replacements = {
+            'S e a n i m e':'A n i D a s h',
+            'Seanime encountered an unexpected error.':'AniDash encountered an unexpected error.',
+            'Seanime is currently updating.':'AniDash is currently updating.',
+            'Welcome to Seanime':'Welcome to AniDash',
+            'About Seanime':'About AniDash',
+            'Seanime Settings':'AniDash Settings',
+            'Seanime Web':'AniDash Web',
+          }
+          for path in (root/'src').rglob('*.tsx'):
+              old = path.read_text()
+              new = old
+              for a,b in replacements.items(): new = new.replace(a,b)
+              if old != new: path.write_text(new)
+          sidebar = root/'src/app/(main)/_features/navigation/main-sidebar.tsx'
+          content = sidebar.read_text().replace('alt="logo"\n                    className="w-15 h-10 transition-all duration-300"','alt="AniDash"\n                    className="w-10 h-10 object-contain transition-all duration-300"')
+          sidebar.write_text(content)
+          PY
+          mv README.md UPSTREAM-README.md
+          cat > README.md <<'EOF'
+          # AniDash Web — Seanime replacement (migration preview)
+          
+          This branch replaces the former static AniDash frontend with the actual Seanime React frontend and its corresponding Go backend, imported from 5rahim/seanime at commit 4bdff7b27b6c043dc87c0ccad3ead54596133a05.
+          
+          AniDash's logo, web title, application manifest and selected visible labels have been changed. Upstream copyright, GPL-3.0 license and notices are retained. See UPSTREAM-README.md and DEVELOPMENT_AND_BUILD.md.
+          
+          **Not a production deployment.** Seanime requires a persistent Go service and server configuration; Vercel static hosting alone is not sufficient. Existing AniDash account/library data and streaming integrations are not automatically migrated. Do not expose a shared single-user server to the public; deploy with appropriate authentication and use only authorized media. The previous website remains on main.
+          
+          Build: `cd seanime-web && npm ci && npm run build`, then copy the resulting out directory to the repository-root web directory and build the Go server as documented upstream.
+          EOF
+          printf '%s\n' '4bdff7b27b6c043dc87c0ccad3ead54596133a05' > .seanime-imported
+          git add -A
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Replace legacy AniDash UI with pinned Seanime source and AniDash branding"
+          git push origin HEAD:refs/heads/migration/seanime-replacement
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Build actual replacement frontend
+        working-directory: seanime-web
+        run: npm ci && npm run build
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: anidash-seanime-web
+          path: seanime-web/out
+          if-no-files-found: error
