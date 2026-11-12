@@ -34,3 +34,12 @@ test("Vercel shell loads the adapter before the app and caches it offline",()=>{
  assert.match(sw,/seanime-ui.js/);
  assert.match(sw,/seanime-ui.css/);
 });
+
+test("ported entry header preserves watchlist and episode action contracts",()=>{
+ const html=window.AniDashSeaUI.entryHeader(media,{score:"8.7",year:2025,hasEpisodes:true});
+ assert.match(html,/data-media-page-header-entry-details/);
+ assert.match(html,/data-play-first="21"/);
+ assert.match(html,/data-watchlist="21"/);
+ assert.match(html,/Anime synopsis/);
+ assert.doesNotMatch(html,/disabled/);
+});

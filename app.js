@@ -1672,14 +1672,7 @@
     const relationItems = media.relations && media.relations.edges ? media.relations.edges.filter(edge => edge.node && edge.node.type === "ANIME").slice(0, 6) : [];
     const malLink = media.idMal ? '<a href="https://myanimelist.net/anime/' + media.idMal + '" target="_blank" rel="noopener">MyAnimeList ↗</a>' : "Not mapped";
     $("#view").innerHTML =
-      '<div class="details-hero"><div class="details-banner" style="background-image:url(&quot;' + escapeHtml(banner) + '&quot;)"></div><div class="details-content">' +
-        '<img class="details-poster" src="' + escapeHtml(imageOf(media)) + '" alt="' + escapeHtml(titleOf(media)) + '">' +
-        '<div class="details-copy"><div class="eyebrow">ANIME DETAILS</div><h1 class="details-title">' + escapeHtml(titleOf(media)) + '</h1>' +
-          '<div class="details-native">' + escapeHtml(media.title && (media.title.romaji || media.title.native) || "") + '</div>' +
-          '<div class="details-meta"><span class="meta-chip">★ ' + formatScore(media.averageScore) + '</span><span class="meta-chip">' + escapeHtml(media.format || "Anime") + '</span><span class="meta-chip">' + escapeHtml(media.status || "Unknown") + '</span><span class="meta-chip">' + escapeHtml(media.episodes ? media.episodes + " episodes" : "Episode count unknown") + '</span><span class="meta-chip">' + escapeHtml(mediaYear(media)) + '</span></div>' +
-          '<p class="details-description">' + escapeHtml(cleanText(media.description) || "No synopsis is available for this title yet.") + '</p>' +
-          '<div class="button-row"><button class="btn btn-primary" data-play-first="' + media.id + '" ' + (episodes.length ? "" : "disabled") + '>▶ Start watching</button><button class="btn btn-secondary" data-watchlist="' + media.id + '">' + (watched ? "✓ In watchlist" : "♡ Add to watchlist") + '</button></div>' +
-        '</div></div></div>' +
+      window.AniDashSeaUI.entryHeader(media, {score:formatScore(media.averageScore),year:mediaYear(media),watched,hasEpisodes:episodes.length>0}) +
       '<div class="details-layout"><section class="content-panel"><div class="section-heading"><div><h2 class="panel-title">Episodes</h2><p class="section-note">' + (matches.length ? escapeHtml(sourceInfo) : "Open an episode to check available streams.") + '</p></div><span class="watchlist-badge">' + episodes.length + ' listed</span></div>' +
         '<div class="episode-toolbar"><input id="episode-filter" class="input-control" placeholder="Find an episode…" aria-label="Find episode"><input id="episode-jump" class="input-control episode-jump-input" type="number" min="1" placeholder="EP #" aria-label="Jump to episode number"><button class="btn btn-quiet" data-episode-go="detail">Go</button>' +
         '<select class="select-control episode-view-selector" id="episode-view-mode" aria-label="Episode layout"><option value="grid">Grid</option><option value="list">List</option></select>' +

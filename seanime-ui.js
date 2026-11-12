@@ -39,5 +39,19 @@
       '<div class="hero-actions"><button class="btn btn-primary" data-anime="'+e(media.id)+'">'+play+' Explore Anime</button><button class="btn btn-secondary" data-watchlist="'+e(media.id)+'">'+bookmark+' Save</button></div>'+
       '</div></div></section>';
   }
-  window.AniDashSeaUI=Object.freeze({card,spotlight});
+  // Port of MediaPageHeader / MediaPageHeaderEntryDetails, adapted to the
+  // AniDash episode and watchlist action contract, not Seanime server state.
+  function entryHeader(media,{score="",year="",watched=false,hasEpisodes=false}={}) {
+    const poster=safeImage(image(media)),banner=safeImage(media?.bannerImage||image(media));
+    const primary=title(media),alternate=media?.title?.romaji||media?.title?.native||"";
+    return '<div class="details-hero sea-entry-header" data-media-page-header><div class="details-banner" data-media-page-header-banner style="background-image:url(&quot;'+banner+'&quot;)"></div><div class="sea-banner-top"></div><div class="sea-banner-bottom"></div>'+
+      '<div class="details-content" data-media-page-header-entry-details>'+
+      (poster?'<div class="sea-entry-cover" data-media-page-header-entry-details-cover-image-container><img class="details-poster" data-media-page-header-entry-details-cover-image src="'+poster+'" alt="'+e(primary)+'"></div>':'')+
+      '<div class="details-copy" data-media-page-header-entry-details-content><div data-media-page-header-entry-details-title-container><h1 class="details-title">'+e(primary)+'</h1>'+
+      (alternate&&alternate.toLowerCase()!==primary.toLowerCase()?'<div class="details-native">'+e(alternate)+'</div>':'')+'</div>'+
+      '<div class="details-meta" data-media-page-header-entry-details-more-info><span class="meta-chip">★ '+e(score)+'</span><span class="meta-chip">'+e(media.format||"Anime")+'</span><span class="meta-chip">'+e(media.status||"Unknown")+'</span><span class="meta-chip">'+e(media.episodes?media.episodes+" episodes":"Episode count unknown")+'</span><span class="meta-chip">'+e(year)+'</span></div>'+
+      '<p class="details-description">'+e(plain(media.description)||"No synopsis is available for this title yet.")+'</p>'+
+      '<div class="button-row"><button class="btn btn-primary" data-play-first="'+e(media.id)+'" '+(hasEpisodes?"":"disabled")+'>▶ Start watching</button><button class="btn btn-secondary" data-watchlist="'+e(media.id)+'">'+(watched?"✓ In watchlist":"♡ Add to watchlist")+'</button></div></div></div></div>';
+  }
+  window.AniDashSeaUI=Object.freeze({card,spotlight,entryHeader});
 })();
