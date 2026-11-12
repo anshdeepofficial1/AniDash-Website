@@ -1,0 +1,10 @@
+.git
+.github
+.agents
+**/node_modules
+seanime-web/out
+seanime-web/out-denshi
+web
+data
+.env
+*.log

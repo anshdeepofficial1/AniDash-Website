@@ -215,6 +215,11 @@ func NewConfig(options *ConfigOptions, logger *zerolog.Logger) (*Config, error) 
 		}
 	}
 
+	// A hosted instance can receive its password from a secret environment variable.
+	// Apply it after config persistence so it is not written by host/port updates.
+	if password := os.Getenv("ANIDASH_SERVER_PASSWORD"); password != "" && !flags.DisablePassword && flags.Password == "" {
+		viper.Set("server.password", password)
+	}
 	// Unmarshal the config values
 	cfg := &Config{}
 	if err := viper.Unmarshal(cfg); err != nil {

@@ -1,0 +1,16 @@
+services:
+  anidash:
+    build: .
+    ports:
+      - "127.0.0.1:43211:43211"
+    environment:
+      ANIDASH_SERVER_PASSWORD: ${ANIDASH_SERVER_PASSWORD:?Set a strong password}
+    volumes:
+      - anidash-data:/data
+      - ./media:/media:ro
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+volumes:
+  anidash-data:

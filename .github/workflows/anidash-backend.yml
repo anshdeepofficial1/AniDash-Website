@@ -1,0 +1,66 @@
+name: AniDash integrated backend acceptance
+on:
+  push:
+    branches: [migration/seanime-replacement]
+    paths:
+      - '.github/workflows/anidash-backend.yml'
+      - 'internal/**'
+      - 'deploy/**'
+      - 'seanime-web/**'
+      - 'Dockerfile'
+      - 'compose.yaml'
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  integrated:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Compile React frontend
+        working-directory: seanime-web
+        run: npm ci && npm run build
+      - name: Embed frontend and compile Go backend
+        env:
+          CGO_ENABLED: '0'
+        run: |
+          mkdir -p web
+          cp -a seanime-web/out/. web/
+          cp seanime-web/public/anidash-logo.png internal/icon/logo.png
+          go build -trimpath -ldflags="-s -w" -o "$RUNNER_TEMP/anidash" .
+      - name: Verify backend and UI over real HTTP
+        shell: bash
+        run: |
+          set -euo pipefail
+          export ANIDASH_SERVER_PASSWORD="$(openssl rand -hex 24)"
+          echo "::add-mask::$ANIDASH_SERVER_PASSWORD"
+          export SEANIME_DATA_DIR="$RUNNER_TEMP/anidash-data"
+          "$RUNNER_TEMP/anidash" --host=127.0.0.1 --port=43211 > "$RUNNER_TEMP/anidash-server.log" 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+          bash deploy/smoke.sh
+      - name: Run direct-stream and security tests
+        env:
+          CGO_ENABLED: '0'
+        run: go test ./internal/directstream ./internal/security
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: anidash-backend-diagnostics
+          path: ${{ runner.temp }}/anidash-server.log
+          if-no-files-found: ignore
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: anidash-linux-amd64
+          path: ${{ runner.temp }}/anidash
+          if-no-files-found: error
