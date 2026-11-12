@@ -3092,7 +3092,7 @@
   }
 
   document.addEventListener("click", async event => {
-    const target = event.composedPath().find(node => node instanceof Element && node.matches("button,a,article"));
+    const target = event.composedPath?.().find(node => node instanceof Element && node.matches("button,a,article")) || event.target.closest?.("button,a,article");
     if (event.target.matches?.("[data-close-modal]")) { closeModal(); return; }
     if (!target) return;
     if (target.hasAttribute("data-player-toggle")) {
