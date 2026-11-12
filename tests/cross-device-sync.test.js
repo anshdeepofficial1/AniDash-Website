@@ -123,3 +123,5 @@ test("MAL invalid OAuth state is rejected without calling token exchange",async(
   assert.equal(await h.client.captureRedirect(),"invalid");
   assert.equal(h.requests.filter(item=>item.url==="/api/mal-token").length,0);
 });
+
+test("first playback sync fetches existing Android notes before writing",async()=>{const {client,queries}=aniHarness();await client.init();await client.syncPosition(21,381,345,1440,false);const mutation=queries.find(q=>q.query.includes("SaveMediaListEntry"));assert.equal(mutation.variables.progress,380);assert.match(mutation.variables.notes,/shx:ep=381&sec=345&dur=1440/);assert.match(mutation.variables.notes,/My personal note/);});

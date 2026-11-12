@@ -74,7 +74,8 @@
         "Accept": "application/json",
         Authorization: "Bearer " + token
       },
-      body: JSON.stringify({ query, variables: variables || {} })
+      body: JSON.stringify({ query, variables: variables || {} }),
+      ...(typeof AbortSignal !== "undefined" && AbortSignal.timeout ? {signal:AbortSignal.timeout(12000)} : {})
     });
     const body = await response.json();
     if (response.status === 401 || /invalid token|unauthorized/i.test(body?.errors?.[0]?.message || "")) {
@@ -84,7 +85,13 @@
     if (!response.ok || body.errors) throw new Error(body.errors?.[0]?.message || "AniList is unavailable.");
     return body.data;
   }
+  let initPending = null;
   async function init() {
+    if (viewer && token) return copy(viewer);
+    if(initPending)return initPending;
+    const run=initAccount(); initPending=run; try{return await run}finally{if(initPending===run)initPending=null}
+  }
+  async function initAccount() {
     if (!token) {
       try { token = localStorage.getItem(TOKEN_KEY); } catch (_) {}
     }
