@@ -576,13 +576,7 @@ function SidebarFooter({ isCollapsed, onLogout }: { isCollapsed: boolean, onLogo
                         href: "/settings",
                         isCurrent: pathname === ("/settings"),
                     },
-                    ...(ctx.isBelowBreakpoint ? [
-                        {
-                            iconType: user?.isSimulated ? FiLogIn : BiLogOut,
-                            name: user?.isSimulated ? "Sign in" : "Sign out",
-                            onClick: user?.isSimulated ? () => setLoginModal(true) : confirmSignOut.open,
-                        },
-                    ] : []),
+
                 ]}
             />
             <ConfirmationDialog {...confirmSignOut} />

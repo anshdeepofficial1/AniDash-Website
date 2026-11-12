@@ -1,10 +1,2 @@
-import { CallbackPage } from "@/app/(main)/auth/_containers/callback-page"
 import React from "react"
-
-
-export default function Page() {
-
-    return (
-        <CallbackPage />
-    )
-}
+export default function Page(){const [message,setMessage]=React.useState("Completing AniList sign-in…");React.useEffect(()=>{let cancelled=false;const timer=window.setTimeout(async()=>{try{const account=(window as any).AniDashAccount;if(!account)throw Error("Account module unavailable");const result=account.captureRedirect();if(result!=="success")throw Error("Invalid or expired AniList sign-in request");await account.init();if(!cancelled)window.location.replace("/settings?tab=profile")}catch(e){if(!cancelled)setMessage((e as Error).message)}},100);return()=>{cancelled=true;clearTimeout(timer)}},[]);return <div className="p-8"><p role="status">{message}</p><a href="/settings?tab=profile">Back to profile</a></div>}
