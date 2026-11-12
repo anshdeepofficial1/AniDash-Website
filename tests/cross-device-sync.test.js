@@ -59,6 +59,21 @@ test("Android shx notes resolve One Piece episode 381 at exactly 5m",async()=>{
   assert.equal(resume.duration,1440);
 });
 
+test("Exact 16-minute resume on episode 1 from phone notes is resolved accurately", () => {
+  const {client} = aniHarness();
+  const testEntry = {
+    mediaId: 100,
+    status: "CURRENT",
+    progress: 0,
+    notes: "shx:ep=1&sec=960&dur=1440",
+    media: { id: 100, episodes: 12 }
+  };
+  const resume = client.resumeFromEntry(testEntry, 12);
+  assert.equal(resume.episode, 1);
+  assert.equal(resume.seconds, 960);
+  assert.equal(resume.duration, 1440);
+});
+
 test("AniDash Watch writes Android-compatible notes while preserving other notes",async()=>{
   const {client,queries}=aniHarness();
   await client.init(); await client.list();

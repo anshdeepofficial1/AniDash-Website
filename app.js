@@ -44,7 +44,13 @@
     autoEnableSubtitles: true, autoSkipIntro: false, showNextEpisodePrompt: true,
     episodeViewMode: "grid", preferredSource: "auto",
     showMangaTab: false, showNewsSection: false, showNewsNotifications: true,
-    trackProgress: true
+    trackProgress: true,
+    subtitles: {
+      size: "100%",
+      color: "#ffffff",
+      bg: "rgba(0,0,0,0.75)"
+    },
+    preferredSubtitleLang: "en"
   };
   store.preferences = { ...DEFAULT_PREFERENCES, ...store.preferences };
   // Earlier builds saved List as their implicit default. Migrate it once so
@@ -59,6 +65,31 @@
     }
   } catch (_) {}
   const setting = key => store.preferences[key];
+
+  function applySubtitleStyles() {
+    if (typeof document === "undefined" || !document.head) return;
+    let style = document.getElementById("anidash-sub-styles");
+    if (!style) {
+      style = document.createElement("style");
+      style.id = "anidash-sub-styles";
+      document.head.appendChild(style);
+    }
+    const cfg = store.preferences?.subtitles || {
+      size: "100%",
+      color: "#ffffff",
+      bg: "rgba(0,0,0,0.75)"
+    };
+    style.textContent = [
+      "video::cue {",
+      "  font-size: " + (cfg.size || "100%") + " !important;",
+      "  color: " + (cfg.color || "#ffffff") + " !important;",
+      "  background-color: " + (cfg.bg || "rgba(0,0,0,0.75)") + " !important;",
+      "  font-family: Montserrat, system-ui, -apple-system, sans-serif !important;",
+      "  text-shadow: 0 1px 2px rgba(0,0,0,0.9) !important;",
+      "}"
+    ].join("\n");
+  }
+
   function applyPreferences() {
     if (!document.body || !document.body.dataset) return;
     const themeMode = setting("themeMode");
@@ -70,6 +101,7 @@
     $$('[data-optional-manga]').forEach(item => { item.hidden = !setting("showMangaTab"); });
     const themeMeta = document.querySelector('meta[name="theme-color"]');
     if (themeMeta) themeMeta.content = document.body.dataset.theme === "dark" ? "#101512" : "#f4f8f5";
+    applySubtitleStyles();
   }
   applyPreferences();
   const state = {
@@ -2060,6 +2092,104 @@
     }
   }
 
+  function formatAiringCountdown(timeUntil) {
+    const s = Number(timeUntil || 0);
+    if (s <= 0) return "";
+    const days = Math.floor(s / 86400);
+    const hours = Math.floor((s % 86400) / 3600);
+    const mins = Math.floor((s % 3600) / 60);
+    let str = "";
+    if (days > 0) str += days + "d ";
+    if (hours > 0 || days > 0) str += hours + "h ";
+    str += mins + "m";
+    return str.trim();
+  }
+
+  function renderServerSelectorCard() {
+    const player = state.player;
+    if (!player) return "";
+    const media = player.media;
+    const episode = player.episode;
+    const providerId = player.match?.provider?.id || "justanime";
+    const selectedServer = String(player.selectedServer || "momo").toLowerCase();
+    const currentCategory = player.category === "dub" ? "dub" : "sub";
+    const thumb = episode.thumbnail || media?.coverImage?.large || media?.bannerImage || "/icons/icon-192.png";
+
+    let subServers = [];
+    let dubServers = [];
+
+    if (providerId === "justanime") {
+      const serverKeys = ["momo", "onyx", "gigi", "nami", "calm", "revo"];
+      const serverMap = player.serverMap || {};
+      subServers = serverKeys.map(key => ({
+        id: key,
+        name: key,
+        isHsub: key === "onyx",
+        disabled: serverMap[key] && serverMap[key].sub === false
+      }));
+      dubServers = serverKeys.map(key => ({
+        id: key,
+        name: key,
+        isHsub: false,
+        disabled: (serverMap[key] && serverMap[key].dub === false) || key === "calm"
+      }));
+    } else if (providerId === "hianime") {
+      const keys = ["hd-1", "hd-2", "megacloud", "vidcloud"];
+      subServers = keys.map(k => ({ id: k, name: k.toUpperCase(), isHsub: false, disabled: false }));
+      dubServers = keys.map(k => ({ id: k, name: k.toUpperCase(), isHsub: false, disabled: false }));
+    } else {
+      const keys = ["anikoto", "megaplay"];
+      subServers = keys.map(k => ({ id: k, name: k === "anikoto" ? "AniKoto" : "MegaPlay", isHsub: false, disabled: false }));
+      dubServers = keys.map(k => ({ id: k, name: k === "anikoto" ? "AniKoto" : "MegaPlay", isHsub: false, disabled: false }));
+    }
+
+    const isMatch = (server, channel) => {
+      if (currentCategory !== channel) return false;
+      const cur = selectedServer;
+      return cur === server.id || (server.id === "momo" && (cur === "megaplay" || cur === "auto"));
+    };
+
+    const renderPills = (servers, channel) => servers.map(server => {
+      const active = isMatch(server, channel);
+      const disabledClass = server.disabled ? " disabled" : "";
+      const hsubBadge = server.isHsub ? '<span class="hsub-badge">HSUB</span>' : '';
+      return '<button class="server-pill' + (active ? " active" : "") + disabledClass + '" data-server-pick="' + escapeHtml(server.id) + '" data-channel="' + channel + '"' + (server.disabled ? ' title="Unavailable in ' + channel.toUpperCase() + '"' : '') + '>' +
+        hsubBadge + escapeHtml(server.name) + '</button>';
+    }).join("");
+
+    const nextAiring = media?.nextAiringEpisode;
+    let airingBannerHtml = "";
+    if (nextAiring && nextAiring.episode && Number(nextAiring.timeUntilAiring || 0) > 0) {
+      airingBannerHtml = '<div class="next-airing-banner"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg><span>Estimated next episode will come at <strong>EP ' + escapeHtml(nextAiring.episode) + '</strong> IN <strong>' + escapeHtml(formatAiringCountdown(nextAiring.timeUntilAiring)) + '</strong></span></div>';
+    }
+
+    return '<div class="server-control-card">' +
+      '<div class="watching-meta">' +
+        '<div class="watching-thumb-wrap"><img class="watching-thumb" src="' + escapeHtml(thumb) + '" alt="Episode thumbnail" /></div>' +
+        '<div class="watching-text"><span class="watching-label">YOU ARE WATCHING</span><h3 class="watching-ep">Episode ' + escapeHtml(episode.number) + '</h3></div>' +
+      '</div>' +
+      '<div class="server-picker-pane">' +
+        '<div class="server-picker-header">' +
+          '<div class="server-hint"><span class="hint-icon">ⓘ</span> If this server doesn\'t load, try another one.</div>' +
+        '</div>' +
+        '<div class="server-channel-row">' +
+          '<div class="server-channel-badge">' +
+            '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><rect x="3" y="5" width="18" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><line x1="7" y1="15" x2="11" y2="15" stroke="currentColor" stroke-width="2"/><line x1="13" y1="15" x2="17" y2="15" stroke="currentColor" stroke-width="2"/></svg>' +
+            '<span>SUB</span>' +
+          '</div>' +
+          '<div class="server-pills-row">' + renderPills(subServers, "sub") + '</div>' +
+        '</div>' +
+        '<div class="server-channel-row">' +
+          '<div class="server-channel-badge">' +
+            '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M12 3v18M8 8v8M4 11v2M16 6v12M20 9v6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>' +
+            '<span>DUB</span>' +
+          '</div>' +
+          '<div class="server-pills-row">' + renderPills(dubServers, "dub") + '</div>' +
+        '</div>' +
+      '</div>' +
+    '</div>' + airingBannerHtml;
+  }
+
   function paintPlayer() {
     const player = state.player;
     const media = player.media;
@@ -2068,10 +2198,12 @@
     const hasPrev = episodeIndex > 0;
     const hasNext = episodeIndex >= 0 && episodeIndex < state.detailEpisodes.length - 1;
     $("#view").innerHTML = '<div class="player-page"><div class="player-topline"><button class="back-button" data-anime="' + media.id + '" aria-label="Back to anime">←</button><div class="player-title-group"><span class="watching-eyebrow">NOW WATCHING <span class="watching-dot"></span> EPISODE ' + escapeHtml(episode.number) + '</span><h1>' + escapeHtml(titleOf(media)) + '</h1><p id="player-episode-heading">' + escapeHtml(episode.title) + '</p></div></div>' +
-      '<div class="player-layout"><section class="player-main"><div class="video-frame"><video id="anime-video" controls playsinline webkit-playsinline preload="metadata"></video><iframe id="anime-embed" title="Episode stream" allow="autoplay; fullscreen; picture-in-picture; encrypted-media" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen hidden></iframe><div class="player-overlay" id="player-overlay" role="status"><div class="player-mini-loader"></div><strong>Opening episode…</strong></div></div><div class="video-ui" id="video-ui" hidden aria-label="Playback controls"><div class="video-ui-bottom"><input class="video-seek" id="video-seek" type="range" min="0" max="1000" value="0" aria-label="Seek position"><div class="video-ui-buttons"><button data-player-toggle aria-label="Play or pause">' + uiIcon("play") + '</button><button data-player-jump="-10" aria-label="Back 10 seconds">−10</button><button data-player-jump="10" aria-label="Forward 10 seconds">+10</button><span id="video-clock" class="video-timecode">00:00 / --:--</span><span class="video-ui-spacer"></span><button data-player-mute aria-label="Mute or unmute" title="Mute or unmute">Sound</button><input id="video-volume" type="range" min="0" max="100" value="100" aria-label="Volume"><button data-player-speed aria-label="Playback speed" title="Playback speed">1×</button><button data-player-fullscreen aria-label="Fullscreen" title="Fullscreen">' + uiIcon("expand") + '</button></div></div></div><p id="embedded-controls-note" class="embedded-controls-note" hidden>Use the controls inside the embedded player.</p>' +
+      '<div class="player-layout"><section class="player-main"><div class="video-frame"><video id="anime-video" controls playsinline webkit-playsinline preload="metadata"></video><iframe id="anime-embed" title="Episode stream" allow="autoplay; fullscreen; picture-in-picture; encrypted-media" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen hidden></iframe><div class="player-overlay" id="player-overlay" role="status"><div class="player-mini-loader"></div><strong>Opening episode…</strong></div></div><div class="video-ui" id="video-ui" hidden aria-label="Playback controls"><div class="video-ui-bottom"><input class="video-seek" id="video-seek" type="range" min="0" max="1000" value="0" aria-label="Seek position"><div class="video-ui-buttons"><button data-player-toggle aria-label="Play or pause" title="Play / Pause (Space / K)">' + uiIcon("play") + '</button><button data-player-jump="-10" aria-label="Back 10 seconds" title="Rewind 10s (← / J)">−10s</button><button data-player-jump="10" aria-label="Forward 10 seconds" title="Forward 10s (→ / L)">+10s</button><button data-next class="video-btn-next" aria-label="Next episode" title="Next Episode (N)" ' + (hasNext ? "" : "disabled") + '><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 4 15 12 5 20 5 4"/><line x1="19" y1="5" x2="19" y2="19"/></svg></button><span id="video-clock" class="video-timecode">00:00 / --:--</span><span class="video-ui-spacer"></span><button data-player-cc class="video-btn-cc" aria-label="Toggle subtitles" title="Subtitles On/Off (C)">CC</button><button data-player-sub-settings class="video-btn-sub-settings" aria-label="Subtitle settings" title="Subtitle settings"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button><button data-player-mute aria-label="Mute or unmute" title="Mute or unmute (M)">Sound</button><input id="video-volume" type="range" min="0" max="100" value="100" aria-label="Volume"><button data-player-speed aria-label="Playback speed" title="Playback speed">1×</button><button data-player-fullscreen aria-label="Fullscreen" title="Fullscreen (F)">' + uiIcon("expand") + '</button></div></div></div><p id="embedded-controls-note" class="embedded-controls-note" hidden>Use the controls inside the embedded player.</p>' +
       '<div class="player-under"><div><h2 id="player-episode-inline-title">' + escapeHtml(episode.title) + '</h2><p>' + escapeHtml(titleOf(media)) + ' · Episode ' + escapeHtml(episode.number) + '</p></div><div class="player-controls"><button class="btn btn-quiet" data-prev ' + (hasPrev ? "" : "disabled") + '>← Previous</button><button class="btn btn-quiet" data-next ' + (hasNext ? "" : "disabled") + '>Next →</button></div></div>' +
       '<div class="button-row" style="margin-top:14px" id="skip-buttons"></div>' +
-      '<div class="player-source-stack"><div class="player-panel player-audio-panel"><div class="player-panel-head"><h3>Audio language</h3><span class="stream-state" id="stream-status" role="status">Checking streams</span></div><div class="source-row" id="category-pills" role="group" aria-label="Audio language"><button class="source-pill' + (player.category === "sub" ? " active" : "") + '" data-category="sub" aria-pressed="' + (player.category === "sub") + '">Subtitled</button><button class="source-pill' + (player.category !== "sub" ? " active" : "") + '" data-category="dub" aria-pressed="' + (player.category !== "sub") + '">English dub</button></div></div>' +
+      '<div class="player-source-stack">' +
+      renderServerSelectorCard() +
+      '<div class="player-panel player-audio-panel"><div class="player-panel-head"><h3>Audio language</h3><span class="stream-state" id="stream-status" role="status">Checking streams</span></div><div class="source-row" id="category-pills" role="group" aria-label="Audio language"><button class="source-pill' + (player.category === "sub" ? " active" : "") + '" data-category="sub" aria-pressed="' + (player.category === "sub") + '">🇯🇵 Japanese (Sub)</button><button class="source-pill' + (player.category !== "sub" ? " active" : "") + '" data-category="dub" aria-pressed="' + (player.category !== "sub") + '">🇬🇧 English dub</button></div></div>' +
       '<div class="player-panel player-stream-panel" id="available-streams-panel" hidden><div class="player-panel-head"><h3>Playback sources</h3><span class="stream-hint">Available sources only</span></div><div class="source-row" id="quality-pills" role="group" aria-label="Available streams"></div><button class="btn btn-secondary" id="next-stream-button" data-next-stream hidden>Try another stream</button></div>' +
       '</div></section><aside class="player-sidebar"><div class="player-panel player-episodes-panel"><div class="player-panel-head"><h3>Episodes</h3><span class="episode-current-badge">EP ' + escapeHtml(episode.number) + '</span></div><div class="player-episode-list">' + playerEpisodeItems() + '</div></div>' +
       '</aside></div></div>';
@@ -2184,6 +2316,7 @@
         episode,
         selectedServer,
         servers: extractArray(payload, ["servers", "serverList", "data.servers"]),
+        serverMap: payload?.serverMap || null,
         streams,
         embeds: embeds.map(item => ({
           ...item,
@@ -2292,6 +2425,7 @@
     player.episode = winner.episode;
     player.servers = winner.servers;
     player.selectedServer = winner.selectedServer;
+    player.serverMap = winner.serverMap || null;
     player.streams = winner.streams;
     player.embeds = winner.embeds;
     const targetQuality = setting("defaultQuality");
@@ -2447,6 +2581,20 @@
     if (toggle) {
       toggle.innerHTML = uiIcon(video.paused ? "play" : "pause");
       toggle.setAttribute("aria-label", video.paused ? "Play" : "Pause");
+      toggle.setAttribute("title", video.paused ? "Play (Space / K)" : "Pause (Space / K)");
+    }
+    const cc = $('[data-player-cc]');
+    if (cc && video.textTracks) {
+      const isShowing = Array.from(video.textTracks).some(t => t.mode === "showing");
+      cc.classList.toggle("active", isShowing);
+      cc.setAttribute("aria-pressed", String(isShowing));
+      cc.setAttribute("title", isShowing ? "Subtitles: ON (Click to turn off, press C)" : "Subtitles: OFF (Click to turn on, press C)");
+    }
+    const nextEp = $('.video-ui [data-next]');
+    if (nextEp && state.player && state.detailEpisodes) {
+      const epIndex = state.detailEpisodes.findIndex(item => Number(item.number) === Number(state.player.episode.number));
+      const hasNext = epIndex >= 0 && epIndex < state.detailEpisodes.length - 1;
+      nextEp.disabled = !hasNext;
     }
     const mute = $('[data-player-mute]');
     if (mute) { mute.textContent = video.muted || video.volume === 0 ? "Muted" : "Sound"; mute.setAttribute("aria-pressed", String(video.muted)); }
@@ -2596,20 +2744,48 @@
       overlay.classList.remove("has-error");
       overlay.innerHTML = '<div class="player-mini-loader"></div><strong>Connecting to video…</strong>';
     }
-    video.onloadedmetadata = () => {
-      if (!isActive()) return;
+    let seekApplied = false;
+    const restoreSavedSeek = () => {
+      if (seekApplied) return;
       const key = String(player.media.id);
       const saved = store.history[key];
-      if (saved && Number(saved.episode) === Number(player.episode.number) && saved.position > 15 && video.duration > saved.position + 15) {
-        video.currentTime = saved.position;
-      }
-      if (video.textTracks && video.textTracks.length) {
+      if (saved && Number(saved.episode) === Number(player.episode.number) && Number(saved.position) > 5) {
+        const targetPos = Number(saved.position);
+        const dur = Number(video.duration);
+        if (Number.isFinite(dur) && dur > 0 && targetPos >= dur - 5) return;
         try {
-          [...video.textTracks].forEach(track => {
-            track.mode = setting("autoEnableSubtitles") ? "showing" : "disabled";
-          });
+          video.currentTime = targetPos;
+          seekApplied = true;
+          toast("Resumed from " + hhmmss(targetPos));
         } catch (_) {}
       }
+    };
+    video.onloadedmetadata = () => {
+      if (!isActive()) return;
+      restoreSavedSeek();
+      if (video.textTracks && video.textTracks.length) {
+        try {
+          const autoSub = setting("autoEnableSubtitles");
+          const prefLang = store.preferences?.preferredSubtitleLang || "en";
+          let activated = false;
+          Array.from(video.textTracks).forEach(track => {
+            if (autoSub && !activated) {
+              const match = (track.language && track.language.toLowerCase().startsWith(prefLang)) ||
+                            (track.label && track.label.toLowerCase().includes("english"));
+              if (match) {
+                track.mode = "showing";
+                activated = true;
+                return;
+              }
+            }
+            track.mode = "disabled";
+          });
+          if (autoSub && !activated && video.textTracks[0]) {
+            video.textTracks[0].mode = "showing";
+          }
+        } catch (_) {}
+      }
+      applySubtitleStyles();
       if (!isActive()) return;
       const playerUI = $("#video-ui");
       if (playerUI) playerUI.hidden = false;
@@ -2631,6 +2807,7 @@
     };
     video.onplaying = () => {
       if (!isActive()) return;
+      restoreSavedSeek();
       clearPlaybackTimer();
       if (state.stallNoticeTimer) {
         window.clearTimeout(state.stallNoticeTimer);
@@ -2640,7 +2817,10 @@
       updateVideoControls();
     };
     video.oncanplay = () => {
-      if (isActive() && !video.paused && overlay) overlay.style.display = "none";
+      if (isActive()) {
+        restoreSavedSeek();
+        if (!video.paused && overlay) overlay.style.display = "none";
+      }
     };
     video.onwaiting = () => {
       if (!isActive() || video.paused || video.seeking) return;
@@ -3005,6 +3185,53 @@
       '<div class="modal-actions"><button class="btn btn-primary" data-close>Done</button></div>');
   }
 
+  function openSubtitleSettingsModal() {
+    const video = $("#anime-video");
+    const tracks = video?.textTracks ? Array.from(video.textTracks) : [];
+    const isShowing = tracks.some(t => t.mode === "showing");
+    if (!store.preferences.subtitles) {
+      store.preferences.subtitles = {
+        size: "100%",
+        color: "#ffffff",
+        bg: "rgba(0,0,0,0.75)"
+      };
+    }
+    const subSettings = store.preferences.subtitles;
+
+    const trackOptions = tracks.length ? tracks.map((t, idx) => {
+      const label = t.label || t.language || ("Track " + (idx + 1));
+      const selected = t.mode === "showing";
+      return '<option value="' + idx + '"' + (selected ? " selected" : "") + '>' + escapeHtml(label) + '</option>';
+    }).join("") : '<option value="-1">No tracks available</option>';
+
+    openModal(
+      '<div class="modal-head"><div><div class="eyebrow">PLAYER SETTINGS</div><h2>Subtitle Settings</h2><p>Customize subtitle appearance and choose language tracks</p></div><button class="close-modal" data-close aria-label="Close">×</button></div>' +
+      '<div class="subtitle-settings-body">' +
+        '<div class="preference-row"><div><strong>Enable subtitles</strong><p>Toggle subtitles on or off for video playback</p></div><button class="toggle-btn' + (isShowing ? " active" : "") + '" data-sub-toggle aria-pressed="' + isShowing + '">' + (isShowing ? "ON" : "OFF") + '</button></div>' +
+        '<div class="preference-row"><div><strong>Subtitle track</strong><p>Select language for subtitles</p></div><select class="input-control sub-select" id="sub-track-select">' + trackOptions + '</select></div>' +
+        '<div class="preference-row"><div><strong>Font size</strong><p>Adjust size of subtitle text</p></div><div class="source-row sub-options-row">' +
+          '<button class="source-pill' + (subSettings.size === "75%" ? " active" : "") + '" data-sub-size="75%">Small</button>' +
+          '<button class="source-pill' + (subSettings.size === "100%" || !subSettings.size ? " active" : "") + '" data-sub-size="100%">Normal</button>' +
+          '<button class="source-pill' + (subSettings.size === "125%" ? " active" : "") + '" data-sub-size="125%">Large</button>' +
+          '<button class="source-pill' + (subSettings.size === "150%" ? " active" : "") + '" data-sub-size="150%">Huge</button>' +
+        '</div></div>' +
+        '<div class="preference-row"><div><strong>Text color</strong><p>Choose color for subtitle cues</p></div><div class="source-row sub-options-row">' +
+          '<button class="source-pill' + (subSettings.color === "#ffffff" || !subSettings.color ? " active" : "") + '" data-sub-color="#ffffff">⚪ White</button>' +
+          '<button class="source-pill' + (subSettings.color === "#ffe600" ? " active" : "") + '" data-sub-color="#ffe600">🟡 Yellow</button>' +
+          '<button class="source-pill' + (subSettings.color === "#00f0ff" ? " active" : "") + '" data-sub-color="#00f0ff">🔵 Cyan</button>' +
+          '<button class="source-pill' + (subSettings.color === "#00ff66" ? " active" : "") + '" data-sub-color="#00ff66">🟢 Green</button>' +
+        '</div></div>' +
+        '<div class="preference-row"><div><strong>Background</strong><p>Choose background box behind subtitles</p></div><div class="source-row sub-options-row">' +
+          '<button class="source-pill' + (subSettings.bg === "rgba(0,0,0,0.75)" || !subSettings.bg ? " active" : "") + '" data-sub-bg="rgba(0,0,0,0.75)">Semi-Black</button>' +
+          '<button class="source-pill' + (subSettings.bg === "#000000" ? " active" : "") + '" data-sub-bg="#000000">Solid Black</button>' +
+          '<button class="source-pill' + (subSettings.bg === "transparent" ? " active" : "") + '" data-sub-bg="transparent">None</button>' +
+        '</div></div>' +
+        '<div class="sub-preview-card"><span class="sub-preview-label">Live Preview:</span><div class="sub-preview-box"><span id="sub-preview-text" style="font-size:' + (subSettings.size || '100%') + '; color:' + (subSettings.color || '#ffffff') + '; background-color:' + (subSettings.bg || 'rgba(0,0,0,0.75)') + ';">This is how your subtitles will appear on screen.</span></div></div>' +
+      '</div>' +
+      '<div class="modal-actions"><button class="btn btn-primary" data-close>Done</button></div>'
+    );
+  }
+
   function openInstallGuide() {
     const ua = navigator.userAgent || "";
     const ios = /iPhone|iPad|iPod/i.test(ua);
@@ -3114,6 +3341,15 @@
   }
 
   document.addEventListener("click", async event => {
+    if (event.target.id === "anime-video" || (event.target.classList && event.target.classList.contains("video-frame"))) {
+      const video = $("#anime-video");
+      if (video && video.style.display !== "none") {
+        if (video.paused) video.play().catch(() => {});
+        else video.pause();
+        updateVideoControls();
+      }
+      return;
+    }
     const target = event.composedPath().find(node => node instanceof Element && node.matches("button,a,article"));
     if (event.target.matches?.("[data-close-modal]")) { closeModal(); return; }
     if (!target) return;
@@ -3128,10 +3364,119 @@
     }
     if (target.hasAttribute("data-player-jump")) {
       const video = $("#anime-video");
-      if (video && Number.isFinite(video.duration) && video.duration > 0) {
-        video.currentTime = Math.max(0, Math.min(video.duration, video.currentTime + Number(target.getAttribute("data-player-jump"))));
+      if (video) {
+        const jump = Number(target.getAttribute("data-player-jump") || 0);
+        const maxTime = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : Infinity;
+        video.currentTime = Math.max(0, Math.min(maxTime, (video.currentTime || 0) + jump));
         updateVideoControls();
       }
+      return;
+    }
+    if (target.hasAttribute("data-player-cc")) {
+      const video = $("#anime-video");
+      if (!video) return;
+      const tracks = Array.from(video.textTracks || []);
+      const currentlyShowing = tracks.some(t => t.mode === "showing");
+      if (currentlyShowing) {
+        tracks.forEach(t => { t.mode = "disabled"; });
+        store.preferences.autoEnableSubtitles = false;
+        persist();
+        toast("Subtitles: OFF");
+      } else {
+        const prefLang = String(store.preferences.preferredSubtitleLang || "en").toLowerCase();
+        let chosen = tracks.find(t => String(t.language || t.label || "").toLowerCase().includes(prefLang)) || tracks[0];
+        tracks.forEach(t => { t.mode = (t === chosen ? "showing" : "disabled"); });
+        store.preferences.autoEnableSubtitles = true;
+        persist();
+        toast("Subtitles: ON" + (chosen?.label ? " (" + chosen.label + ")" : ""));
+      }
+      updateVideoControls();
+      return;
+    }
+    if (target.hasAttribute("data-player-sub-settings")) {
+      openSubtitleSettingsModal();
+      return;
+    }
+    if (target.hasAttribute("data-server-pick")) {
+      const serverId = target.getAttribute("data-server-pick");
+      const channel = target.getAttribute("data-channel") || "sub";
+      const player = state.player;
+      if (player) {
+        player.category = channel;
+        player.selectedServer = serverId;
+        player.manualProvider = true;
+        showPlayerOverlay("Switching server…", "Loading " + serverId.toUpperCase() + " (" + channel.toUpperCase() + ")", false);
+        loadPlayerStreams(state.token);
+      }
+      return;
+    }
+    if (target.hasAttribute("data-provider-pick")) {
+      const providerId = target.getAttribute("data-provider-pick");
+      const player = state.player;
+      if (player) {
+        const match = (state.detailMatches || []).find(m => m?.provider?.id === providerId && m.episodesReady);
+        if (match) {
+          player.match = match;
+          player.selectedServer = ({ justanime: "momo", hianime: "hd-1", anikoto: "anikoto" }[providerId] || "auto");
+          player.manualProvider = true;
+          showPlayerOverlay("Switching provider…", "Loading " + match.provider.name, false);
+          loadPlayerStreams(state.token);
+        } else {
+          toast("Selected provider is still loading episodes...");
+        }
+      }
+      return;
+    }
+    if (target.hasAttribute("data-sub-toggle")) {
+      const video = $("#anime-video");
+      const tracks = Array.from(video?.textTracks || []);
+      const currentlyShowing = tracks.some(t => t.mode === "showing");
+      if (currentlyShowing) {
+        tracks.forEach(t => { t.mode = "disabled"; });
+        store.preferences.autoEnableSubtitles = false;
+        target.className = "toggle-btn btn-inactive";
+        target.textContent = "Subtitles: Disabled";
+      } else {
+        const sel = $("#sub-track-select");
+        const idx = sel ? Number(sel.value || 0) : 0;
+        tracks.forEach((t, i) => { t.mode = (i === idx ? "showing" : "disabled"); });
+        store.preferences.autoEnableSubtitles = true;
+        target.className = "toggle-btn btn-active";
+        target.textContent = "Subtitles: Enabled";
+      }
+      persist();
+      applySubtitleStyles();
+      updateVideoControls();
+      return;
+    }
+    if (target.hasAttribute("data-sub-size")) {
+      store.preferences.subtitles = store.preferences.subtitles || {};
+      store.preferences.subtitles.size = target.getAttribute("data-sub-size");
+      persist();
+      applySubtitleStyles();
+      $$("[data-sub-size]").forEach(b => b.classList.toggle("active", b === target));
+      const preview = $("#sub-preview-text");
+      if (preview) preview.style.fontSize = store.preferences.subtitles.size;
+      return;
+    }
+    if (target.hasAttribute("data-sub-color")) {
+      store.preferences.subtitles = store.preferences.subtitles || {};
+      store.preferences.subtitles.color = target.getAttribute("data-sub-color");
+      persist();
+      applySubtitleStyles();
+      $$("[data-sub-color]").forEach(b => b.classList.toggle("active", b === target));
+      const preview = $("#sub-preview-text");
+      if (preview) preview.style.color = store.preferences.subtitles.color;
+      return;
+    }
+    if (target.hasAttribute("data-sub-bg")) {
+      store.preferences.subtitles = store.preferences.subtitles || {};
+      store.preferences.subtitles.bg = target.getAttribute("data-sub-bg");
+      persist();
+      applySubtitleStyles();
+      $$("[data-sub-bg]").forEach(b => b.classList.toggle("active", b === target));
+      const preview = $("#sub-preview-text");
+      if (preview) preview.style.background = store.preferences.subtitles.bg;
       return;
     }
     if (target.hasAttribute("data-player-mute")) {
@@ -3566,9 +3911,95 @@
     if (state.route === "/downloads") renderDownloads();
   });
   document.addEventListener("keydown", event => {
-    if (event.key === "Escape" && $(".modal-backdrop")) { closeModal(); event.preventDefault(); }
+    if (event.key === "Escape" && $(".modal-backdrop")) { closeModal(); event.preventDefault(); return; }
+    if (state.route === "/watch") {
+      const activeTag = (document.activeElement?.tagName || "").toLowerCase();
+      if (activeTag === "input" || activeTag === "textarea" || activeTag === "select") return;
+
+      const video = $("#anime-video");
+      if (event.code === "Space" || event.key === "k" || event.key === "K") {
+        if (video) {
+          event.preventDefault();
+          if (video.paused) video.play().catch(() => {});
+          else video.pause();
+          updateVideoControls();
+        }
+        return;
+      }
+      if (event.key === "ArrowLeft" || event.key === "j" || event.key === "J") {
+        if (video) {
+          event.preventDefault();
+          const maxT = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : Infinity;
+          video.currentTime = Math.max(0, Math.min(maxT, (video.currentTime || 0) - 10));
+          updateVideoControls();
+        }
+        return;
+      }
+      if (event.key === "ArrowRight" || event.key === "l" || event.key === "L") {
+        if (video) {
+          event.preventDefault();
+          const maxT = Number.isFinite(video.duration) && video.duration > 0 ? video.duration : Infinity;
+          video.currentTime = Math.max(0, Math.min(maxT, (video.currentTime || 0) + 10));
+          updateVideoControls();
+        }
+        return;
+      }
+      if (event.key === "n" || event.key === "N") {
+        const nextBtn = $('[data-next]:not([disabled])');
+        if (nextBtn) { event.preventDefault(); nextBtn.click(); }
+        return;
+      }
+      if (event.key === "c" || event.key === "C") {
+        const ccBtn = $('[data-player-cc]');
+        if (ccBtn) { event.preventDefault(); ccBtn.click(); }
+        return;
+      }
+      if (event.key === "m" || event.key === "M") {
+        if (video) {
+          event.preventDefault();
+          video.muted = !video.muted;
+          updateVideoControls();
+        }
+        return;
+      }
+      if (event.key === "f" || event.key === "F") {
+        const fsBtn = $('[data-player-fullscreen]');
+        if (fsBtn) { event.preventDefault(); fsBtn.click(); }
+        return;
+      }
+      if (event.key === "ArrowUp") {
+        if (video) {
+          event.preventDefault();
+          video.volume = Math.min(1, Math.round((video.volume + 0.05) * 100) / 100);
+          const volEl = $("#video-volume");
+          if (volEl) volEl.value = Math.round(video.volume * 100);
+          updateVideoControls();
+        }
+        return;
+      }
+      if (event.key === "ArrowDown") {
+        if (video) {
+          event.preventDefault();
+          video.volume = Math.max(0, Math.round((video.volume - 0.05) * 100) / 100);
+          const volEl = $("#video-volume");
+          if (volEl) volEl.value = Math.round(video.volume * 100);
+          updateVideoControls();
+        }
+        return;
+      }
+    }
   });
   document.addEventListener("change", async event => {
+    if (event.target.id === "sub-track-select") {
+      const video = $("#anime-video");
+      const tracks = Array.from(video?.textTracks || []);
+      const idx = Number(event.target.value || 0);
+      tracks.forEach((t, i) => { t.mode = (i === idx ? "showing" : "disabled"); });
+      if (tracks[idx]?.language) store.preferences.preferredSubtitleLang = tracks[idx].language;
+      persist();
+      updateVideoControls();
+      return;
+    }
     if (event.target.id === "player-episode-range") {
       state.playerEpisodeManualPage = true;
       state.playerEpisodePage = Math.max(1, Number(event.target.value) || 1);

@@ -231,3 +231,134 @@ body { min-height: 100dvh; }
  .video-timecode { font-size:10px; margin-left:2px; }
  .video-seek { height:16px; margin-bottom:2px; }
 }
+
+/* Subtitle and Extended Player Controls */
+.video-btn-cc {
+  font-family: inherit; font-size: 11px; font-weight: 800; letter-spacing: 0.5px;
+  border: 1px solid rgba(255,255,255,0.3) !important; border-radius: 6px !important;
+  padding: 2px 6px !important; min-width: 32px !important; height: 26px !important;
+}
+.video-btn-cc.active {
+  background: #ffffff !important; color: #000000 !important; border-color: #ffffff !important;
+}
+.video-btn-sub-settings, .video-btn-next {
+  display: grid; place-items: center; border-radius: 6px;
+}
+.video-btn-next svg { width: 18px; height: 18px; }
+.video-btn-next:disabled { opacity: 0.35; cursor: not-allowed; }
+
+/* JustAnime & Multi-Source Server Control Card */
+.server-control-card {
+  display: flex; gap: 20px; align-items: center;
+  background: #111114; border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 12px; padding: 14px 18px; margin: 16px 0 10px;
+}
+.watching-meta {
+  display: flex; align-items: center; gap: 14px;
+  min-width: 220px; padding-right: 18px;
+  border-right: 1px solid rgba(255,255,255,0.08);
+}
+.watching-thumb-wrap {
+  width: 96px; height: 56px; border-radius: 6px;
+  overflow: hidden; flex-shrink: 0; background: #000;
+}
+.watching-thumb { width: 100%; height: 100%; object-fit: cover; }
+.watching-text { display: flex; flex-direction: column; gap: 2px; }
+.watching-label {
+  font-size: 10px; font-weight: 700; letter-spacing: 1.2px;
+  color: rgba(255,255,255,0.45); text-transform: uppercase;
+}
+.watching-ep { font-size: 18px; font-weight: 800; color: #ffffff; margin: 0; }
+.server-picker-pane { flex: 1; display: flex; flex-direction: column; gap: 10px; }
+.server-picker-header { display: flex; justify-content: space-between; align-items: center; }
+.server-hint { font-size: 12px; color: rgba(255,255,255,0.5); display: flex; align-items: center; gap: 6px; }
+.hint-icon { font-size: 13px; opacity: 0.7; }
+.server-channel-row { display: flex; align-items: center; gap: 12px; }
+.server-channel-badge {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 11px; font-weight: 800; color: rgba(255,255,255,0.55);
+  min-width: 52px;
+}
+.server-channel-badge svg { flex-shrink: 0; opacity: 0.7; }
+.server-pills-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.server-pill {
+  position: relative; background: rgba(255,255,255,0.07);
+  border: 1px solid rgba(255,255,255,0.12); color: rgba(255,255,255,0.85);
+  font-size: 13px; font-weight: 600; padding: 6px 16px; border-radius: 8px;
+  cursor: pointer; transition: all 0.15s ease;
+}
+.server-pill:hover { background: rgba(255,255,255,0.16); }
+.server-pill.active {
+  background: #ffffff; color: #0a0a0c; border-color: #ffffff;
+  font-weight: 700; box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+}
+.server-pill.disabled {
+  opacity: 0.35; border: 1px dashed rgba(255,255,255,0.25);
+  cursor: not-allowed; text-decoration: line-through;
+}
+.hsub-badge {
+  position: absolute; top: -7px; right: -4px;
+  background: #1c1c20; border: 1px solid rgba(255,255,255,0.3);
+  font-size: 8px; font-weight: 800; color: rgba(255,255,255,0.9);
+  padding: 1px 4px; border-radius: 3px; pointer-events: none; line-height: 1.1;
+}
+.provider-switch-row { display: flex; align-items: center; gap: 6px; font-size: 11px; }
+.provider-switch-label { color: rgba(255,255,255,0.45); font-weight: 600; }
+.provider-switch-pill {
+  background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1);
+  color: rgba(255,255,255,0.7); font-size: 11px; font-weight: 600;
+  padding: 3px 8px; border-radius: 6px; cursor: pointer;
+}
+.provider-switch-pill.active {
+  background: rgba(255,255,255,0.22); color: #ffffff;
+  border-color: rgba(255,255,255,0.4);
+}
+
+/* Estimated Next Airing Episode Banner */
+.next-airing-banner {
+  display: flex; align-items: center; gap: 8px;
+  background: #111114; border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 8px; padding: 10px 14px; margin: 0 0 14px;
+  font-size: 12px; color: rgba(255,255,255,0.7);
+}
+.next-airing-banner svg { stroke: rgba(255,255,255,0.5); flex-shrink: 0; }
+.next-airing-banner strong { color: #ffffff; font-weight: 700; }
+
+/* Subtitle Settings Modal */
+.sub-options-row { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
+.sub-pills { display: flex; gap: 8px; flex-wrap: wrap; }
+.sub-pill {
+  padding: 6px 12px; font-size: 12px; border-radius: 6px;
+  background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.12);
+  color: #fff; cursor: pointer; transition: all 0.15s ease;
+}
+.sub-pill:hover { background: rgba(255,255,255,0.15); }
+.sub-pill.active {
+  background: #ffffff; color: #000; font-weight: 700; border-color: #ffffff;
+}
+.sub-select {
+  width: 100%; padding: 8px 10px; background: #1a1a1f; color: #fff;
+  border: 1px solid rgba(255,255,255,0.15); border-radius: 6px;
+}
+.sub-preview-card {
+  margin: 14px 0; background: #000; border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 8px; overflow: hidden;
+}
+.sub-preview-box {
+  height: 80px; display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(135deg, #181824 0%, #0d0d14 100%);
+}
+#sub-preview-text { padding: 4px 10px; border-radius: 4px; }
+.toggle-btn {
+  padding: 6px 14px; border-radius: 6px; font-weight: 700;
+  cursor: pointer; border: 1px solid rgba(255,255,255,0.2);
+}
+.toggle-btn.btn-active { background: #22c55e; color: #000000; border-color: #22c55e; }
+.toggle-btn.btn-inactive { background: rgba(255,255,255,0.1); color: #ffffff; }
+
+@media(max-width: 760px) {
+  .server-control-card { flex-direction: column; align-items: stretch; gap: 14px; padding: 12px; }
+  .watching-meta { border-right: none; border-bottom: 1px solid rgba(255,255,255,0.08); padding-right: 0; padding-bottom: 12px; }
+  .server-channel-row { flex-direction: column; align-items: flex-start; gap: 6px; }
+  .server-channel-badge { min-width: auto; }
+}

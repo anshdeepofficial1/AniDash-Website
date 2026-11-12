@@ -5,16 +5,28 @@ const UA = "Mozilla/5.0 (Linux; Android 15) AppleWebKit/537.36 (KHTML, like Geck
 const SERVER_OPTIONS = {
   sub: [
     { id: "auto", name: "Automatic (Best available)" },
-    { id: "megaplay", name: "Momo (HLS)" },
+    { id: "momo", name: "Momo (HLS)" },
+    { id: "onyx", name: "Onyx (HSUB)" },
+    { id: "gigi", name: "Gigi (MP4)" },
+    { id: "nami", name: "Nami (HLS)" },
+    { id: "calm", name: "Calm (HLS)" },
+    { id: "revo", name: "Revo (HLS)" },
+    { id: "megaplay", name: "MegaPlay (HLS)" },
     { id: "zokoanime", name: "Zoko (HLS)" },
-    { id: "animegg", name: "Gigi (MP4)" },
+    { id: "animegg", name: "AnimeGG (MP4)" },
     { id: "anineko", name: "Neko (HLS)" }
   ],
   dub: [
     { id: "auto", name: "Automatic (Best available)" },
-    { id: "megaplay", name: "Momo (HLS)" },
+    { id: "momo", name: "Momo (HLS)" },
+    { id: "onyx", name: "Onyx (HLS)" },
+    { id: "gigi", name: "Gigi (MP4)" },
+    { id: "nami", name: "Nami (HLS)" },
+    { id: "calm", name: "Calm (HLS)" },
+    { id: "revo", name: "Revo (HLS)" },
+    { id: "megaplay", name: "MegaPlay (HLS)" },
     { id: "zokoanime", name: "Zoko (HLS)" },
-    { id: "animegg", name: "Gigi (MP4)" },
+    { id: "animegg", name: "AnimeGG (MP4)" },
     { id: "anineko", name: "Neko (HLS)" }
   ]
 };
@@ -42,7 +54,8 @@ function allowedJustAnimePath(path) {
   const value = String(path || "");
   return /^\/search\?(?:[^#]*)$/.test(value) ||
     /^\/anime\/\d{1,12}\/episodes\?page=\d{1,2}$/.test(value) ||
-    /^\/watch\/\d{1,12}\/episode\/\d{1,5}(?:\.\d{1,3})?(?:\/(?:megaplay|zokoanime|animegg|anineko\/(?:sub|dub)(?:\/hd1)?))?$/.test(value);
+    /^\/watch\/\d{1,12}\/episode\/\d{1,5}(?:\.\d{1,3})?\/servers$/.test(value) ||
+    /^\/watch\/\d{1,12}\/episode\/\d{1,5}(?:\.\d{1,3})?(?:\/(?:momo|megaplay|onyx|gigi|animegg|nami|calm|revo|zokoanime|zoko|anineko(?:\/(?:sub|dub)(?:\/hd1)?)?))?$/.test(value);
 }
 
 async function requestJson(url, timeout = 8500, signal) {
@@ -113,7 +126,7 @@ function getPath(animeId, episode, suffix = "") {
     throw new Error("Invalid JustAnime episode number");
   }
   const safeSuffix = String(suffix || "");
-  if (safeSuffix && !/^\/(?:megaplay|zokoanime|animegg|anineko\/(?:sub|dub)(?:\/hd1)?)$/.test(safeSuffix)) {
+  if (safeSuffix && !/^\/(?:servers|momo|megaplay|onyx|gigi|animegg|nami|calm|revo|zokoanime|zoko|anineko(?:\/(?:sub|dub)(?:\/hd1)?)?)$/.test(safeSuffix)) {
     throw new Error("Unknown JustAnime server");
   }
   return "/watch/" + id + "/episode/" + ep + safeSuffix;
@@ -247,8 +260,10 @@ function mediaUrl(req, raw, isHls, playbackHeaders = {}) {
     const target = new URL(String(raw));
     if (target.protocol !== "https:") return String(raw);
     const allowed = [
-      "neko.justanime.to", "nexabloom.top", "give6beforegtav.site",
-      "megaplay.buzz", "zokoanime.video", "animegg.org",
+      "neko.justanime.to", "core.justanime.to", "justanime.to",
+      "nexabloom.top", "give6beforegtav.site",
+      "megaplay.buzz", "zokoanime.video", "animegg.org", "vidcache.net",
+      "echovideo.to", "megavid.se", "animex.one",
       "kwik.cx", "kwik.si", "kwik.to", "kwik.li",
       "megacloud.blog", "megacloud.tv", "rapid-cloud.co", "rapid-cloud.ru",
       "vidnest.fun", "norami.top", "kryntal.top", "akirax.buzz", "vid-tube.site"
@@ -311,18 +326,29 @@ function normalizeBlock(payload, endpoint, category, req) {
     actualCategory = endpointCategory;
   }
 
-  const serverName = endpoint.includes("megaplay") ? "Momo"
-    : endpoint.includes("zokoanime") ? "Zoko"
-    : endpoint.includes("anineko") ? "Neko"
-    : endpoint.includes("animegg") ? "Gigi" : "Auto";
-  const serverId = endpoint.includes("megaplay") ? "megaplay"
-    : endpoint.includes("zokoanime") ? "zokoanime"
-    : endpoint.includes("anineko") ? "anineko"
-    : endpoint.includes("animegg") ? "animegg" : "auto";
+  const serverName = (endpoint.includes("megaplay") || endpoint.includes("/momo")) ? "Momo"
+    : endpoint.includes("onyx") ? "Onyx"
+    : (endpoint.includes("animegg") || endpoint.includes("/gigi")) ? "Gigi"
+    : endpoint.includes("nami") ? "Nami"
+    : endpoint.includes("calm") ? "Calm"
+    : endpoint.includes("revo") ? "Revo"
+    : endpoint.includes("zoko") ? "Zoko"
+    : endpoint.includes("anineko") ? "Neko" : "Auto";
+  const serverId = (endpoint.includes("megaplay") || endpoint.includes("/momo")) ? "momo"
+    : endpoint.includes("onyx") ? "onyx"
+    : (endpoint.includes("animegg") || endpoint.includes("/gigi")) ? "gigi"
+    : endpoint.includes("nami") ? "nami"
+    : endpoint.includes("calm") ? "calm"
+    : endpoint.includes("revo") ? "revo"
+    : endpoint.includes("zoko") ? "zokoanime"
+    : endpoint.includes("anineko") ? "anineko" : "auto";
 
-  const referer = endpoint.includes("megaplay") ? "https://megaplay.buzz/"
+  const referer = (endpoint.includes("megaplay") || endpoint.includes("/momo")) ? "https://megaplay.buzz/"
+    : endpoint.includes("onyx") ? "https://animex.one/"
+    : (endpoint.includes("animegg") || endpoint.includes("/gigi")) ? "https://www.animegg.org/"
+    : endpoint.includes("nami") ? "https://justanime.to/"
+    : endpoint.includes("calm") || endpoint.includes("revo") ? "https://justanime.to/"
     : endpoint.includes("zoko") ? "https://zokoanime.video/"
-    : endpoint.includes("animegg") ? "https://www.animegg.org/"
     : "https://justanime.to/";
 
   const sources = (Array.isArray(raw.sources) ? raw.sources : []).map(item => {
@@ -369,18 +395,30 @@ async function streams(req, animeId, episode, server, category) {
   if (explicit === "auto" || explicit === "default") {
     endpoints = [
       getPath(animeId, episode, "/megaplay"),
+      getPath(animeId, episode, "/onyx"),
+      getPath(animeId, episode, "/animegg"),
+      getPath(animeId, episode, "/nami"),
+      getPath(animeId, episode, "/calm"),
+      getPath(animeId, episode, "/revo"),
       getPath(animeId, episode),
       getPath(animeId, episode, "/zokoanime"),
-      getPath(animeId, episode, "/animegg"),
       getPath(animeId, episode, "/anineko/" + cleanCategory + "/hd1"),
       getPath(animeId, episode, "/anineko/" + cleanCategory)
     ];
   } else if (explicit === "megaplay" || explicit === "momo") {
     endpoints = [getPath(animeId, episode, "/megaplay")];
-  } else if (explicit === "zokoanime" || explicit === "zoko") {
-    endpoints = [getPath(animeId, episode, "/zokoanime")];
+  } else if (explicit === "onyx") {
+    endpoints = [getPath(animeId, episode, "/onyx")];
   } else if (explicit === "animegg" || explicit === "gigi") {
     endpoints = [getPath(animeId, episode, "/animegg")];
+  } else if (explicit === "nami") {
+    endpoints = [getPath(animeId, episode, "/nami")];
+  } else if (explicit === "calm") {
+    endpoints = [getPath(animeId, episode, "/calm")];
+  } else if (explicit === "revo") {
+    endpoints = [getPath(animeId, episode, "/revo")];
+  } else if (explicit === "zokoanime" || explicit === "zoko") {
+    endpoints = [getPath(animeId, episode, "/zokoanime")];
   } else if (explicit === "anineko" || explicit === "neko") {
     endpoints = [getPath(animeId, episode, "/anineko/" + cleanCategory)];
   } else {
@@ -493,6 +531,21 @@ export default async function handler(req, res) {
       if (!animeId || !episode) {
         return send(res, 400, { error: "Anime ID and episode are required to verify available servers" });
       }
+      try {
+        const serverPayload = await getJson(req, getPath(animeId, episode, "/servers"), 5000);
+        if (serverPayload && serverPayload.servers && typeof serverPayload.servers === "object") {
+          const map = serverPayload.servers;
+          const servers = Object.keys(map)
+            .filter(key => map[key] && map[key][category] === true)
+            .map(key => ({
+              id: key,
+              name: key.charAt(0).toUpperCase() + key.slice(1),
+              isDub: category === "dub",
+              isHsub: key === "onyx" && category === "sub"
+            }));
+          return send(res, 200, { servers, serverMap: map, category }, "no-store");
+        }
+      } catch (_) {}
       const resolved = await streams(req, animeId, episode, "auto", category);
       return send(res, 200, { servers: resolved.servers, category }, "no-store");
     }

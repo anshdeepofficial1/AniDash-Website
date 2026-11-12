@@ -1,11 +1,16 @@
 const ALLOWED_HOSTS = new Set([
   "neko.justanime.to",
+  "core.justanime.to",
+  "justanime.to",
   "nexabloom.top",
   "give6beforegtav.site",
   "megaplay.buzz",
   "zokoanime.video",
   "animegg.org",
   "vidcache.net",
+  "echovideo.to",
+  "megavid.se",
+  "animex.one",
   "kwik.cx",
   "kwik.si",
   "kwik.to",
@@ -48,9 +53,10 @@ function proxyContext(target) {
 
 
 function headersFor(target, req, custom = {}) {
-  const isJustAnime = target.hostname === "neko.justanime.to" || target.hostname.endsWith(".justanime.to");
+  const isJustAnime = target.hostname === "neko.justanime.to" || target.hostname.endsWith(".justanime.to") || target.hostname.endsWith(".echovideo.to");
   const isKwik = /^kwik\./i.test(target.hostname) || target.hostname.endsWith(".kwik.cx");
-  const referer = custom.referer || custom.Referer || (isJustAnime ? "https://justanime.to/" : isKwik ? "https://kwik.cx/" : "https://" + target.hostname + "/");
+  const isAnimex = target.hostname.endsWith(".animex.one") || target.hostname.endsWith(".megavid.se");
+  const referer = custom.referer || custom.Referer || (isJustAnime ? "https://justanime.to/" : isAnimex ? "https://animex.one/" : isKwik ? "https://kwik.cx/" : "https://" + target.hostname + "/");
   const origin = custom.origin || custom.Origin || (() => {
     try { return new URL(referer).origin; } catch { return "https://" + target.hostname; }
   })();

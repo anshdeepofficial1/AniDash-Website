@@ -153,13 +153,16 @@
     const completed = Math.max(0, Number(entry.progress || 0));
     const next = completed + 1;
     const notes = parseWatchNotes(entry.notes);
-    const partial = notes && notes.episode >= next && notes.seconds > 0 &&
-      (notes.duration <= 0 || notes.seconds < notes.duration);
-    const ep = partial ? notes.episode : next;
+    const hasNoteTime = notes && notes.seconds > 0;
+    const isFinished = notes && notes.duration > 0 && notes.seconds >= notes.duration - 30;
+    const resumeExact = hasNoteTime && !isFinished && notes.episode > 0;
+    const ep = resumeExact ? notes.episode : (completed > 0 && (notes?.episode || next) <= completed ? next : (notes?.episode || next));
+    const sec = resumeExact ? notes.seconds : 0;
+    const dur = notes?.duration || 1440;
     return {
       episode: totalEpisodes > 0 ? Math.min(ep, totalEpisodes) : ep,
-      seconds: partial ? notes.seconds : 0,
-      duration: notes?.duration || 1440,
+      seconds: sec,
+      duration: dur,
       updatedAt: Number(entry.updatedAt || 0) * 1000,
       completedEpisodes: completed
     };
