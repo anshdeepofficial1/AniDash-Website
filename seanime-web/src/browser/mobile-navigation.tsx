@@ -1,0 +1,5 @@
+import React from "react"
+import { usePathname,useRouter,useSearchParams } from "@/lib/navigation"
+import { LuHouse,LuCompass,LuSearch,LuList,LuUserRound } from "react-icons/lu"
+const tabs=[{label:"Home",href:"/",icon:LuHouse},{label:"Discover",href:"/discover",icon:LuCompass},{label:"Search",href:"/search",icon:LuSearch},{label:"My List",href:"/lists",icon:LuList},{label:"Profile",href:"/settings?tab=profile",icon:LuUserRound}]
+export function MobileBottomNavigation(){const path=usePathname(),params=useSearchParams(),router=useRouter();if(path.startsWith("/entry")&&params.has("episode"))return null;return <nav aria-label="Mobile navigation" className="anidash-mobile-nav">{tabs.map(t=>{const target=t.href.split("?")[0],active=target==="/"?path==="/":path.startsWith(target);return <button key={t.label} type="button" aria-current={active?"page":undefined} onClick={()=>router.push(t.href)} className={active?"active":""}><t.icon aria-hidden="true" size={22}/><span>{t.label}</span></button>})}</nav>}

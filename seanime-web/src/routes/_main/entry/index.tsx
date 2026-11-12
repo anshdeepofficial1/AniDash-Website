@@ -5,6 +5,7 @@ import { z } from "zod"
 const searchSchema = z.object({
     id: z.coerce.number().optional(),
     tab: z.string().optional(),
+    episode: z.coerce.number().int().positive().optional(),
 })
 
 export const Route = createFileRoute("/_main/entry/")({

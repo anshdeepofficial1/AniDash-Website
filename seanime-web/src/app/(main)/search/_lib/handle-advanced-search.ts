@@ -12,7 +12,7 @@ export function useAnilistAdvancedSearch() {
     const params = useAtomValue(__advancedSearch_paramsAtom)
     const password = useAtomValue(serverAuthTokenAtom)
 
-    const { isLoading: isLoading1, data: data1, fetchNextPage: fetchNextPage1, hasNextPage: hasNextPage1 } = useInfiniteQuery({
+    const { isLoading: isLoading1, isError: isError1, error: error1, refetch: refetch1, data: data1, fetchNextPage: fetchNextPage1, hasNextPage: hasNextPage1 } = useInfiniteQuery({
         queryKey: ["advanced-search-anime", params],
         initialPageParam: 1,
         queryFn: async ({ pageParam }) => {
@@ -53,7 +53,7 @@ export function useAnilistAdvancedSearch() {
         refetchOnMount: true,
     })
 
-    const { isLoading: isLoading2, data: data2, fetchNextPage: fetchNextPage2, hasNextPage: hasNextPage2 } = useInfiniteQuery({
+    const { isLoading: isLoading2, isError: isError2, error: error2, refetch: refetch2, data: data2, fetchNextPage: fetchNextPage2, hasNextPage: hasNextPage2 } = useInfiniteQuery({
         queryKey: ["advanced-search-manga", params],
         initialPageParam: 1,
         queryFn: async ({ pageParam }) => {
@@ -102,6 +102,9 @@ export function useAnilistAdvancedSearch() {
 
     return {
         isLoading,
+        isError: params.type === "anime" ? isError1 : isError2,
+        error: params.type === "anime" ? error1 : error2,
+        refetch: params.type === "anime" ? refetch1 : refetch2,
         data,
         fetchNextPage,
         hasNextPage,

@@ -1,41 +1,13 @@
-import { useGetMissingEpisodes } from "@/api/hooks/anime_entries.hooks"
-import { CustomLibraryBanner } from "@/app/(main)/_features/anime-library/_containers/custom-library-banner"
-import { PluginWebviewSlot } from "@/app/(main)/_features/plugin/webview/plugin-webviews"
-import { MissingEpisodes } from "@/app/(main)/schedule/_components/missing-episodes"
-import { UpcomingEpisodes } from "@/app/(main)/schedule/_containers/upcoming-episodes.tsx"
-import { PageWrapper } from "@/components/shared/page-wrapper"
-import { AppLayoutStack } from "@/components/ui/app-layout"
-import { LoadingSpinner } from "@/components/ui/loading-spinner"
 import React from "react"
-import { ScheduleCalendar } from "./_components/schedule-calendar"
-
-
-export default function Page() {
-
-    const { data, isLoading } = useGetMissingEpisodes()
-
-    if (isLoading) return <LoadingSpinner />
-
-    return (
-        <>
-            <CustomLibraryBanner discrete />
-            <PageWrapper
-                className="p-4 sm:p-8 space-y-10 pb-10"
-            >
-                <PluginWebviewSlot slot="schedule-screen-top" />
-                <MissingEpisodes data={data} isLoading={isLoading} />
-                <AppLayoutStack>
-
-                    <div className="hidden lg:block space-y-2">
-                        <h2>Release schedule</h2>
-                        <p className="text-[--muted]">Based on your anime list</p>
-                    </div>
-
-                    <ScheduleCalendar />
-                </AppLayoutStack>
-                <UpcomingEpisodes />
-                <PluginWebviewSlot slot="schedule-screen-bottom" />
-            </PageWrapper>
-        </>
-    )
+import { useQuery } from "@tanstack/react-query"
+import { browserSchedule } from "@/browser/transport"
+import { PageWrapper } from "@/components/shared/page-wrapper"
+import { SeaLink } from "@/components/shared/sea-link"
+export default function Page(){
+ const [personal,setPersonal]=React.useState(false),[week,setWeek]=React.useState(0)
+ const q=useQuery({queryKey:["anidash-schedule",personal,week],queryFn:()=>browserSchedule(personal,week),retry:1,staleTime:120000})
+ const start=new Date();start.setHours(0,0,0,0);start.setDate(start.getDate()+week*7)
+ const days=Array.from({length:7},(_,i)=>{const d=new Date(start);d.setDate(d.getDate()+i);return d})
+ return <PageWrapper className="p-4 sm:p-8 space-y-6"><header><h1>Release schedule</h1><p className="text-[--muted]">Upcoming anime episodes in your local time. Dates are provided by AniList and may change.</p></header><div className="flex flex-wrap gap-2"><button className={"rounded-lg border px-4 py-2 "+(!personal?"bg-[--subtle]":"")} onClick={()=>setPersonal(false)}>All releases</button><button className={"rounded-lg border px-4 py-2 "+(personal?"bg-[--subtle]":"")} onClick={()=>setPersonal(true)}>My List</button><button className="rounded-lg border px-4 py-2 ml-auto" onClick={()=>setWeek(w=>w-1)}>Previous week</button><button className="rounded-lg border px-4 py-2" onClick={()=>setWeek(0)}>This week</button><button className="rounded-lg border px-4 py-2" onClick={()=>setWeek(w=>w+1)}>Next week</button></div>
+ {q.isPending?<p>Loading release dates…</p>:q.isError?<div role="alert"><p>{(q.error as Error).message}</p><button className="border rounded-lg p-2" onClick={()=>q.refetch()}>Try again</button></div>:<div className="space-y-5">{days.map(day=>{const rows=(q.data||[]).filter(a=>new Date(a.airingAt*1000).toDateString()===day.toDateString());return <section key={day.toISOString()} className="border rounded-xl p-4 space-y-3"><h2 className="text-lg font-semibold">{day.toLocaleDateString(undefined,{weekday:"long",month:"long",day:"numeric",year:"numeric"})}</h2>{rows.length?<div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{rows.map(a=><SeaLink key={a.id} href={"/entry?id="+a.media.id} className="flex gap-3 rounded-lg border p-3 hover:bg-[--subtle]"><img className="w-14 h-20 rounded object-cover" src={a.media.coverImage?.large} alt=""/><div><p className="font-semibold">{a.media.title?.english||a.media.title?.userPreferred||a.media.title?.romaji}</p><p className="text-sm text-[--muted]">Episode {a.episode} · {new Date(a.airingAt*1000).toLocaleTimeString(undefined,{hour:"numeric",minute:"2-digit"})}</p></div></SeaLink>)}</div>:<p className="text-sm text-[--muted]">No confirmed {personal?"My List ":""}releases for this date.</p>}</section>})}</div>}</PageWrapper>
 }

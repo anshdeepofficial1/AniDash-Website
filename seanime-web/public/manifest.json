@@ -1,7 +1,7 @@
 {
-  "name": "AniDash",
+  "name": "AniDash Go",
   "short_name": "AniDash",
-  "description": "AniDash \u2014 Anime, without the noise.",
+  "description": "AniDash — Anime, without the noise.",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#0c0c0c",
@@ -25,5 +25,7 @@
       "type": "image/png",
       "purpose": "any"
     }
-  ]
+  ],
+  "scope": "/",
+  "id": "/"
 }

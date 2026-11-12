@@ -1229,3 +1229,21 @@ media-preview-chapter-display {
 [data-mpv-prism-video-canvas] {
     background: #000000 !important;
 }
+
+/* AniDash Go phone and installed PWA safe areas */
+.anidash-mobile-nav{display:none}
+@media(max-width:1023px){
+ .anidash-main-content{padding-bottom:calc(76px + env(safe-area-inset-bottom,0px));min-width:0}
+ .anidash-main-content:has([data-anidash-watch-page]){padding-bottom:env(safe-area-inset-bottom,0px)}
+ .anidash-mobile-nav{position:fixed;display:grid;grid-template-columns:repeat(5,minmax(0,1fr));bottom:0;left:0;right:0;z-index:100;padding:9px max(8px,env(safe-area-inset-right,0px)) calc(10px + env(safe-area-inset-bottom,0px)) max(8px,env(safe-area-inset-left,0px));background:rgba(13,13,17,.96);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border-top:1px solid rgba(255,255,255,.12);color:#a4a4ae}
+ .anidash-mobile-nav button{display:flex;align-items:center;justify-content:center;flex-direction:column;gap:4px;min-height:44px;font-size:10px;white-space:nowrap}
+ .anidash-mobile-nav button.active{color:white}
+ .anidash-mobile-nav button.active svg{color:var(--brand,white)}
+ .anidash-mobile-hero{position:relative;isolation:isolate;overflow:hidden;margin:0 16px 20px;height:clamp(285px,46vh,400px);border-radius:18px;background:#16161a}
+ [data-top-navbar]{padding-top:env(safe-area-inset-top,0px);height:calc(56px + env(safe-area-inset-top,0px))!important}
+ [data-library-toolbar]{margin-top:0!important}
+ [data-anidash-watch-page]{padding-inline:max(12px,env(safe-area-inset-left,0px)) max(12px,env(safe-area-inset-right,0px))}
+}
+@media(prefers-reduced-motion:reduce){.anidash-mobile-hero *{scroll-behavior:auto!important}}
+
+@media(max-width:1023px){[data-home-screen] [data-library-toolbar-top-padding]{height:0!important}[data-home-screen] [data-library-toolbar]{margin-top:0!important}.anidash-mobile-hero{touch-action:pan-y}}

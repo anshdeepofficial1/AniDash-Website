@@ -83,7 +83,7 @@ export function ServerSettings(props: ServerSettingsProps) {
     return (
         <div className="space-y-8">
 
-            {(!isApiWorking && !isFetchingApiStatus) && (
+            {(isApiWorking === false && !isFetchingApiStatus) && (
                 <Alert
                     intent="warning-basic"
                     description={<div className="space-y-1">

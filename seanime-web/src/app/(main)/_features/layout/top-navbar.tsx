@@ -60,8 +60,8 @@ export function TopNavbar(props: TopNavbarProps) {
                         <PlaybackManagerProgressTrackingButton />
                         <ManualProgressTrackingButton />
                         <div data-top-navbar-content-separator className="flex flex-1"></div>
-                        <PluginSidebarTray place="top" />
-                        {!isOffline && <ChapterDownloadsButton />}
+                        
+                        
                         {/*{!isOffline && <RefreshAnilistButton />}*/}
                     </div>
                 </div>

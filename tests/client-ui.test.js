@@ -78,6 +78,7 @@ function createBrowser(initialHash) {
   };
   const context = {
     document, window, location, history, localStorage, fetch,
+    Element: Object,
     URL, URLSearchParams, AbortController,
     setTimeout, clearTimeout,
     navigator: { userAgent: "Node test" },
@@ -126,11 +127,13 @@ test("player appears before stream resolution and DUB/SUB switching does not thr
   assert.doesNotMatch(html, /Checking JustAnime, HiAnime and AniKoto in parallel/);
   const click = browser.listeners.get("click");
   const target = {
+    matches: () => true,
     hasAttribute: key => key === "data-category",
     getAttribute: key => key === "data-category" ? "sub" : null
   };
   await assert.doesNotReject(async () => click({
     target: { closest: () => target },
+    composedPath: () => [target],
     preventDefault() {}
   }));
 });

@@ -1,3 +1,4 @@
+import { MobileBottomNavigation } from "@/browser/mobile-navigation"
 import { ScanProgressBar } from "@/app/(main)/_features/anime-library/_containers/scan-progress-bar"
 import { ScannerModal } from "@/app/(main)/_features/anime-library/_containers/scanner-modal"
 import { ErrorExplainer } from "@/app/(main)/_features/error-explainer/error-explainer"
@@ -56,8 +57,9 @@ export const MainLayout = ({ children }: { children: React.ReactNode }) => {
             <AppSidebarProvider>
                 <AppLayout withSidebar sidebarSize="slim">
                     <AppLayoutSidebar><MainSidebar /></AppLayoutSidebar>
-                    <AppLayout><AppLayoutContent>{children}</AppLayoutContent></AppLayout>
+                    <AppLayout><AppLayoutContent className="anidash-main-content">{children}</AppLayoutContent></AppLayout>
                 </AppLayout>
+            <MobileBottomNavigation />
             </AppSidebarProvider>
         </>
     )

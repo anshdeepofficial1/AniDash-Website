@@ -149,9 +149,9 @@ export function MainSidebar() {
                 />
 
                 <div className="flex w-full gap-2 flex-col px-4 shrink-0 pb-2">
-                    <SidebarUpdates isCollapsed={isCollapsed} />
+                    
                     <SidebarFooter isCollapsed={isCollapsed} onLogout={logout} />
-                    <SidebarUser expandedSidebar={expandedSidebar} onLogout={logout} isCollapsed={isCollapsed} />
+                    
                 </div>
             </AppSidebar>
         </>
@@ -223,7 +223,7 @@ function SidebarNavigation({ isCollapsed, containerRef }: { isCollapsed: boolean
         {
             id: "lists",
             iconType: RiListCheck3,
-            name: "My lists",
+            name: "My List",
             href: "/lists",
             isCurrent: pathname === "/lists",
         },
@@ -307,7 +307,7 @@ function SidebarNavigation({ isCollapsed, containerRef }: { isCollapsed: boolean
     ])
 
     // Plugins
-    const pluginWebviewItems = usePluginSidebarItems()
+    const pluginWebviewItems: ReturnType<typeof usePluginSidebarItems> = []
 
     // Overflow logic
     const [autoUnpinnedIds, setAutoUnpinnedIds] = React.useState<string[]>([])
@@ -431,7 +431,7 @@ function SidebarNavigation({ isCollapsed, containerRef }: { isCollapsed: boolean
                         onClick: () => {
                             ctx.setOpen(false)
                             if (isRefreshingAC) return
-                            refreshAC()
+                            window.location.reload()
                         },
                     },
                 ]}
@@ -470,7 +470,7 @@ function SidebarNavigation({ isCollapsed, containerRef }: { isCollapsed: boolean
                 </HoverCard>
             </div>}
 
-            <PluginSidebarTray place="sidebar" />
+            
 
         </div>
     )
@@ -565,18 +565,10 @@ function SidebarFooter({ isCollapsed, onLogout }: { isCollapsed: boolean, onLogo
                             : undefined,
                     },
                     {
-                        iconType: IoCloudOfflineOutline,
-                        name: "Offline",
-                        href: "/sync",
-                        isCurrent: pathname.includes("/sync"),
-                        addon: (syncIsActive)
-                            ? <Badge
-                                className="absolute right-0 top-0 bg-blue-500" size="sm"
-                                intent="alert-solid"
-                            >
-                                1
-                            </Badge>
-                            : undefined,
+                        iconType: FiLogIn,
+                        name: "Profile",
+                        href: "/settings?tab=profile",
+                        isCurrent: false,
                     },
                     {
                         iconType: LuSettings,
@@ -584,13 +576,7 @@ function SidebarFooter({ isCollapsed, onLogout }: { isCollapsed: boolean, onLogo
                         href: "/settings",
                         isCurrent: pathname === ("/settings"),
                     },
-                    ...(ctx.isBelowBreakpoint ? [
-                        {
-                            iconType: user?.isSimulated ? FiLogIn : BiLogOut,
-                            name: user?.isSimulated ? "Sign in" : "Sign out",
-                            onClick: user?.isSimulated ? () => setLoginModal(true) : confirmSignOut.open,
-                        },
-                    ] : []),
+
                 ]}
             />
             <ConfirmationDialog {...confirmSignOut} />

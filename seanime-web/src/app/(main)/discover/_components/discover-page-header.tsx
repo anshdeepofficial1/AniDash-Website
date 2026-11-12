@@ -1,3 +1,4 @@
+import { useDiscoverTrendingAnime } from "@/app/(main)/discover/_lib/handle-discover-queries"
 import { AL_BaseAnime } from "@/api/generated/types"
 import { ElectronYoutubeEmbed, useElectronYoutubeEmbed } from "@/app/(main)/_electron/electron-embed"
 import { TRANSPARENT_SIDEBAR_BANNER_IMG_STYLE } from "@/app/(main)/_features/custom-ui/styles"
@@ -348,7 +349,7 @@ function MediaMetadata({ media, pageType, isTransitioning, onHoverChange }: Medi
     )
 }
 
-export function DiscoverPageHeader({ playTrailer }: { playTrailer?: boolean }) {
+function DesktopDiscoverPageHeader({ playTrailer }: { playTrailer?: boolean }) {
     const ts = useThemeSettings()
     const pathname = usePathname()
 
@@ -503,3 +504,20 @@ export function DiscoverPageHeader({ playTrailer }: { playTrailer?: boolean }) {
         </motion.div>
     )
 }
+
+function MobileTrendingHero(){
+ const {data,isLoading,isError,refetch}=useDiscoverTrendingAnime()
+ const slides=(data?.Page?.media||[]).filter(Boolean).filter(m=>m.status!=="NOT_YET_RELEASED").slice(0,10)
+ const [index,setIndex]=React.useState(0),[paused,setPaused]=React.useState(false)
+ const touch=React.useRef(0)
+ React.useEffect(()=>{if(slides.length<2||paused||window.matchMedia("(prefers-reduced-motion: reduce)").matches)return;const id=window.setInterval(()=>setIndex(i=>(i+1)%slides.length),2500);return()=>clearInterval(id)},[slides.length,paused])
+ const item=slides[index%Math.max(1,slides.length)]
+ if(isLoading)return <div className="anidash-mobile-hero animate-pulse bg-[--subtle]" aria-label="Loading trending anime"/>
+ if(isError)return <div className="rounded-xl border p-4 mx-4"><p>Unable to load trending anime.</p><button onClick={()=>refetch()}>Retry</button></div>
+ if(!item)return null
+ return <section className="anidash-mobile-hero" aria-label="Trending anime" onTouchStart={e=>{touch.current=e.touches[0].clientX;setPaused(true)}} onTouchEnd={e=>{const delta=e.changedTouches[0].clientX-touch.current;if(Math.abs(delta)>35)setIndex(i=>(i+(delta<0?1:slides.length-1))%slides.length);setPaused(false)}} onTouchCancel={()=>setPaused(false)}>
+ <AnimatePresence initial={false}><motion.div key={item.id} className="absolute inset-0" initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}} transition={{duration:.35}}><img src={item.bannerImage||item.coverImage?.extraLarge||item.coverImage?.large} className="absolute inset-0 w-full h-full object-cover" alt=""/><div className="absolute inset-0 bg-gradient-to-t from-black via-black/30 to-transparent"/></motion.div></AnimatePresence>
+ <div className="absolute bottom-8 inset-x-0 p-5 space-y-2 z-10"><p className="text-xs font-semibold uppercase tracking-widest text-white/80">Trending now · {index+1}/{slides.length}</p><h2 className="text-2xl font-bold text-white line-clamp-2">{item.title?.english||item.title?.userPreferred||item.title?.romaji}</h2><p className="text-xs text-white/75">{item.genres?.slice(0,3).join(" · ")}</p><SeaLink href={"/entry?id="+item.id} className="inline-flex items-center rounded-full bg-white text-black font-semibold px-5 py-2">View anime</SeaLink></div>
+ <div className="absolute z-20 bottom-4 inset-x-0 flex justify-center gap-1.5">{slides.map((m,i)=><button key={m.id} aria-label={"Slide "+(i+1)} aria-current={i===index} onClick={()=>setIndex(i)} className={"h-2 rounded-full "+(i===index?"w-5 bg-white":"w-2 bg-white/45")}/>)}</div></section>
+}
+export function DiscoverPageHeader(props:{playTrailer?:boolean}){const [mobile,setMobile]=React.useState(()=>window.matchMedia("(max-width: 1023px)").matches);React.useEffect(()=>{const q=window.matchMedia("(max-width: 1023px)");const f=()=>setMobile(q.matches);q.addEventListener("change",f);return()=>q.removeEventListener("change",f)},[]);return mobile?<MobileTrendingHero/>:<DesktopDiscoverPageHeader {...props}/>}
