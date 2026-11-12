@@ -20,6 +20,20 @@
             background-color: #0c0c0c;
         }
     </style>
+    <script>
+    // Run before the app bundles so legacy installed PWAs stop serving old HTML.
+    (function () {
+      if ("serviceWorker" in navigator) navigator.serviceWorker.getRegistrations().then(function (registrations) {
+        registrations.forEach(function (r) {
+          var worker = r.active || r.waiting || r.installing;
+          if (worker && new URL(worker.scriptURL).origin === location.origin && new URL(worker.scriptURL).pathname === "/sw.js") r.unregister().catch(function () {});
+        });
+      }).catch(function () {});
+      if ("caches" in window) caches.keys().then(function (keys) {
+        return Promise.all(keys.filter(function(k){return k.indexOf("anidash-watch-shell-")===0;}).map(function(k){return caches.delete(k);}));
+      }).catch(function () {});
+    })();
+    </script>
 </head>
 
 <body>

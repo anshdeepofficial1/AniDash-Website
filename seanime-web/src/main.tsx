@@ -1,3 +1,4 @@
+import { isChunkLoadError, refreshCurrentBuild } from "@/browser/chunk-recovery"
 import { useIsSimulatedUser } from "@/app/(main)/_hooks/use-server-status"
 import { ClientProviders, queryClient, store } from "@/app/client-providers"
 import "./app/globals.css"
@@ -106,6 +107,8 @@ function DesktopStartupReady() {
 }
 
 function RootErrorFallback({ error, resetErrorBoundary }: FallbackProps) {
+    const chunkError=isChunkLoadError(error)
+    React.useEffect(()=>{if(chunkError)void refreshCurrentBuild()},[chunkError])
     return (
         <div className="min-h-screen bg-[#0c0c0c] text-white flex items-center justify-center p-6">
             <div className="w-full max-w-lg rounded-2xl border bg-black/60 p-6 text-center backdrop-blur-sm space-y-4">
@@ -126,7 +129,7 @@ function RootErrorFallback({ error, resetErrorBoundary }: FallbackProps) {
                         type="button"
                         intent="gray-outline"
                         className="rounded-full"
-                        onClick={resetErrorBoundary}
+                        onClick={()=>chunkError?void refreshCurrentBuild(true):resetErrorBoundary()}
                     >
                         Retry
                     </Button>

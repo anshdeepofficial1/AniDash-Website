@@ -1,3 +1,4 @@
+import { isChunkLoadError, refreshCurrentBuild } from "@/browser/chunk-recovery"
 import { LuffyError } from "@/components/shared/luffy-error"
 import { useQueryClient } from "@tanstack/react-query"
 import { useRouter as useTanStackRouter } from "@tanstack/react-router"
@@ -28,7 +29,11 @@ export function AppErrorBoundary({ error, reset, resetErrorBoundary }: AppErrorB
         }
     }, [pathname, reset, resetErrorBoundary])
 
+    const chunkError=isChunkLoadError(error)
+    React.useEffect(()=>{if(chunkError)void refreshCurrentBuild()},[chunkError])
+
     const handleReset = () => {
+        if(chunkError){void refreshCurrentBuild(true);return}
         if (resetErrorBoundary) {
             resetErrorBoundary()
         }
@@ -45,7 +50,7 @@ export function AppErrorBoundary({ error, reset, resetErrorBoundary }: AppErrorB
             reset={handleReset}
         >
             <p className="text-[--muted]">
-                {(error as Error)?.message || "An unexpected error occurred."}
+                {chunkError ? "AniDash Go was updated. Reloading the latest version, or tap Retry to refresh." : (error as Error)?.message || "An unexpected error occurred."}
             </p>
         </LuffyError>
     )
