@@ -1,0 +1,3 @@
+# AniDash React browser migration
+
+Actual Seanime frontend source at pinned commit 4bdff7b27b6c043dc87c0ccad3ead54596133a05 is retained under seanime-web. The browser entry imports upstream Button, SeaImage, PageWrapper, MediaCardGrid, Skeleton and the original global Tailwind theme; its discovery header, media cards and navigation are adapted in React from upstream components. Existing catalog API, browser storage and account scripts are reused. No Go process. The watch and manga routes are still served by the legacy player/shell during this migration; native Seanime video-core and full settings/account parity remain incomplete. Do not promote without browser testing. GPL-3.0 license and attribution retained.
