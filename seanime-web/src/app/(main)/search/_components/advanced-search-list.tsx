@@ -8,10 +8,12 @@ import { AiOutlinePlusCircle } from "react-icons/ai"
 
 export function AdvancedSearchList() {
 
-    const { isLoading, data, fetchNextPage, hasNextPage, type } = useAnilistAdvancedSearch()
+    const { isLoading, isError, error, refetch, data, fetchNextPage, hasNextPage, type } = useAnilistAdvancedSearch()
 
     const items = data?.pages.filter(Boolean).flatMap(n => n.Page?.media).filter(Boolean)
 
+    if (isError) return <div role="alert" className="rounded-xl border p-5 space-y-3"><p>{(error as Error)?.message || "Unable to load search results."}</p><button className="border rounded-lg px-4 py-2" onClick={() => refetch()}>Try again</button></div>
+    if (!isLoading && !items?.length) return <p className="text-[--muted] p-4">No matching titles. Try another title or clear filters.</p>
     return <>
         {!isLoading && <MediaCardLazyGrid itemCount={items?.length ?? 0}>
             {items?.map(media => (

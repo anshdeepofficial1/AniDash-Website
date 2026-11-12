@@ -47,7 +47,7 @@ export const TopMenu: React.FC<TopMenuProps> = (props) => {
                 href: "/lists",
                 icon: null,
                 isCurrent: pathname.startsWith("/lists"),
-                name: "My lists",
+                name: "My List",
             },
             {
                 href: "/discover",

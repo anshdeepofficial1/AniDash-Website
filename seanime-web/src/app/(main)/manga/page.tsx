@@ -1,68 +1,9 @@
-import { CustomLibraryBanner } from "@/app/(main)/_features/anime-library/_containers/custom-library-banner"
-import { MediaEntryPageLoadingDisplay } from "@/app/(main)/_features/media/_components/media-entry-page-loading-display"
-import { MangaLibraryHeader } from "@/app/(main)/manga/_components/library-header"
-import { useHandleMangaCollection } from "@/app/(main)/manga/_lib/handle-manga-collection"
-import { MangaLibraryView } from "@/app/(main)/manga/_screens/manga-library-view"
-import { cn } from "@/components/ui/core/styling"
-import { ThemeLibraryScreenBannerType, useThemeSettings } from "@/lib/theme/theme-hooks"
-import { __isDesktop__ } from "@/types/constants"
 import React from "react"
-
-
-export default function Page() {
-    const {
-        mangaCollection,
-        filteredMangaCollection,
-        mangaCollectionLoading,
-        storedFilters,
-        storedProviders,
-        mangaCollectionGenres,
-        hasManga,
-    } = useHandleMangaCollection()
-
-    const ts = useThemeSettings()
-
-    if (!mangaCollection || mangaCollectionLoading) return <MediaEntryPageLoadingDisplay />
-
-    return (
-        <div
-            data-manga-page-container
-            data-stored-filters={JSON.stringify(storedFilters)}
-            data-stored-providers={JSON.stringify(storedProviders)}
-        >
-            {(
-                (!!ts.libraryScreenCustomBannerImage && ts.libraryScreenBannerType === ThemeLibraryScreenBannerType.Custom)
-            ) && (
-                <>
-                    <CustomLibraryBanner isLibraryScreen />
-                    <div
-                        data-manga-page-custom-banner-spacer
-                        className={cn("h-14")}
-                    ></div>
-                </>
-            )}
-            {ts.libraryScreenBannerType === ThemeLibraryScreenBannerType.Dynamic && (
-                <>
-                    <MangaLibraryHeader manga={mangaCollection?.lists?.flatMap(l => l.entries)?.flatMap(e => e?.media)?.filter(Boolean) || []} />
-                    <div
-                        data-manga-page-dynamic-banner-spacer
-                        className={cn(
-                            !__isDesktop__ && "h-28",
-                            (!__isDesktop__ && ts.hideTopNavbar) && "h-40",
-                            __isDesktop__ && "h-40",
-                        )}
-                    ></div>
-                </>
-            )}
-
-            <MangaLibraryView
-                genres={mangaCollectionGenres}
-                collection={mangaCollection}
-                filteredCollection={filteredMangaCollection}
-                storedProviders={storedProviders}
-                hasManga={hasManga}
-                isMangaPage
-            />
-        </div>
-    )
+import { useQuery } from "@tanstack/react-query"
+import { list,mangaLists,saveBrowserManga } from "@/browser/transport"
+import { PageWrapper } from "@/components/shared/page-wrapper"
+export default function Page(){
+ const [term,setTerm]=React.useState(""),[search,setSearch]=React.useState(""),[mine,setMine]=React.useState(false),[msg,setMsg]=React.useState("")
+ const q=useQuery({queryKey:["anidash-manga",search,mine],queryFn:async()=>mine?(await mangaLists()).flatMap(g=>g.entries.map((e:any)=>e.media)):(await list({search:search||undefined,sort:search?["SEARCH_MATCH"]:["POPULARITY_DESC"],perPage:36},"MANGA")).Page.media})
+ return <PageWrapper className="p-4 sm:p-8 space-y-6"><h1>Manga</h1><p className="text-[--muted]">Discover manga and build your reading list. Reading availability depends on the publisher.</p><div className="flex gap-2"><button className="border rounded-lg px-4 py-2" onClick={()=>setMine(false)}>Discover</button><button className="border rounded-lg px-4 py-2" onClick={()=>setMine(true)}>My manga</button></div><form className="flex gap-2" onSubmit={e=>{e.preventDefault();setMine(false);setSearch(term.trim())}}><input className="border rounded-lg p-3 flex-1 bg-[--paper]" value={term} onChange={e=>setTerm(e.target.value)} placeholder="Search manga"/><button className="border rounded-lg px-4">Search</button></form>{msg&&<p role="status">{msg}</p>}{q.isPending?<p>Loading manga…</p>:q.isError?<p role="alert">{(q.error as Error).message} <button onClick={()=>q.refetch()}>Retry</button></p>:<div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">{q.data?.map((m:any)=><article key={m.id} className="rounded-xl border overflow-hidden bg-[--paper]"><a href={m.siteUrl||"https://anilist.co/manga/"+m.id} target="_blank" rel="noreferrer"><img className="w-full aspect-[2/3] object-cover" src={m.coverImage?.large} alt=""/><h3 className="p-3 text-sm">{m.title?.english||m.title?.userPreferred||m.title?.romaji}</h3></a><button className="m-2 border rounded-lg p-2 text-sm" onClick={async()=>{try{await saveBrowserManga(m);setMsg("Saved to My Manga");if(mine)q.refetch()}catch(e){setMsg("Saved locally; AniList sync failed: "+(e as Error).message)}}}>Add to list</button></article>)}</div>}</PageWrapper>
 }
