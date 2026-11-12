@@ -1,7 +1,7 @@
 name: AniDash integrated backend acceptance
 on:
   push:
-    branches: [migration/seanime-replacement]
+    branches: [main, migration/seanime-replacement]
     paths:
       - '.github/workflows/anidash-backend.yml'
       - 'internal/**'
@@ -9,6 +9,8 @@ on:
       - 'seanime-web/**'
       - 'Dockerfile'
       - 'compose.yaml'
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 permissions:
   contents: read
