@@ -7,4 +7,6 @@ fi
 if [ -n "${PORT:-}" ]; then
   export SEANIME_SERVER_PORT="$PORT"
 fi
-exec /app/anidash --disable-features=ManageExtensions,OpenInExplorer,TorrentStreaming,DebridStreaming,ManageDebrid,ManageAutoDownloader,ViewAutoDownloader,ManageNakama,PushRequests
+mkdir -p "$SEANIME_DATA_DIR" /media
+chown 10001:10001 "$SEANIME_DATA_DIR"
+exec gosu anidash /app/anidash --disable-features=ManageExtensions,OpenInExplorer,TorrentStreaming,DebridStreaming,ManageDebrid,ManageAutoDownloader,ViewAutoDownloader,ManageNakama,PushRequests
