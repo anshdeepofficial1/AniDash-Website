@@ -1,0 +1,45 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Browser transport for original Seanime screens. Public metadata is fetched
+// from AniList; lists and preferences belong to the current browser only.
+// No Go server, shared administrator, fake streaming provider or hosted files.
+import { DEFAULT_HOME_ITEMS } from "@/app/(main)/_features/home/home-items.utils"
+import { THEME_DEFAULT_VALUES } from "@/lib/theme/theme-hooks"
+const STORAGE="anidash.watch.web.v1"
+const w=window as any
+const read=()=>{try{return JSON.parse(localStorage.getItem(STORAGE)||"{}")}catch{return {}}}
+function save(s:any){s.updatedAt=Date.now();localStorage.setItem(STORAGE,JSON.stringify(s));w.AniDashStorage?.save(s).catch(()=>{});}
+const fields="id idMal siteUrl status season type format seasonYear bannerImage episodes synonyms isAdult countryOfOrigin meanScore averageScore description genres duration trailer{id site thumbnail} title{english native romaji userPreferred} coverImage{color extraLarge large medium} startDate{day month year} endDate{day month year} nextAiringEpisode{airingAt episode timeUntilAiring}"
+const mangaFields="id idMal siteUrl status type format bannerImage chapters volumes synonyms isAdult countryOfOrigin meanScore description genres title{english native romaji userPreferred} coverImage{color extraLarge large medium} startDate{day month year} endDate{day month year}"
+const mem=new Map<string,{at:number,value:any}>(),pending=new Map<string,Promise<any>>()
+async function gql(query:string,variables:any={}){
+ const key=JSON.stringify([query,variables]),cached=mem.get(key);if(cached&&Date.now()-cached.at<240000)return cached.value;
+ if(pending.has(key))return pending.get(key);
+ const p=(async()=>{const r=await fetch("https://graphql.anilist.co",{method:"POST",headers:{"Content-Type":"application/json","Accept":"application/json"},body:JSON.stringify({query,variables}),signal:AbortSignal.timeout(15000)});const j=await r.json();if(!r.ok||j.errors||!j.data)throw new Error(r.status===429?"AniList rate limit reached":"AniList metadata unavailable");mem.set(key,{at:Date.now(),value:j.data});return j.data})().finally(()=>pending.delete(key));pending.set(key,p);return p
+}
+function settings(){const s=read();return {id:1,library:{torrentProvider:"none",libraryPath:"",enableManga:!!s.preferences?.showMangaTab,enableOnlinestream:false,disableAnimeCardTrailers:false},torrent:{defaultTorrentClient:"none"},anilist:{blurAdultContent:true},mediaPlayer:{},nakama:{enabled:false},autoDownloader:{enabled:false}}}
+export function browserStatus(){return {os:"browser",clientDevice:"browser",clientPlatform:"web",clientUserAgent:navigator.userAgent,dataDir:"",version:"2.0.0",versionName:"AniDash Browser",settings:settings(),themeSettings:{...THEME_DEFAULT_VALUES,id:1,...read().seanimeTheme},isOffline:false,anilistClientId:"",updating:false,isDesktopSidecar:false,disabledFeatures:["ManageExtensions","OpenInExplorer","TorrentStreaming","DebridStreaming","ManageDebrid","ManageAutoDownloader","ViewAutoDownloader","ManageNakama","PushRequests"],serverReady:true,serverHasPassword:false,showChangelogTour:"",user:w.AniDashAccount?.currentUser?.()?{viewer:w.AniDashAccount.currentUser(),token:"",isSimulated:false}:undefined}}
+function listData(s:any,id:number){const entry=s.watchlist?.[id];if(!entry)return undefined;return {status:s.libraryStatuses?.[id]||"PLANNING",progress:Math.max(0,(s.history?.[id]?.episode||1)-1)}}
+function localLists(){const s=read(),groups=new Map<string,any[]>();for(const m of Object.values(s.watchlist||{}) as any[]){if(!m?.id)continue;const d=listData(s,m.id)!;const rows=groups.get(d.status)||[];rows.push({id:m.id,media:m,mediaId:m.id,...d,listData:d});groups.set(d.status,rows)}return [...groups].map(([status,entries])=>({name:status,status,type:status,entries}))}
+async function media(id:number){return (await gql("query($id:Int!){Media(id:$id,type:ANIME,isAdult:false){"+fields+"}}",{id})).Media}
+async function list(d:any={},type="ANIME"){const query="query($page:Int,$perPage:Int,$search:String,$sort:[MediaSort],$status:[MediaStatus],$genres:[String],$tags:[String],$score:Int,$season:MediaSeason,$year:Int,$format:MediaFormat,$country:CountryCode){Page(page:$page,perPage:$perPage){pageInfo{currentPage hasNextPage lastPage perPage total} media(type:"+type+",isAdult:false,search:$search,sort:$sort,status_in:$status,genre_in:$genres,tag_in:$tags,averageScore_greater:$score,season:$season,seasonYear:$year,format:$format,countryOfOrigin:$country){"+(type==="ANIME"?fields:mangaFields)+"}}}";return gql(query,{page:d.page||1,perPage:Math.min(50,d.perPage||20),search:d.search||undefined,sort:d.sort,status:d.status,genres:d.genres,tags:d.tags,score:d.averageScore_greater,season:d.season,year:d.seasonYear,format:d.format,country:d.countryOfOrigin})}
+async function airing(d:any={}){return gql("query($page:Int,$perPage:Int,$after:Int,$before:Int,$future:Boolean,$sort:[AiringSort]){Page(page:$page,perPage:$perPage){pageInfo{currentPage hasNextPage lastPage perPage total} airingSchedules(airingAt_greater:$after,airingAt_lesser:$before,notYetAired:$future,sort:$sort){id airingAt episode timeUntilAiring media{"+fields+"}}}}",{page:d.page||1,perPage:Math.min(50,d.perPage||20),after:d.airingAt_greater,before:d.airingAt_lesser,future:d.notYetAired,sort:d.sort})}
+function episodeRows(m:any){const count=m.status==="RELEASING"?Math.max(0,(m.nextAiringEpisode?.episode||1)-1):m.episodes||0;return Array.from({length:Math.min(3000,count)},(_,i)=>({type:"main",displayTitle:"Episode "+(i+1),episodeTitle:"",episodeNumber:i+1,absoluteEpisodeNumber:i+1,progressNumber:i+1,isDownloaded:false,isInvalid:false,_isNakamaEpisode:false,baseAnime:m}))}
+const supported=(e:string)=>["/api/v1/status","/api/v1/settings","/api/v1/anilist/list-anime","/api/v1/anilist/list-recent-anime","/api/v1/anilist/collection","/api/v1/anilist/collection/raw","/api/v1/anilist/list-entry","/api/v1/library/collection","/api/v1/library/unknown-media","/api/v1/manga/anilist/collection","/api/v1/manga/anilist/collection/raw","/api/v1/manga/list-manga"].includes(e)||/^\/api\/v1\/(anilist\/media-details|library\/anime-entry|anime\/episode-collection)\/\d+$/.test(e)||e.includes("/home-items")
+export const browserSupports=supported
+export async function browserRequest(endpoint:string,method:string,data:any,params:any):Promise<any>{
+ const d=data||params||{},s=read(),id=Number(endpoint.split("/").pop());
+ if(endpoint==="/api/v1/status")return browserStatus();
+ if(endpoint==="/api/v1/settings"&&method==="GET")return settings();
+ if(endpoint==="/api/v1/anilist/list-anime")return list(d);
+ if(endpoint==="/api/v1/manga/list-manga")return list(d,"MANGA");
+ if(endpoint==="/api/v1/anilist/list-recent-anime"){const a=await airing(d);a.Page.airingSchedules=a.Page.airingSchedules.filter((x:any)=>x.media&&!x.media.isAdult);return a}
+ if(endpoint==="/api/v1/anilist/collection"||endpoint==="/api/v1/anilist/collection/raw")return {MediaListCollection:{lists:localLists()}};
+ if(endpoint==="/api/v1/library/collection"){const lists=localLists();return {lists,continueWatchingList:[],stats:{totalEntries:lists.reduce((n,l)=>n+l.entries.length,0),totalFiles:0,totalShows:0,totalMovies:0,totalSpecials:0,totalSize:"0 B"}}}
+ if(endpoint==="/api/v1/manga/anilist/collection"||endpoint==="/api/v1/manga/anilist/collection/raw")return {MediaListCollection:{lists:[]}};
+ if(endpoint.includes("/home-items"))return DEFAULT_HOME_ITEMS;
+ if(/^\/api\/v1\/anilist\/media-details\/\d+$/.test(endpoint))return media(id);
+ if(/^\/api\/v1\/library\/anime-entry\/\d+$/.test(endpoint)){const m=await media(id);if(!m)throw new Error("Anime not found");const episodes=episodeRows(m);return {mediaId:id,media:m,listData:listData(s,id),episodes,localFiles:[],currentEpisodeCount:episodes.length,anidbId:0,_isNakamaEntry:false}}
+ if(/^\/api\/v1\/anime\/episode-collection\/\d+$/.test(endpoint)){const m=await media(id);return {hasMappingError:false,episodes:episodeRows(m)}}
+ if(endpoint==="/api/v1/library/unknown-media"||endpoint==="/api/v1/anilist/list-entry"){const ids=endpoint.endsWith("unknown-media")?d.mediaIds:[d.mediaId||d.id];s.watchlist||={};s.libraryStatuses||={};for(const raw of ids||[]){const id=Number(raw);if(!Number.isInteger(id)||id<=0)throw new Error("Invalid anime ID");const m=await media(id);if(!m)throw new Error("Anime not found");s.watchlist[id]=m;s.libraryStatuses[id]=d.status||"PLANNING";}save(s);return true}
+ throw new Error("This Seanime server feature is not available in AniDash Browser")
+}

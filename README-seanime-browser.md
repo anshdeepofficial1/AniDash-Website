@@ -1,0 +1,3 @@
+# Original Seanime React application — AniDash browser migration
+
+This branch now builds the original upstream entry point `src/main.tsx`, original TanStack route tree, original HomeScreen, DiscoverPage, MediaEntryCard, MainSidebar, TopNavbar, and AppLayout. The previous custom browser layout is removed. Only the browser transport and server-dependent startup lifecycle are adapted. Public AniList metadata and browser-local collection state are real; unavailable server features are not implemented. No Go or Railway. Playback, account migration, route parity and real-browser acceptance are incomplete. Do not promote until verified. GPL-3.0 attribution preserved.
