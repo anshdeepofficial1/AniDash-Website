@@ -1,3 +1,4 @@
+import { BrowserEpisodes } from "@/browser/episodes"
 import { AL_AnimeDetailsById_Media, Anime_Entry, Anime_Episode } from "@/api/generated/types"
 import { getEpisodeMinutesRemaining, getEpisodePercentageComplete, useGetContinuityWatchHistory } from "@/api/hooks/continuity.hooks"
 import { EpisodeCard } from "@/app/(main)/_features/anime/_components/episode-card"
@@ -97,6 +98,7 @@ export function EpisodeSection({ entry, details, bottomSection, hideCarousel, ma
     }, [media, episodesToWatch, mainEpisodes, specialEpisodes, ncEpisodes, currentView])
 
     if (!media) return null
+    if (serverStatus?.os === "browser") return <><BrowserEpisodes entry={entry} />{bottomSection}</>
 
     // if (!!media && entry._isNakamaEntry && !entry.listData && !!entry.libraryData) {
     //     return <div className="space-y-10">

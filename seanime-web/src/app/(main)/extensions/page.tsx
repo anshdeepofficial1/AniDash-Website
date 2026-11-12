@@ -1,100 +1,15 @@
-import { usePluginWithIssuesCount } from "@/api/hooks/extensions.hooks"
+import React from "react"
 import { CustomLibraryBanner } from "@/app/(main)/_features/anime-library/_containers/custom-library-banner"
-import { __extensions_currentPageAtom, ExtensionList } from "@/app/(main)/extensions/_containers/extension-list"
-import { MarketplaceExtensions } from "@/app/(main)/extensions/_containers/marketplace-extensions"
 import { PageWrapper } from "@/components/shared/page-wrapper"
 import { StaticTabs } from "@/components/ui/tabs"
-import { useSearchParams } from "@/lib/navigation"
-import { useAtom } from "jotai"
-import { AnimatePresence } from "motion/react"
-import React from "react"
-import { FaExclamation } from "react-icons/fa"
+import { Button } from "@/components/ui/button"
 import { LuPackageCheck, LuShoppingBasket } from "react-icons/lu"
-
-export default function Page() {
-
-    const [page, setPage] = useAtom(__extensions_currentPageAtom)
-    const unauthorizedPluginCount = usePluginWithIssuesCount()
-
-    const searchParams = useSearchParams()
-    React.useEffect(() => {
-        const tab = searchParams.get("tab")
-        if (tab) {
-            setPage(tab as "installed" | "marketplace")
-        }
-    }, [searchParams])
-
-    return (
-        <>
-            <CustomLibraryBanner discrete />
-            <PageWrapper className="p-4 sm:p-8 space-y-4">
-
-                {/*<div className="flex-wrap max-w-full bg-[--paper] p-2 border rounded-lg">*/}
-                <StaticTabs
-                    data-anilist-collection-lists-tabs
-                    className="w-fit border rounded-full mx-auto py-0"
-                    triggerClass="px-4 py-1 text-md h-full rounded-full"
-                    pillClass="rounded-full border-transparent"
-                    items={[
-                        {
-                            name: "Installed",
-                            isCurrent: page === "installed",
-                            onClick: () => setPage("installed"),
-                            iconType: LuPackageCheck,
-                            addon: unauthorizedPluginCount > 0 && (
-                                <span className="ml-2 bottom-1 right-1 rounded-full relative">
-                                    <FaExclamation className="text-[--orange] animate-bounce size-6" />
-                                </span>
-                            ),
-                        },
-                        {
-                            name: "Marketplace",
-                            isCurrent: page === "marketplace",
-                            onClick: () => setPage("marketplace"),
-                            iconType: LuShoppingBasket,
-                        },
-                    ]}
-                />
-                {/*</div>*/}
-
-                <AnimatePresence mode="wait">
-                    {page === "installed" && (
-                        <PageWrapper
-                            {...{
-                                initial: { opacity: 0, y: 0 },
-                                animate: { opacity: 1, y: 0 },
-                                exit: { opacity: 0 },
-                                transition: {
-                                    type: "spring",
-                                    damping: 15,
-                                    stiffness: 135,
-                                },
-                            }}
-                            key="installed" className="pt-0 space-y-8 relative z-[4]"
-                        >
-                            <ExtensionList />
-                        </PageWrapper>
-                    )}
-                    {page === "marketplace" && (
-                        <PageWrapper
-                            {...{
-                                initial: { opacity: 0, y: 0 },
-                                animate: { opacity: 1, y: 0 },
-                                exit: { opacity: 0 },
-                                transition: {
-                                    type: "spring",
-                                    damping: 15,
-                                    stiffness: 135,
-                                },
-                            }}
-                            key="marketplace" className="pt-0 space-y-8 relative z-[4]"
-                        >
-                            <MarketplaceExtensions />
-                        </PageWrapper>
-                    )}
-                </AnimatePresence>
-            </PageWrapper>
-        </>
-    )
-
+import { ANDROID_SOURCES, installedSources, parseSource, installSource, removeSource } from "@/browser/sources"
+export default function Page(){
+ const [page,setPage]=React.useState<"installed"|"marketplace">("marketplace"),[sources,setSources]=React.useState(installedSources),[message,setMessage]=React.useState(""),[consent,setConsent]=React.useState(false)
+ async function importFile(file:File|undefined){if(!file)return;try{if(!consent)throw Error("Confirm that you have permission to use this media.");if(file.size>2_000_000)throw Error("Manifest exceeds 2 MB");const source=parseSource(await file.text());installSource(source);setSources(installedSources());setMessage(source.name+" installed");setPage("installed")}catch(e){setMessage(e instanceof Error?e.message:"Import failed")}}
+ return <><CustomLibraryBanner discrete/><PageWrapper className="p-4 sm:p-8 space-y-6"><StaticTabs className="w-fit border rounded-full mx-auto py-0" triggerClass="px-4 py-1 text-md h-full rounded-full" pillClass="rounded-full border-transparent" items={[{name:"Installed",isCurrent:page==="installed",onClick:()=>setPage("installed"),iconType:LuPackageCheck},{name:"Marketplace",isCurrent:page==="marketplace",onClick:()=>setPage("marketplace"),iconType:LuShoppingBasket}]}/>
+ {message&&<p role="status" className="border rounded-lg p-3">{message}</p>}
+ {page==="installed"?<section className="space-y-4"><h2>Installed browser sources</h2>{sources.length?sources.map(s=><div key={s.id} className="flex justify-between items-center gap-4 border rounded-xl p-4"><div><h3>{s.name}</h3><p className="text-[--muted] text-sm">{s.episodes.length} episode records</p></div><Button intent="gray-outline" onClick={()=>{removeSource(s.id);setSources(installedSources())}}>Uninstall</Button></div>):<p>No compatible sources installed.</p>}</section>:<><section className="space-y-4"><h2>AniDash Android sources</h2><p className="text-[--muted]">These built-in sources use the Android/Dart extension runtime. They are not executable browser extensions.</p><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{ANDROID_SOURCES.map(name=><div key={name} className="border rounded-xl p-4 bg-[--paper]"><h3>{name}</h3><p className="text-sm text-[--muted]">Android only · Not available on web</p></div>)}</div></section><section className="border rounded-xl p-5 space-y-4"><h2>Install browser source</h2><p className="text-sm text-[--muted]">Import a data-only JSON manifest containing HTTPS MP4 or HLS media that you have permission to play. No executable Android packages or server-side proxy.</p><label className="flex gap-2 items-center"><input type="checkbox" checked={consent} onChange={e=>setConsent(e.target.checked)}/> I have permission to access and play the media.</label><input type="file" accept=".json,application/json" disabled={!consent} onChange={e=>{void importFile(e.target.files?.[0]);e.target.value=""}}/><details className="text-sm"><summary>Manifest format</summary><pre className="overflow-auto p-3 rounded bg-[--subtle]">{JSON.stringify({version:1,id:"my-licensed-source",name:"My licensed media",episodes:[{mediaId:1,episode:1,audio:"dub",url:"https://your-authorized-host.example/episode.mp4"}]},null,2)}</pre></details></section></>}
+ </PageWrapper></>
 }

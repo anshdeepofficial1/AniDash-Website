@@ -136,7 +136,7 @@ export function AnimeEntryPage() {
         if (!animeEntry) return
         try {
             if (animeEntry?.media?.title?.userPreferred) {
-                document.title = `${animeEntry?.media?.title?.userPreferred} | Seanime`
+                document.title = `${animeEntry?.media?.title?.userPreferred} | AniDash`
             }
             // switchedView.current = false
         }
@@ -251,7 +251,7 @@ export function AnimeEntryPage() {
             items: [
                 ...[{
                     id: "library",
-                    description: "Downloaded episodes",
+                    description: "Episodes",
                     show: currentView !== "library",
                 },
                     {
@@ -471,7 +471,7 @@ export function EntrySectionTabs(props: EntrySectionTabs) {
                     pillClass="border-transparent"
                     iconClass="size-5 hidden data-[current=true]:block"
                     items={[
-                        { name: "Local library", iconType: IoLibraryOutline, isCurrent: isLibraryView, onClick: () => setView("library") },
+                        { name: "Episodes", iconType: IoLibraryOutline, isCurrent: isLibraryView, onClick: () => setView("library") },
                         ...(serverStatus?.torrentstreamSettings?.enabled ? [{
                             name: "Torrent streaming",
                             iconType: PiMonitorPlayDuotone,
