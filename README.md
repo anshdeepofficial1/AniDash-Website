@@ -1,4 +1,4 @@
-# AniDash Watch Web
+# AniDash Watch Web — Seanime UI port
 
 A standalone responsive anime discovery and streaming PWA. This repository is separate from the AniDash Android app and the AniDash download/marketing website.
 
@@ -114,3 +114,8 @@ Run `python -m http.server 8080` in the repository root and open `http://localho
 - If AniList has no episode count and Ani-Zip has no episode mapping, AniDash cannot generate a reliable episode list for that title.
 - Local watchlists and playback positions remain in browser storage; wiping browser data can remove unsynced positions. Use Settings → Export JSON. AniList and MyAnimeList web login are available only after their corresponding OAuth application and Vercel environment variables have been configured and redeployed; real-provider sign-in needs testing with an authorized account. Streaming-provider account login is not supported.
 - **Security**: The browser stores the OAuth tokens in localStorage; signing out clears them. This is not equivalent to server-side HttpOnly session storage. Do not run unknown third-party scripts or extensions in the website; protect the production host from XSS. For a broader multi-user service, migrate to Authorization Code + server-side sessions.
+
+
+## Frontend provenance
+
+The browser-compatible media card and discovery header are adapted from Seanime's actual GPL-3.0 source at commit 4bdff7b27b6c043dc87c0ccad3ead54596133a05 (5rahim and contributors). See LICENSE.seanime and seanime-ui.js / seanime-ui.css. The rest of the browser runtime continues to use AniDash's existing data, navigation, account and player contracts. The original Go backend and desktop functionality are not required or included. This is an incremental port, not the complete upstream React application.

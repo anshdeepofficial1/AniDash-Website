@@ -40,7 +40,7 @@
 
   const store = readStore();
   const DEFAULT_PREFERENCES = {
-    themeMode: "light", preferredAudio: "dub", defaultQuality: "Auto",
+    themeMode: "dark", preferredAudio: "dub", defaultQuality: "Auto",
     autoEnableSubtitles: true, autoSkipIntro: false, showNextEpisodePrompt: true,
     episodeViewMode: "grid", preferredSource: "auto",
     showMangaTab: false, showNewsSection: false, showNewsNotifications: true,
@@ -69,7 +69,7 @@
     document.body.dataset.mangaNav = setting("showMangaTab") ? "true" : "false";
     $$('[data-optional-manga]').forEach(item => { item.hidden = !setting("showMangaTab"); });
     const themeMeta = document.querySelector('meta[name="theme-color"]');
-    if (themeMeta) themeMeta.content = document.body.dataset.theme === "dark" ? "#101512" : "#f4f8f5";
+    if (themeMeta) themeMeta.content = document.body.dataset.theme === "dark" ? "#070707" : "#f4f4f5";
   }
   applyPreferences();
   const state = {
@@ -343,27 +343,15 @@
   function card(media, type = "ANIME") {
     const isManga = type === "MANGA";
     const progress = !isManga && store.history[String(media.id)];
-    const poster = imageOf(media);
     const pct = progress?.duration > 0 ? Math.max(0, Math.min(100, (progress.position / progress.duration) * 100)) : 0;
-    const tag = isManga ? "" : animeSeasonBadge(media);
-    const typeAttr = isManga ? "data-manga" : "data-anime";
-    const episodes = isManga ? (media.chapters ? media.chapters + " chapters" : media.format) :
-      (media.episodes ? media.episodes + " eps" : media.status);
-    return '<article class="anime-card" ' + typeAttr + '="' + escapeHtml(media.id) +
-      '" tabindex="0" role="button" aria-label="Open ' + escapeHtml(titleOf(media)) + '">' +
-      '<div class="poster-wrap">' +
-        (poster ? '<img loading="lazy" src="' + escapeHtml(poster) + '" alt="' + escapeHtml(titleOf(media)) + '">' :
-        '<div class="poster-fallback">' + escapeHtml(titleOf(media)) + '</div>') +
-        '<div class="poster-shade"></div>' +
-        (tag ? '<span class="season-chip">' + escapeHtml(tag) + '</span>' : "") +
-        (media.averageScore ? '<span class="poster-score">' + uiIcon("star") + ' ' + formatScore(media.averageScore) + '</span>' : '') +
-      '</div>' +
-      '<div class="card-title">' + escapeHtml(titleOf(media)) + '</div>' +
-      '<p class="card-subtitle">' + escapeHtml([mediaYear(media), episodes].filter(Boolean).join(" · ")) + '</p>' +
-      (progress ? '<div class="card-progress"><span style="width:' + pct + '%"></span></div><div class="card-resume">Episode ' +
-        escapeHtml(progress.episode || 1) + (progress.position > 0 ? " · " + hhmmss(progress.position) : "") +
-        '</div>' : '') +
-    '</article>';
+    return window.AniDashSeaUI.card(media, {
+      type, season: isManga ? "" : animeSeasonBadge(media),
+      score: media.averageScore ? formatScore(media.averageScore) : "",
+      year: mediaYear(media),
+      episodes: isManga ? (media.chapters ? media.chapters + " chapters" : media.format) : (media.episodes ? media.episodes + " eps" : media.status),
+      progress: pct, resume: progress ? "Episode " + (progress.episode || 1) + (progress.position > 0 ? " · " + hhmmss(progress.position) : "") : "",
+      star: uiIcon("star")
+    });
   }
 
   function grid(items) {
@@ -525,18 +513,8 @@
   }
 
   function spotlightMarkup(media) {
-    const image = media?.bannerImage || imageOf(media);
-    return '<section class="hero-stage home-hero"><div class="hero-bg" style="background-image:url(&quot;' +
-      escapeHtml(image) + '&quot;)"></div><div class="hero-content">' +
-      '<div class="hero-kicker">Trending on AniDash</div>' +
-      '<h1 class="hero-title">' + escapeHtml(titleOf(media)) + '</h1>' +
-      '<div class="hero-meta"><span>' + uiIcon("star") + ' ' + formatScore(media?.averageScore) + '</span>' +
-      '<span>' + escapeHtml(animeSeasonBadge(media)) + '</span>' +
-      '<span>' + escapeHtml(media?.format || "Anime") + '</span>' +
-      '<span>' + escapeHtml(mediaYear(media)) + '</span></div>' +
-      '<div class="hero-actions"><button class="btn btn-primary" data-anime="' + media.id + '">' +
-        uiIcon("play") + ' Explore Anime</button><button class="btn btn-secondary" data-watchlist="' + media.id + '">' +
-        uiIcon("bookmark") + ' Save</button></div></div></section>';
+    return window.AniDashSeaUI.spotlight(media, {score: formatScore(media?.averageScore),
+      season: animeSeasonBadge(media), year: mediaYear(media), play: uiIcon("play"), bookmark: uiIcon("bookmark"), star: uiIcon("star")});
   }
   function showSpotlight(index) {
     if (state.route !== "/home" || !state.spotlight?.length) return;

@@ -10,8 +10,8 @@
     "standalone"
   ],
   "orientation": "any",
-  "background_color": "#f4f8f5",
-  "theme_color": "#f4f8f5",
+  "background_color": "#070707",
+  "theme_color": "#070707",
   "icons": [
     {
       "src": "/icons/anidash-icon.png",
