@@ -9,6 +9,7 @@
   let viewer = null;
   let config = null;
   let entries = new Map();
+  let listPending = null, listAt = 0;
   let mangaEntries = new Map();
   let favoriteIds = new Set();
   const pendingProgress = new Map();
@@ -22,7 +23,7 @@
   function clearToken() {
     token = null;
     viewer = null;
-    entries.clear(); mangaEntries.clear(); favoriteIds.clear();
+    entries.clear(); mangaEntries.clear(); favoriteIds.clear(); listAt = 0; listPending = null;
     try { localStorage.removeItem(TOKEN_KEY); } catch (_) {}
     inform();
   }
@@ -157,17 +158,24 @@
     };
   }
 
-  async function list() {
+  async function list(force = false) {
     if (!authenticated()) return [];
+    if (listPending) return listPending;
+    if (!force && listAt && Date.now() - listAt < 30000) return copy([...entries.values()].filter(e=>e.media));
+    const userId=viewer.id;
+    const run = (async()=>{
     const data = await request(
-      "query ($userId: Int!) { MediaListCollection(userId: $userId, type: ANIME) { lists { entries { id mediaId status progress notes repeat updatedAt media { id idMal title { english romaji native } coverImage { extraLarge large medium } bannerImage episodes status format averageScore seasonYear nextAiringEpisode { episode } } } } } }",
+      "query ($userId: Int!) { MediaListCollection(userId: $userId, type: ANIME) { lists { entries { id mediaId status progress notes repeat updatedAt media { id idMal title { english romaji native userPreferred } coverImage { extraLarge large medium } bannerImage episodes status format averageScore seasonYear isAdult nextAiringEpisode { episode } } } } } }",
       { userId: Number(viewer.id) }
     );
     const all = (data?.MediaListCollection?.lists || [])
       .flatMap(group => group?.entries || [])
       .filter(entry => Number.isInteger(Number(entry.mediaId)) && entry.media);
+    if(viewer?.id!==userId)return [];
     entries = new Map(all.map(entry => [Number(entry.mediaId), entry]));
+    listAt=Date.now();
     return copy(all);
+    })(); listPending=run; try{return await run}finally{if(listPending===run)listPending=null}
   }
 
   async function listManga() {
@@ -225,6 +233,7 @@
     const dur = Math.max(0, Math.floor(Number(duration) || 0));
     const previous = pendingProgress.get(id) || Promise.resolve();
     const requestPromise = previous.catch(() => {}).then(async () => {
+      if(!entries.has(id))await list(true);
       const entry = entries.get(id);
       // Android uses the number of fully watched episodes, never increment on a partial episode.
       const progress = Math.max(Number(entry?.progress || 0), ended ? ep : ep - 1);
@@ -237,6 +246,7 @@
       );
       if (data?.SaveMediaListEntry) {
         entries.set(id, { ...entry, ...data.SaveMediaListEntry });
+        listAt=0;
         return copy(data.SaveMediaListEntry);
       }
       return null;

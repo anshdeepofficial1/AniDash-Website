@@ -1,3 +1,4 @@
+import { BrowserContinueWatching } from "@/browser/continue-watching"
 import { AL_ListRecentAnime_Page_AiringSchedules, Anime_ScheduleItem, Models_HomeItem } from "@/api/generated/types"
 import { useAnilistListAnime, useAnilistListRecentAiringAnime } from "@/api/hooks/anilist.hooks"
 import { useGetLibraryCollection } from "@/api/hooks/anime_collection.hooks"
@@ -166,6 +167,7 @@ export function HomeScreen() {
                     </div>
                 </React.Fragment>
 
+                {serverStatus?.os === "browser" && <BrowserContinueWatching />}
                 <HomeToolbar
                     collectionList={libraryCollectionList}
                     unmatchedLocalFiles={unmatchedLocalFiles}
@@ -267,6 +269,7 @@ export function HomeScreen() {
                 </div>
             </React.Fragment>}
 
+            {serverStatus?.os === "browser" && <BrowserContinueWatching />}
             {/*Continue Watching Header*/}
             {homeItems[0]?.type === "anime-continue-watching-header" && <React.Fragment>
                 <ContinueWatchingHeader episodes={continueWatchingList} />
@@ -496,6 +499,7 @@ export function HomeScreenItem(props: HomeScreenItemProps) {
     }
 
     if (item.type === "anime-continue-watching") {
+        if (typeof window !== "undefined" && (window as any).AniDashAccount) return null
         return (
             <>
                 <ContinueWatching
