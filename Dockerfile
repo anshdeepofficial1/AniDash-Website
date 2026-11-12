@@ -18,5 +18,4 @@ COPY --from=backend /anidash /app/anidash
 COPY --chmod=755 deploy/entrypoint.sh /app/entrypoint.sh
 ENV SEANIME_DATA_DIR=/data SEANIME_SERVER_HOST=0.0.0.0 SEANIME_SERVER_PORT=43211
 EXPOSE 43211
-VOLUME ["/data"]
 ENTRYPOINT ["/usr/bin/tini","--","/app/entrypoint.sh"]
