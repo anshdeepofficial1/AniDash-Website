@@ -131,6 +131,7 @@ test("player appears before stream resolution and DUB/SUB switching does not thr
   };
   await assert.doesNotReject(async () => click({
     target: { closest: () => target },
+    composedPath: () => [],
     preventDefault() {}
   }));
 });

@@ -21,10 +21,9 @@ function pathMatchesRule(path, source) {
 test("every public SPA route has a Vercel rewrite without intercepting APIs or assets", () => {
   assert.equal(vercel.cleanUrls, true);
   const routes = [
-    "/home", "/discover", "/library", "/history", "/account", "/news",
-    "/notifications", "/settings", "/manga", "/manga-library", "/search",
-    "/downloads", "/anime/21", "/watch/21", "/watch/21/390",
-    "/section/trending", "/manga-section/popular", "/manga-detail/2"
+    "/home", "/discover", "/lists", "/schedule", "/account", "/settings",
+    "/manga", "/manga/entry", "/search", "/entry", "/extensions", "/auth/callback",
+    "/anime/21", "/watch/21", "/watch/21/390", "/section/trending"
   ];
   for (const path of routes) {
     assert.ok(vercel.rewrites.some(rule =>
