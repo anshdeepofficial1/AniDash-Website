@@ -894,7 +894,7 @@ function AnimeCarousel(props: { libraryCollectionProps: HandleLibraryCollectionP
                 {/*<CarouselMasks />*/}
                 <CarouselDotButtons className="-top-2" />
                 <CarouselContent className="px-6">
-                    {!!data ? data?.Page?.media?.filter(Boolean)?.sort((a, b) => b.meanScore! - a.meanScore!).map(media => {
+                    {!!data ? data?.Page?.media?.filter(Boolean)?.map(media => {
                         return (
                             <MediaEntryCard
                                 key={media.id}
