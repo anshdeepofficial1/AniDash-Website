@@ -2068,7 +2068,7 @@
     const hasPrev = episodeIndex > 0;
     const hasNext = episodeIndex >= 0 && episodeIndex < state.detailEpisodes.length - 1;
     $("#view").innerHTML = '<div class="player-page"><div class="player-topline"><button class="back-button" data-anime="' + media.id + '" aria-label="Back to anime">←</button><div class="player-title-group"><span class="watching-eyebrow">NOW WATCHING <span class="watching-dot"></span> EPISODE ' + escapeHtml(episode.number) + '</span><h1>' + escapeHtml(titleOf(media)) + '</h1><p id="player-episode-heading">' + escapeHtml(episode.title) + '</p></div></div>' +
-      '<div class="player-layout"><section class="player-main"><div class="video-frame"><video id="anime-video" controls playsinline webkit-playsinline preload="metadata"></video><iframe id="anime-embed" title="Episode stream" allow="autoplay; fullscreen; picture-in-picture; encrypted-media" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen hidden></iframe><div class="video-ui" id="video-ui" hidden><div class="video-ui-top"><span>' + escapeHtml(titleOf(media)) + ' · Episode ' + escapeHtml(episode.number) + '</span></div><div class="video-ui-bottom"><input class="video-seek" id="video-seek" type="range" min="0" max="1000" value="0" aria-label="Seek position"><div class="video-ui-buttons"><button data-player-toggle aria-label="Play or pause">' + uiIcon("play") + '</button><button data-player-jump="-10" aria-label="Back 10 seconds">−10</button><button data-player-jump="10" aria-label="Forward 10 seconds">+10</button><span id="video-clock" class="video-timecode">00:00 / --:--</span><span class="video-ui-spacer"></span><button data-player-speed aria-label="Playback speed">1×</button><button data-player-fullscreen aria-label="Fullscreen">' + uiIcon("expand") + '</button></div></div></div><div class="player-overlay" id="player-overlay" role="status"><div class="player-mini-loader"></div><strong>Opening episode…</strong></div></div>' +
+      '<div class="player-layout"><section class="player-main"><div class="video-frame"><video id="anime-video" controls playsinline webkit-playsinline preload="metadata"></video><iframe id="anime-embed" title="Episode stream" allow="autoplay; fullscreen; picture-in-picture; encrypted-media" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen hidden></iframe><div class="player-overlay" id="player-overlay" role="status"><div class="player-mini-loader"></div><strong>Opening episode…</strong></div></div><div class="video-ui" id="video-ui" hidden aria-label="Playback controls"><div class="video-ui-bottom"><input class="video-seek" id="video-seek" type="range" min="0" max="1000" value="0" aria-label="Seek position"><div class="video-ui-buttons"><button data-player-toggle aria-label="Play or pause">' + uiIcon("play") + '</button><button data-player-jump="-10" aria-label="Back 10 seconds">−10</button><button data-player-jump="10" aria-label="Forward 10 seconds">+10</button><span id="video-clock" class="video-timecode">00:00 / --:--</span><span class="video-ui-spacer"></span><button data-player-mute aria-label="Mute or unmute" title="Mute or unmute">Sound</button><input id="video-volume" type="range" min="0" max="100" value="100" aria-label="Volume"><button data-player-speed aria-label="Playback speed" title="Playback speed">1×</button><button data-player-fullscreen aria-label="Fullscreen" title="Fullscreen">' + uiIcon("expand") + '</button></div></div></div><p id="embedded-controls-note" class="embedded-controls-note" hidden>Use the controls inside the embedded player.</p>' +
       '<div class="player-under"><div><h2 id="player-episode-inline-title">' + escapeHtml(episode.title) + '</h2><p>' + escapeHtml(titleOf(media)) + ' · Episode ' + escapeHtml(episode.number) + '</p></div><div class="player-controls"><button class="btn btn-quiet" data-prev ' + (hasPrev ? "" : "disabled") + '>← Previous</button><button class="btn btn-quiet" data-next ' + (hasNext ? "" : "disabled") + '>Next →</button></div></div>' +
       '<div class="button-row" style="margin-top:14px" id="skip-buttons"></div>' +
       '<div class="player-source-stack"><div class="player-panel player-audio-panel"><div class="player-panel-head"><h3>Audio language</h3><span class="stream-state" id="stream-status" role="status">Checking streams</span></div><div class="source-row" id="category-pills" role="group" aria-label="Audio language"><button class="source-pill' + (player.category === "sub" ? " active" : "") + '" data-category="sub" aria-pressed="' + (player.category === "sub") + '">Subtitled</button><button class="source-pill' + (player.category !== "sub" ? " active" : "") + '" data-category="dub" aria-pressed="' + (player.category !== "sub") + '">English dub</button></div></div>' +
@@ -2448,6 +2448,10 @@
       toggle.innerHTML = uiIcon(video.paused ? "play" : "pause");
       toggle.setAttribute("aria-label", video.paused ? "Play" : "Pause");
     }
+    const mute = $('[data-player-mute]');
+    if (mute) { mute.textContent = video.muted || video.volume === 0 ? "Muted" : "Sound"; mute.setAttribute("aria-pressed", String(video.muted)); }
+    const volume = $("#video-volume");
+    if (volume) volume.value = String(Math.round((video.muted ? 0 : video.volume) * 100));
     const speed = $('[data-player-speed]');
     if (speed) speed.textContent = Number(video.playbackRate || 1).toFixed(2).replace(/0$/, "").replace(/\.$/, "") + "×";
   }
@@ -2527,9 +2531,11 @@
       player.activePlaybackId === attemptId && state.currentVideo === url;
     const playerUI = $("#video-ui");
     if (playerUI) playerUI.hidden = true;
+    const embedNote = $("#embedded-controls-note");
+    if (embedNote) embedNote.hidden = true;
     video.controls = true;
     // Detach handlers from the previous attempt before resetting the element.
-    for (const event of ["loadedmetadata", "playing", "canplay", "waiting", "error", "timeupdate", "pause", "ended", "stalled"]) {
+    for (const event of ["loadedmetadata", "playing", "canplay", "waiting", "error", "timeupdate", "pause", "ended", "stalled", "volumechange", "ratechange"]) {
       video["on" + event] = null;
     }
     if (embed) embed.onerror = null;
@@ -2549,6 +2555,7 @@
       video.removeAttribute("src");
       video.load();
       video.style.display = "none";
+      if (embedNote) embedNote.hidden = false;
       if (embed) {
         embed.hidden = false;
         embed.onerror = () => {
@@ -2605,7 +2612,10 @@
       }
       if (!isActive()) return;
       const playerUI = $("#video-ui");
-      if (playerUI) { playerUI.hidden = false; video.controls = false; }
+      if (playerUI) playerUI.hidden = false;
+      // Keep the browser controls available in addition to the toolbar. Native
+      // controls support accessibility, mobile fullscreen and keyboard input.
+      video.controls = true;
       updateVideoControls();
       video.play().catch(error => {
         if (!isActive()) return;
@@ -2652,6 +2662,8 @@
       }, 650);
     };
     video.onstalled = video.onwaiting;
+    video.onvolumechange = () => { if (isActive()) updateVideoControls(); };
+    video.onratechange = () => { if (isActive()) updateVideoControls(); };
     video.onerror = () => {
       if (!isActive()) return;
       clearPlaybackTimer();
@@ -3102,7 +3114,7 @@
   }
 
   document.addEventListener("click", async event => {
-    const target = event.target.closest("button,a,article");
+    const target = event.composedPath().find(node => node instanceof Element && node.matches("button,a,article"));
     if (event.target.matches?.("[data-close-modal]")) { closeModal(); return; }
     if (!target) return;
     if (target.hasAttribute("data-player-toggle")) {
@@ -3122,6 +3134,11 @@
       }
       return;
     }
+    if (target.hasAttribute("data-player-mute")) {
+      const video = $("#anime-video");
+      if (video && video.style.display !== "none") { video.muted = !video.muted; updateVideoControls(); }
+      return;
+    }
     if (target.hasAttribute("data-player-speed")) {
       const video = $("#anime-video");
       if (video) {
@@ -3134,10 +3151,11 @@
     }
     if (target.hasAttribute("data-player-fullscreen")) {
       const video = $("#anime-video");
-      const frame = $(".video-frame");
+      const frame = $(".player-main");
       try {
         if (document.fullscreenElement && document.exitFullscreen) await document.exitFullscreen();
         else if (frame?.requestFullscreen) await frame.requestFullscreen();
+        else if (frame?.webkitRequestFullscreen) frame.webkitRequestFullscreen();
         else if (video?.webkitEnterFullscreen) video.webkitEnterFullscreen();
         else toast("Fullscreen is unavailable in this browser.");
       } catch (_) { toast("Fullscreen could not be opened."); }
@@ -3659,6 +3677,11 @@
         group.hidden = visible === 0;
         if (headings[index]) headings[index].hidden = visible === 0;
       });
+      return;
+    }
+    if (event.target.id === "video-volume") {
+      const video = $("#anime-video");
+      if (video) { video.volume = Math.max(0, Math.min(1, Number(event.target.value) / 100)); video.muted = video.volume === 0; }
       return;
     }
     if (event.target.id === "video-seek") {
