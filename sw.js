@@ -1,6 +1,6 @@
-const CACHE_NAME = "anidash-watch-shell-v19";
+const CACHE_NAME = "anidash-watch-shell-v21";
 const READER_LIB = "https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js";
-const SHELL = ["/", "/index.html", "/styles.css", "/android-ui.css", "/preferences.css", "/app-parity.css", "/unslop.css", "/native-parity.css", "/catalog-polish.css", "/premium-desktop.css", "/library-storage.js", "/anilist-account.js", "/mal-account.js", "/cbz-reader.js", "/episode-arcs.js", "/app.js", "/manifest.webmanifest", "/icons/anidash-icon.png", "/icons/ui-sprite.svg"];
+const SHELL = ["/", "/index.html", "/styles.css", "/android-ui.css", "/preferences.css", "/app-parity.css", "/unslop.css", "/native-parity.css", "/catalog-polish.css", "/premium-desktop.css", "/seanime-ui.css", "/seanime-ui.js", "/library-storage.js", "/anilist-account.js", "/mal-account.js", "/cbz-reader.js", "/episode-arcs.js", "/app.js", "/manifest.webmanifest", "/icons/anidash-icon.png", "/icons/ui-sprite.svg"];
 
 self.addEventListener("install", event => {
   event.waitUntil(caches.open(CACHE_NAME).then(async cache => {
@@ -56,7 +56,7 @@ self.addEventListener("fetch", event => {
     return;
   }
   const isShellAsset =
-    ["/", "/index.html", "/styles.css", "/android-ui.css", "/preferences.css", "/app-parity.css", "/unslop.css", "/native-parity.css", "/catalog-polish.css", "/premium-desktop.css", "/library-storage.js", "/anilist-account.js", "/mal-account.js", "/cbz-reader.js", "/episode-arcs.js", "/app.js", "/manifest.webmanifest"].includes(url.pathname) ||
+    ["/", "/index.html", "/styles.css", "/android-ui.css", "/preferences.css", "/app-parity.css", "/unslop.css", "/native-parity.css", "/catalog-polish.css", "/premium-desktop.css", "/seanime-ui.css", "/seanime-ui.js", "/library-storage.js", "/anilist-account.js", "/mal-account.js", "/cbz-reader.js", "/episode-arcs.js", "/app.js", "/manifest.webmanifest"].includes(url.pathname) ||
     url.pathname.startsWith("/icons/");
   if (!isShellAsset) return;
 

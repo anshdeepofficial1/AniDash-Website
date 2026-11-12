@@ -56,7 +56,8 @@
   "git": {
     "deploymentEnabled": {
       "**": false,
-      "main": true
+      "main": true,
+      "migration/seanime-vercel-ui": true
     }
   },
   "rewrites": [

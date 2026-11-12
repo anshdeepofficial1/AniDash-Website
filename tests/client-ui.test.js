@@ -84,6 +84,7 @@ function createBrowser(initialHash) {
     confirm: () => false,
     console
   };
+  vm.runInNewContext(readFileSync(new URL("../seanime-ui.js", import.meta.url), "utf8"), context, { filename: "seanime-ui.js" });
   vm.runInNewContext(source, context, { filename: "app.js" });
   return { elements, listeners, urls, localData, getElement };
 }
