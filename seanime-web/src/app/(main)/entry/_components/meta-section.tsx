@@ -248,7 +248,7 @@ export function MetaSection(props: { entry: Anime_Entry, details: AL_AnimeDetail
                 </p>}
 
 
-                {(!entry.anidbId || entry.anidbId === 0) && !isCustomSource(entry.mediaId) && entry.media?.status !== "NOT_YET_RELEASED" && (
+                {serverStatus?.os !== "browser" && (!entry.anidbId || entry.anidbId === 0) && !isCustomSource(entry.mediaId) && entry.media?.status !== "NOT_YET_RELEASED" && (
                     <p
                         className={cn(
                             "text-center text-gray-200 opacity-50 text-sm flex gap-1 items-center",

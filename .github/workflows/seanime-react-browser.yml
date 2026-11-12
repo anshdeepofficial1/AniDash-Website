@@ -1,5 +1,8 @@
 name: Seanime React browser build
 on:
+  push:
+    branches: [main]
+    paths: ['seanime-web/**','api/episode-metadata.js','scripts/package-browser.mjs','vercel.json']
   pull_request:
     branches: [main]
     paths: ['seanime-web/**','scripts/package-browser.mjs','vercel.json']
