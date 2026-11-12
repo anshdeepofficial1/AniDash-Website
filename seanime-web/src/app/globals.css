@@ -1245,3 +1245,5 @@ media-preview-chapter-display {
  [data-anidash-watch-page]{padding-inline:max(12px,env(safe-area-inset-left,0px)) max(12px,env(safe-area-inset-right,0px))}
 }
 @media(prefers-reduced-motion:reduce){.anidash-mobile-hero *{scroll-behavior:auto!important}}
+
+@media(max-width:1023px){[data-home-screen] [data-library-toolbar-top-padding]{height:0!important}[data-home-screen] [data-library-toolbar]{margin-top:0!important}.anidash-mobile-hero{touch-action:pan-y}}

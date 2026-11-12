@@ -510,7 +510,7 @@ function MobileTrendingHero(){
  const slides=(data?.Page?.media||[]).filter(Boolean).filter(m=>m.status!=="NOT_YET_RELEASED").slice(0,10)
  const [index,setIndex]=React.useState(0),[paused,setPaused]=React.useState(false)
  const touch=React.useRef(0)
- React.useEffect(()=>{if(slides.length<2||paused)return;const id=window.setInterval(()=>setIndex(i=>(i+1)%slides.length),2500);return()=>clearInterval(id)},[slides.length,paused])
+ React.useEffect(()=>{if(slides.length<2||paused||window.matchMedia("(prefers-reduced-motion: reduce)").matches)return;const id=window.setInterval(()=>setIndex(i=>(i+1)%slides.length),2500);return()=>clearInterval(id)},[slides.length,paused])
  const item=slides[index%Math.max(1,slides.length)]
  if(isLoading)return <div className="anidash-mobile-hero animate-pulse bg-[--subtle]" aria-label="Loading trending anime"/>
  if(isError)return <div className="rounded-xl border p-4 mx-4"><p>Unable to load trending anime.</p><button onClick={()=>refetch()}>Retry</button></div>
