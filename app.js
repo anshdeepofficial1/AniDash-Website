@@ -2506,7 +2506,7 @@
       return;
     }
     let parsed;
-    try { parsed = new URL(url); } catch (_) {
+    try { parsed = new URL(url, window.location.href); } catch (_) {
       fallbackToNextProvider("The source returned an invalid media URL.");
       return;
     }
@@ -2521,12 +2521,18 @@
     if (!video) return;
     const player = state.player;
     const attemptId = player.activePlaybackId = (player.activePlaybackId || 0) + 1;
+    url = parsed.toString();
     state.currentVideo = url;
     const isActive = () => state.route === "/watch" && state.player === player &&
       player.activePlaybackId === attemptId && state.currentVideo === url;
     const playerUI = $("#video-ui");
     if (playerUI) playerUI.hidden = true;
     video.controls = true;
+    // Detach handlers from the previous attempt before resetting the element.
+    for (const event of ["loadedmetadata", "playing", "canplay", "waiting", "error", "timeupdate", "pause", "ended", "stalled"]) {
+      video["on" + event] = null;
+    }
+    if (embed) embed.onerror = null;
     clearPlaybackTimer();
     if (state.stallNoticeTimer) {
       window.clearTimeout(state.stallNoticeTimer);
@@ -2565,6 +2571,7 @@
     video.pause();
     video.removeAttribute("src");
     while (video.firstChild) video.removeChild(video.firstChild);
+    video.load();
     (tracks || []).forEach(track => {
       if (!track.url) return;
       const el = document.createElement("track");
@@ -2582,44 +2589,6 @@
       overlay.classList.remove("has-error");
       overlay.innerHTML = '<div class="player-mini-loader"></div><strong>Connecting to video…</strong>';
     }
-    if (isHls && video.canPlayType("application/vnd.apple.mpegurl")) {
-      video.src = url;
-    } else if (isHls) {
-      const ready = await ensureHlsEngine();
-      if (!isActive()) return;
-      if (!ready) {
-        fallbackToNextProvider("HLS playback is unavailable in this browser.");
-        return;
-      }
-      const hls = new window.Hls({
-        enableWorker: true, lowLatencyMode: false, startLevel: -1,
-        capLevelToPlayerSize: true, startFragPrefetch: true,
-        backBufferLength: 30, maxBufferLength: 30, maxMaxBufferLength: 60
-      });
-      state.hls = hls;
-      const recoveries = { network: 0, media: 0 };
-      hls.on(window.Hls.Events.ERROR, (_event, data) => {
-        if (!isActive() || state.hls !== hls || !data?.fatal) return;
-        if (data.type === window.Hls.ErrorTypes.NETWORK_ERROR && recoveries.network++ < 2) {
-          try { hls.startLoad(); return; } catch (_) {}
-        }
-        if (data.type === window.Hls.ErrorTypes.MEDIA_ERROR && recoveries.media++ < 1) {
-          try { hls.recoverMediaError(); return; } catch (_) {}
-        }
-        fallbackToNextProvider("The HLS source could not recover.");
-      });
-      hls.loadSource(url);
-      hls.attachMedia(video);
-    } else {
-      video.src = url;
-    }
-    if (!isActive()) return;
-    clearPlaybackTimer();
-    state.playbackWatchdog = window.setTimeout(() => {
-      if (isActive() && video.readyState < 2 && !video.ended) {
-        fallbackToNextProvider("This stream took too long to start.");
-      }
-    }, 14000);
     video.onloadedmetadata = () => {
       if (!isActive()) return;
       const key = String(player.media.id);
@@ -2682,6 +2651,7 @@
         }, 10000);
       }, 650);
     };
+    video.onstalled = video.onwaiting;
     video.onerror = () => {
       if (!isActive()) return;
       clearPlaybackTimer();
@@ -2730,6 +2700,45 @@
         ).catch(() => toast("Saved locally; MAL episode sync unavailable."));
       }
     };
+    // Register every event handler before setting src or attaching HLS.
+    if (!isActive()) return;
+    clearPlaybackTimer();
+    state.playbackWatchdog = window.setTimeout(() => {
+      if (isActive() && video.readyState < 2 && !video.ended) {
+        fallbackToNextProvider("This stream took too long to start.");
+      }
+    }, 25000);
+    if (isHls && video.canPlayType("application/vnd.apple.mpegurl")) {
+      video.src = url;
+    } else if (isHls) {
+      const ready = await ensureHlsEngine();
+      if (!isActive()) return;
+      if (!ready) {
+        fallbackToNextProvider("HLS playback is unavailable in this browser.");
+        return;
+      }
+      const hls = new window.Hls({
+        enableWorker: true, lowLatencyMode: false, startLevel: -1,
+        capLevelToPlayerSize: true, startFragPrefetch: true,
+        backBufferLength: 30, maxBufferLength: 30, maxMaxBufferLength: 60
+      });
+      state.hls = hls;
+      const recoveries = { network: 0, media: 0 };
+      hls.on(window.Hls.Events.ERROR, (_event, data) => {
+        if (!isActive() || state.hls !== hls || !data?.fatal) return;
+        if (data.type === window.Hls.ErrorTypes.NETWORK_ERROR && recoveries.network++ < 2) {
+          try { hls.startLoad(); return; } catch (_) {}
+        }
+        if (data.type === window.Hls.ErrorTypes.MEDIA_ERROR && recoveries.media++ < 1) {
+          try { hls.recoverMediaError(); return; } catch (_) {}
+        }
+        fallbackToNextProvider("The HLS source could not recover.");
+      });
+      hls.loadSource(url);
+      hls.attachMedia(video);
+    } else {
+      video.src = url;
+    }
   }
 
   function savePlaybackProgress(video, ended, force = false) {
