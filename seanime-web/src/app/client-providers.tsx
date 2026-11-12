@@ -39,11 +39,11 @@ export const ClientProviders: React.FC<ClientProvidersProps> = ({ children }) =>
             <CookiesProvider>
                 <JotaiProvider store={store}>
                     <QueryClientProvider client={queryClient}>
-                        <WebsocketProvider>
+                        <>
                             {children}
                             <CustomThemeProvider />
                             <Toaster />
-                        </WebsocketProvider>
+                        </>
                         <CustomCSSProvider />
                         {/*{import.meta.env.MODE === "development" && <React.Suspense fallback={null}>*/}
                         {/*    <ReactQueryDevtools />*/}

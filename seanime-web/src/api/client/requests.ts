@@ -1,3 +1,4 @@
+import { browserRequest, browserSupports } from "@/browser/transport"
 import { getServerBaseUrl } from "@/api/client/server-url"
 import { SERVER_AUTH_TOKEN_STORAGE_KEY, serverAuthTokenAtom } from "@/app/(main)/_atoms/server-status.atoms"
 import { getClientId, getClientIdProof, setClientIdentity } from "@/lib/server/client-id"
@@ -100,46 +101,7 @@ export async function buildSeaQuery<T, D extends any = any>(
         params,
         password,
     }: SeaQuery<D>): Promise<T | undefined> {
-    const headers: Record<string, string> = {}
-
-    if (password) {
-        headers["X-Seanime-Token"] = password
-    }
-
-    const clientId = getClientId()
-    const clientIdProof = getClientIdProof()
-    if (clientId) {
-        headers["X-Seanime-Client-Id"] = clientId
-    }
-    if (clientIdProof) {
-        headers["X-Seanime-Client-Id-Proof"] = clientIdProof
-    }
-    if (__clientPlatform__) {
-        headers["X-Seanime-Client-Platform"] = __clientPlatform__
-    }
-
-    let res
-    try {
-        res = await axios<T>({
-            url: getServerBaseUrl() + endpoint,
-            method,
-            data,
-            params,
-            headers,
-            withCredentials: true,
-        })
-    }
-    catch (error) {
-        if (axios.isAxiosError(error)) {
-            checkAuthError(error)
-        }
-        throw error
-    }
-
-    syncClientIdFromHeader(res.headers)
-
-    const response = _handleSeaResponse<T>(res.data)
-    return response.data
+    return browserRequest(endpoint,method,data,params) as Promise<T | undefined>
 }
 
 function syncClientIdFromHeader(headers: unknown) {
@@ -256,6 +218,7 @@ export function useServerQuery<R, V = any>(
             })
         },
         ...options,
+        enabled: browserSupports(endpoint) && options.enabled !== false,
     })
 
     useEffect(() => {

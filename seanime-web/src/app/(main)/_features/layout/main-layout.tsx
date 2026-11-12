@@ -48,56 +48,15 @@ const MpvCoreLazyWrapper = React.lazy(() => import("@/app/(main)/_features/mpv-c
 const NativePlayerLazyWrapper = React.lazy(() => import("@/app/(main)/_features/native-player/native-player-lazy-wrapper"))
 
 export const MainLayout = ({ children }: { children: React.ReactNode }) => {
-    const serverStatus = useServerStatus()
-
+    useAnimeLibraryCollectionLoader()
+    useAnimeCollectionLoader()
     return (
         <>
-            <Loader />
-            <MangaPreferencesSync />
-            <MangaSourceRefreshSync />
-            <ScanProgressBar />
-            <LibraryWatcher />
-            <ScannerModal />
-            <PlaylistListModal />
-            <GlobalPlaylistManager />
-            <ChapterDownloadsDrawer />
-            <PlaybackPlayPill />
             <MediaPreviewModal />
-            <PlaybackManagerProgressTracking />
-            <ManualProgressTracking />
-            <IssueReport />
-            <ErrorExplainer />
-            <SeaCommand />
-
-            <PluginManager />
-            {(__isElectronDesktop__) && (
-                <React.Suspense fallback={null}>
-                    {serverStatus?.settings?.mediaPlayer?.mpvPrismEnabled ? (
-                        <MpvCoreLazyWrapper />
-                    ) : (
-                        <NativePlayerLazyWrapper />
-                    )}
-                </React.Suspense>
-            )}
-            <NakamaManager />
-            <NakamaWatchPartyChatProvider />
-            <NakamaWatchPartyChat />
-            <TopIndefiniteLoader />
-            <RateLimitLoader />
-            <Announcements />
-            <LibraryExplorerDrawer />
-            <PluginWebviewSlot slot="fixed" />
-
             <AppSidebarProvider>
                 <AppLayout withSidebar sidebarSize="slim">
-                    <AppLayoutSidebar>
-                        <MainSidebar />
-                    </AppLayoutSidebar>
-                    <AppLayout>
-                        <AppLayoutContent>
-                            {children}
-                        </AppLayoutContent>
-                    </AppLayout>
+                    <AppLayoutSidebar><MainSidebar /></AppLayoutSidebar>
+                    <AppLayout><AppLayoutContent>{children}</AppLayoutContent></AppLayout>
                 </AppLayout>
             </AppSidebarProvider>
         </>

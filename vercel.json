@@ -70,6 +70,10 @@
       "destination": "/"
     },
     {
+      "source": "/search",
+      "destination": "/"
+    },
+    {
       "source": "/library",
       "destination": "/"
     },
@@ -78,16 +82,20 @@
       "destination": "/"
     },
     {
-      "source": "/account",
+      "source": "/lists",
       "destination": "/"
     },
     {
-      "source": "/news",
-      "destination": "/legacy.html"
+      "source": "/schedule",
+      "destination": "/"
     },
     {
-      "source": "/notifications",
-      "destination": "/legacy.html"
+      "source": "/entry",
+      "destination": "/"
+    },
+    {
+      "source": "/account",
+      "destination": "/"
     },
     {
       "source": "/settings",
@@ -95,19 +103,23 @@
     },
     {
       "source": "/manga",
-      "destination": "/legacy.html"
-    },
-    {
-      "source": "/manga-library",
-      "destination": "/legacy.html"
-    },
-    {
-      "source": "/search",
       "destination": "/"
     },
     {
-      "source": "/downloads",
-      "destination": "/legacy.html"
+      "source": "/manga/entry",
+      "destination": "/"
+    },
+    {
+      "source": "/auth/callback",
+      "destination": "/"
+    },
+    {
+      "source": "/public/auth",
+      "destination": "/"
+    },
+    {
+      "source": "/section/:name",
+      "destination": "/"
     },
     {
       "source": "/anime/:id",
@@ -115,25 +127,13 @@
     },
     {
       "source": "/watch/:id",
-      "destination": "/legacy.html"
-    },
-    {
-      "source": "/watch/:id/:episode",
-      "destination": "/legacy.html"
-    },
-    {
-      "source": "/section/:name",
       "destination": "/"
     },
     {
-      "source": "/manga-section/:name",
-      "destination": "/legacy.html"
-    },
-    {
-      "source": "/manga-detail/:id",
-      "destination": "/legacy.html"
+      "source": "/watch/:id/:episode",
+      "destination": "/"
     }
   ],
-  "buildCommand": "cd seanime-web && npm ci && npx rsbuild build --config rsbuild.browser.config.ts && cd .. && node scripts/package-browser.mjs",
-  "outputDirectory": "seanime-web/out-browser"
+  "buildCommand": "cd seanime-web && npm ci && npx rsbuild build && cd .. && node scripts/package-browser.mjs",
+  "outputDirectory": "seanime-web/out"
 }
