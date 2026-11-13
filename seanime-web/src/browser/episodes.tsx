@@ -14,7 +14,7 @@ import {
   LuChevronRight,
   LuList,
   LuLayoutGrid,
-  LuSubtitles,
+  LuCaptions,
   LuVolume2,
   LuVolumeX,
   LuMaximize
@@ -930,7 +930,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
                     : "bg-neutral-800 text-neutral-400 hover:bg-neutral-700"
                 }`}
               >
-                <LuSubtitles className="size-3.5" /> CC {subtitlesEnabled ? "ON" : "OFF"}
+                <LuCaptions className="size-3.5" /> CC {subtitlesEnabled ? "ON" : "OFF"}
               </button>
               <button
                 type="button"
