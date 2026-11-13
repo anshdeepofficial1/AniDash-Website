@@ -315,17 +315,26 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
       if (pos > 0 && Number.isFinite(el.duration) && pos < el.duration && el.currentTime < 1) {
         el.currentTime = pos
       }
-      void el.play().catch(() => {
-        if (live) setBuffering(false)
+      void el.play().catch((reason: unknown) => {
+        if (!live) return
+        setBuffering(false)
+        setIsPlaying(false)
+        if (reason instanceof DOMException && reason.name === "NotAllowedError") return
+        if (reason instanceof DOMException && reason.name === "AbortError") return
+        setError("The browser rejected playback. Check that the media format is supported.")
       })
     }
 
     el.addEventListener("loadedmetadata", onLoadedMetadata, { once: true })
 
     const streamUrl = activeStream.url
-    const isHls =
-      activeStream.isM3U8 !== false &&
-      (/\.m3u8(?:$|\?)/i.test(streamUrl) || activeStream.server !== "Gigi")
+    // Respect media format metadata rather than inferring the format from a provider name.
+    const mime = (activeStream.type || "").toLowerCase()
+    const explicitFile = /\.(mp4|webm|m4v|ogv|mov)(?:$|[?#])/i.test(streamUrl) ||
+      /^(video\/|mp4$|webm$)/.test(mime) && !mime.includes("mpegurl")
+    const isHls = activeStream.isM3U8 === true ||
+      (activeStream.isM3U8 !== false && !explicitFile &&
+        (/\.m3u8(?:$|[?#])/i.test(streamUrl) || /hls|mpegurl|m3u8/.test(mime)))
 
     if (isHls && Hls.isSupported()) {
       hls = new Hls({
@@ -369,7 +378,9 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     if (!buffering || !activeStream?.url || isLoadingStream || error) return
     const timeout = window.setTimeout(() => {
       setBuffering(false)
-      setError("The media has not started loading. Retry playback or check your connection.")
+      setIsPlaying(false)
+      video.current?.pause()
+      setError("The media did not deliver playable frames. Retry playback or check your connection.")
     }, 20000)
     return () => window.clearTimeout(timeout)
   }, [buffering, activeStream?.url, isLoadingStream, error, playbackRevision])
@@ -451,7 +462,12 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     if (!el) return
     if (el.paused) {
       setError("")
-      void el.play().catch(() => setBuffering(false))
+      void el.play().catch((reason: unknown) => {
+        setBuffering(false)
+        setIsPlaying(false)
+        if (reason instanceof DOMException && (reason.name === "NotAllowedError" || reason.name === "AbortError")) return
+        setError("The browser rejected playback. Check that the media format is supported.")
+      })
     } else el.pause()
   }
 
@@ -908,7 +924,12 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
               onError={() => {
                 setBuffering(false)
                 setIsPlaying(false)
-                setError("The browser could not play this media. Retry playback or use a compatible source.")
+                const code = video.current?.error?.code
+                const message = code === 2 ? "The media download failed."
+                  : code === 3 ? "The browser could not decode the media."
+                  : code === 4 ? "The media format is not supported by this browser."
+                  : "The browser could not play this media."
+                setError(message + " Retry playback.")
               }}
             >
               {tracks.map((t, idx) => (
