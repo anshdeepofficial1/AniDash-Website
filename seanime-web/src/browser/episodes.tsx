@@ -1321,8 +1321,10 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
         [data-episode-navigator-scroll] { max-height: min(58dvh, 600px); min-height: 9rem; overflow-y: auto; overscroll-behavior-y: contain; scrollbar-width: thin; scrollbar-color: #555 transparent; }
         @media (min-width: 1100px) {
           [data-anidash-watch-page] { grid-template-columns: minmax(0, 1fr) minmax(280px, 23%); gap: 1.25rem; }
-          [data-episode-navigator-scroll] { max-height: min(62dvh, 760px); }
+          [data-episode-navigator-scroll] { max-height: min(72dvh, 880px); }
         }
+        [data-anidash-watch-page][data-movie="true"] { grid-template-columns: minmax(0, 1fr); }
+        [data-anidash-watch-page][data-movie="true"] aside { display: none; }
         [data-player-wrapper]:fullscreen, [data-player-wrapper]:-webkit-full-screen { width: 100%; height: 100%; max-width: none; max-height: none; aspect-ratio: auto; border: 0; border-radius: 0; }
         video::cue {
           background-color: rgba(0, 0, 0, 0.8) !important;
@@ -1543,7 +1545,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
 
       {/* Full Watch Player View */}
       {watchMode && (
-        <div data-anidash-watch-page className="w-full max-w-[1920px] mx-auto p-2 sm:p-4 lg:p-6">
+        <div data-anidash-watch-page data-movie={m.format === "MOVIE" ? "true" : undefined} className="w-full max-w-[1920px] mx-auto p-2 sm:p-4 lg:p-6">
           <main className="min-w-0 space-y-4" onClick={returnPointerFocus}>
           <header>
              <h3 className="text-lg sm:text-2xl font-bold leading-tight">
@@ -1829,36 +1831,12 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
               </div>
             )}
           </div>
-          {/* Exact Server Selector Card (Matching Screenshot) */}
-          <div className="rounded-xl border border-neutral-800 bg-[#0d0d0d] overflow-hidden flex flex-col md:flex-row shadow-lg">
-            {/* Left box: You are watching */}
-            <div className="p-4 md:w-60 shrink-0 flex items-center gap-3.5 bg-[#121212] border-b md:border-b-0 md:border-r border-neutral-800/80">
-              <div className="relative w-20 sm:w-24 aspect-video rounded-lg overflow-hidden bg-neutral-900 border border-neutral-800 shrink-0">
-                <img
-                  src={currentEpThumb}
-                  alt={`Episode ${selected} thumbnail`}
-                  className="w-full h-full object-cover"
-                  onError={e => {
-                    const fallback = m.coverImage?.large || m.bannerImage || "/icons/icon-192.png"
-                    if (e.currentTarget.src !== fallback) e.currentTarget.src = fallback
-                  }}
-                />
-              </div>
-              <div className="min-w-0">
-                <span className="text-[11px] font-semibold tracking-wider text-neutral-400 uppercase block">
-                  YOU ARE WATCHING
-                </span>
-                <h3 className="text-xl sm:text-2xl font-bold text-white tracking-tight">
-                  Episode {selected}
-                </h3>
-              </div>
-            </div>
-
-            {/* Right box: Server Picker */}
-            <div className="flex-1 p-4 space-y-3.5">
-              <div className="flex items-center gap-1.5 text-xs text-neutral-400">
-                <span className="text-sm leading-none font-bold">ⓘ</span>
-                <span>If this server doesn&apos;t load, try another one.</span>
+          {/* Audio and source controls only; episode artwork belongs to the details section. */}
+          <section aria-label="Audio and servers" className="rounded-xl border border-neutral-800 bg-[#0d0d0d] overflow-hidden">
+            <div className="p-4 space-y-3.5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h2 className="text-sm font-semibold">Audio &amp; servers</h2>
+                <span className="rounded-md bg-white/10 px-2 py-1 text-[11px] text-neutral-300">{audio === "dub" ? "English DUB" : "Japanese SUB"}</span>
               </div>
 
               {/* SUB Channel Row */}
@@ -1950,7 +1928,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
                 </div>
               </div>
             </div>
-          </div>
+          </section>
 
           {/* Estimated Next Episode Airing Banner */}
           {hasNextAiring && (
@@ -1975,38 +1953,37 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
             </div>
           )}
 
-          {/* Episode information */}
-          <section aria-label="Episode details" className="rounded-xl border border-neutral-800 bg-[#0d0d0d] p-4 sm:p-5 space-y-4">
-            <div className="flex items-start gap-4">
-              <div className="relative w-28 sm:w-40 aspect-video shrink-0 overflow-hidden rounded-lg bg-neutral-900">
-                <img src={currentEpThumb} alt="" className="h-full w-full object-cover" loading="lazy" />
+          {/* Single episode and series information section. */}
+          <section aria-label="Episode details" className="rounded-xl border border-neutral-800 bg-[#0d0d0d] overflow-hidden">
+            <div className="p-4 sm:p-5">
+              <div className="flex items-start gap-4">
+                <div className="relative w-28 sm:w-40 aspect-video shrink-0 overflow-hidden rounded-lg bg-neutral-900">
+                  <img src={currentEpThumb} alt="" className="h-full w-full object-cover" loading="lazy" onError={e => {
+                    const fallback = m.bannerImage || m.coverImage?.large || "/icons/icon-192.png"
+                    if (e.currentTarget.getAttribute("src") !== fallback) e.currentTarget.src = fallback
+                  }} />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <h2 className="text-base font-bold">Episode details</h2>
+                  <p className="text-sm text-neutral-400 mt-1">{animeTitle}</p>
+                  {selectedEpisodeTitle && <p className="text-sm text-neutral-300 mt-1 leading-snug">{selectedEpisodeTitle}</p>}
+                </div>
               </div>
-              <div className="min-w-0 flex-1">
-                <p className="text-[10px] uppercase tracking-widest text-neutral-400 font-semibold">Episode details</p>
-                <h2 className="text-base sm:text-xl font-bold leading-snug">{selectedEpisodeTitle || "Episode " + selected}</h2>
-                <p className="text-sm text-neutral-400 mt-1">{animeTitle}</p>
-              </div>
+              <dl className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-4 mt-4 pt-4 border-t border-neutral-800">
+                {episodeFacts.map(([label, value]) => <div key={label} className="min-w-0"><dt className="text-xs text-neutral-500">{label}</dt><dd className="text-sm font-medium mt-1 break-words">{value}</dd></div>)}
+              </dl>
             </div>
-            <dl className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-4 border-t border-neutral-800 pt-4">
-              {episodeFacts.map(([label, value]) => <div key={label} className="min-w-0"><dt className="text-xs text-neutral-500">{label}</dt><dd className="text-sm font-medium mt-1 break-words">{value}</dd></div>)}
-            </dl>
-          </section>
-
-          <section aria-label="About the anime" className="rounded-xl border border-neutral-800 bg-[#0d0d0d] p-4 sm:p-5">
-            <div className="flex items-start gap-4">
-              {m.coverImage?.large && <img src={m.coverImage.large} alt="" loading="lazy" className="w-20 sm:w-28 shrink-0 rounded-lg aspect-[2/3] object-cover bg-neutral-900" />}
-              <div className="min-w-0 flex-1 space-y-3">
-                <div className="flex flex-wrap items-start justify-between gap-2">
-                  <div><p className="text-[10px] font-semibold tracking-widest uppercase text-neutral-500">About the series</p><h2 className="font-bold text-lg">{animeTitle}</h2></div>
-                  <button type="button" onClick={closePlayer} className="text-xs font-medium text-neutral-300 hover:text-white underline underline-offset-4">View anime details</button>
-                </div>
-                <div className="flex flex-wrap gap-1.5">
-                  {typeof mediaDetails.averageScore === "number" && mediaDetails.averageScore > 0 && <span className="rounded-md bg-white/10 px-2 py-1 text-xs">★ {(mediaDetails.averageScore / 10).toFixed(1)}</span>}
-                  {m.format && <span className="rounded-md bg-white/10 px-2 py-1 text-xs">{m.format.replace(/_/g, " ")}</span>}
-                  {Array.isArray(mediaDetails.genres) && mediaDetails.genres.slice(0, 6).map((genre: string) => <span key={genre} className="rounded-md border border-neutral-800 px-2 py-1 text-xs text-neutral-300">{genre}</span>)}
-                </div>
-                {synopsis && <details className="text-sm leading-relaxed text-neutral-300"><summary className="cursor-pointer text-white text-sm font-medium">Series synopsis</summary><p className="mt-2">{synopsis}</p></details>}
+            <div className="border-t border-neutral-800 p-4 sm:p-5 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h3 className="text-sm font-semibold">About the series</h3>
+                <button type="button" onClick={closePlayer} className="text-xs font-medium text-neutral-300 hover:text-white underline underline-offset-4">View anime details</button>
               </div>
+              <div className="flex flex-wrap gap-1.5">
+                {typeof mediaDetails.averageScore === "number" && mediaDetails.averageScore > 0 && <span className="rounded-md bg-white/10 px-2 py-1 text-xs">★ {(mediaDetails.averageScore / 10).toFixed(1)}</span>}
+                {m.format && <span className="rounded-md bg-white/10 px-2 py-1 text-xs">{m.format.replace(/_/g, " ")}</span>}
+                {Array.isArray(mediaDetails.genres) && mediaDetails.genres.slice(0, 6).map((genre: string) => <span key={genre} className="rounded-md border border-neutral-800 px-2 py-1 text-xs text-neutral-300">{genre}</span>)}
+              </div>
+              {synopsis && <details className="text-sm leading-relaxed text-neutral-300"><summary className="cursor-pointer text-white text-sm font-medium">Series synopsis</summary><p className="mt-2">{synopsis}</p></details>}
             </div>
           </section>
           </main>
@@ -2056,13 +2033,6 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
                 <div className="px-4 py-3 border-t border-neutral-800 text-xs text-neutral-400 flex justify-between gap-2"><span>{navigatorRows.length} episodes in range</span>{currentArc && <span className="truncate" title={currentArc.title}>{currentArc.title}</span>}</div>
               </section>
             )}
-            <section className="rounded-xl border border-neutral-800 bg-[#0d0d0d] p-4 space-y-3">
-              <h2 className="font-semibold text-sm">Now watching</h2>
-              <div className="aspect-video overflow-hidden rounded-lg bg-neutral-900"><img src={currentEpThumb} alt="" loading="lazy" className="w-full h-full object-cover" /></div>
-              <p className="font-semibold text-sm leading-snug">{selectedEpisodeTitle || "Episode " + selected}</p>
-              <p className="text-xs text-neutral-400">{animeTitle} · Episode {selected}</p>
-              {duration > 0 && <div><div className="h-1 rounded-full bg-white/15 overflow-hidden"><div className="h-full bg-white" style={{width: progressPercent + "%"}} /></div><p className="mt-2 text-xs text-neutral-400 tabular-nums">{formatSeconds(currentTime)} / {formatSeconds(duration)}</p></div>}
-            </section>
           </aside>
         </div>
       )}
