@@ -17,7 +17,9 @@ import {
   LuCaptions,
   LuVolume2,
   LuVolumeX,
-  LuMaximize
+  LuMaximize,
+  LuSettings,
+  LuUpload
 } from "react-icons/lu"
 
 type Metadata = {
@@ -40,10 +42,53 @@ type StreamSource = {
   isDub?: boolean
 }
 
-type StreamTrack = {
-  url: string
-  lang: string
-  type: string
+type StreamTrack = { url?: string; file?: string; src?: string; lang?: string; label?: string; language?: string; kind?: string; type?: string }
+type CaptionFile = { id: string; url: string; label: string; language: string }
+type CaptionOption = { index: number; label: string; language: string }
+type PlayerMenu = "settings" | "quality" | "speed" | "subtitles" | "appearance" | null
+type PipVideo = HTMLVideoElement & {
+  requestPictureInPicture?: () => Promise<unknown>
+  webkitSupportsPresentationMode?: (mode: string) => boolean
+  webkitSetPresentationMode?: (mode: string) => void
+  webkitPresentationMode?: string
+}
+type PipDocument = Document & { pictureInPictureEnabled?: boolean; pictureInPictureElement?: Element | null; exitPictureInPicture?: () => Promise<unknown> }
+
+function subtitleVtt(input: string): string {
+  const text = input.replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n").trim()
+  if (/^WEBVTT(?:\s|$)/.test(text)) return text + "\n"
+  if (!/\d{1,2}:\d{2}:\d{2}[,.]\d{3}\s*-->/.test(text)) throw Error("Unsupported subtitle format; use WebVTT or SRT.")
+  return "WEBVTT\n\n" + text.replace(/^(\d{1,2}:\d{2}:\d{2})[,.](\d{3})(\s*-->\s*)(\d{1,2}:\d{2}:\d{2})[,.](\d{3})/gm, "$1.$2$3$4.$5") + "\n"
+}
+function captionSource(track: StreamTrack, index: number) {
+  const raw = track.url || track.file || track.src
+  if (typeof raw !== "string") return null
+  const kind = String(track.kind || track.type || "").toLowerCase()
+  const label = String(track.label || track.lang || track.language || "Subtitle " + (index + 1))
+  if (/thumbnail|sprite|metadata|chapter|preview/.test(kind + " " + label.toLowerCase())) return null
+  if (kind && !/caption|subtitle|vtt|srt|text|unknown/.test(kind) && !/\.(vtt|srt)(?:[?#]|$)/i.test(raw)) return null
+  try {
+    const u = new URL(raw, window.location.href)
+    if (u.protocol !== "https:" && u.origin !== window.location.origin) return null
+    if (u.username || u.password) return null
+    const lang = String(track.language || track.lang || "").trim()
+    const language = /^(en|eng|english)(?:[-_ ].*)?$/i.test(lang) || /english/i.test(label) ? "en" : /^[a-z]{2,3}(-[A-Za-z0-9]+)*$/i.test(lang) ? lang : "und"
+    return { id: "remote-" + index, url: u.href, label, language }
+  } catch { return null }
+}
+function captionPlainText(cue: TextTrackCue) {
+  const vtt = cue as VTTCue
+  if (typeof vtt.getCueAsHTML === "function") {
+    const fragment = vtt.getCueAsHTML()
+    return (fragment.textContent || "").trim()
+  }
+  return typeof vtt.text === "string" ? vtt.text.replace(/<[^>]*>/g, "").trim() : ""
+}
+function PipIcon() {
+  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className="size-5" aria-hidden="true"><rect x="3" y="4" width="18" height="14" rx="2"/><rect x="12" y="11" width="9" height="7" rx="1.3"/></svg>
+}
+function NextIcon() {
+  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className="size-5" aria-hidden="true"><path d="m5 4 12 8-12 8zM19 4v16"/></svg>
 }
 
 const PAGE_SIZE = 24
@@ -122,7 +167,23 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
   const [streams, setStreams] = React.useState<StreamSource[]>([])
   const [activeStream, setActiveStream] = React.useState<StreamSource | null>(null)
   const [tracks, setTracks] = React.useState<StreamTrack[]>([])
-  const [subtitlesEnabled, setSubtitlesEnabled] = React.useState(true)
+  const [subtitlesEnabled, setSubtitlesEnabled] = React.useState(initial.preferences?.playerSubtitles !== false)
+  const [captionChoice, setCaptionChoice] = React.useState("auto")
+  const [captionFiles, setCaptionFiles] = React.useState<CaptionFile[]>([])
+  const [uploadedCaption, setUploadedCaption] = React.useState<CaptionFile | null>(null)
+  const [captionOptions, setCaptionOptions] = React.useState<CaptionOption[]>([])
+  const [captionText, setCaptionText] = React.useState("")
+  const [captionMessage, setCaptionMessage] = React.useState("")
+  const [captionDelay, setCaptionDelay] = React.useState(0)
+  const [captionSize, setCaptionSize] = React.useState<number>([0.8, 1, 1.25, 1.5].includes(initial.preferences?.playerCaptionSize) ? initial.preferences.playerCaptionSize : 1)
+  const [captionBackground, setCaptionBackground] = React.useState(initial.preferences?.playerCaptionBackground !== false)
+  const [playerMenu, setPlayerMenu] = React.useState<PlayerMenu>(null)
+  const [pipSupported, setPipSupported] = React.useState(false)
+  const [pipActive, setPipActive] = React.useState(false)
+  const [playerNotice, setPlayerNotice] = React.useState("")
+  const [hlsLevels, setHlsLevels] = React.useState<{ index: number; label: string }[]>([])
+  const [qualityLevel, setQualityLevel] = React.useState(-1)
+  const [controlsVisible, setControlsVisible] = React.useState(true)
   const [isLoadingStream, setIsLoadingStream] = React.useState(false)
   const [error, setError] = React.useState("")
   const [isPlaying, setIsPlaying] = React.useState(false)
@@ -158,6 +219,16 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
   const [metaRevision, setMetaRevision] = React.useState(0)
 
   const video = React.useRef<HTMLVideoElement>(null)
+  const hlsInstance = React.useRef<Hls | null>(null)
+  const subtitleInput = React.useRef<HTMLInputElement>(null)
+  const uploadedUrl = React.useRef<string | null>(null)
+  const controlsTimer = React.useRef<number | undefined>(undefined)
+  const selectedCaptionIndex = captionChoice !== "auto" && captionOptions.some(t => String(t.index) === captionChoice)
+    ? Number(captionChoice)
+    : (captionOptions.find(t => /^en(?:[-_]|$)|english/i.test(t.language + " " + t.label)) || captionOptions.find(t => /english/i.test(t.label)) || captionOptions[0])?.index
+  const captionLabel = captionOptions.find(t => t.index === selectedCaptionIndex)?.label || "Unavailable"
+  const controlClass = "shrink-0 grid size-9 sm:size-10 place-items-center rounded-xl text-white/90 hover:bg-white/15 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-white disabled:opacity-35 disabled:pointer-events-none transition"
+  const menuRowClass = "w-full flex items-center justify-between gap-3 rounded-xl px-3 py-2.5 text-left text-sm hover:bg-white/10 focus-visible:outline focus-visible:outline-white transition"
   const lastSaved = React.useRef(0)
   const lastSynced = React.useRef(0)
   const syncBusy = React.useRef(false)
@@ -225,6 +296,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     setError("")
     setSegments(EMPTY_SEGMENTS)
     setTracks([])
+    setCaptionText("")
     skippedSegments.current.clear()
 
     // Fetch server availability map in background
@@ -337,6 +409,8 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     setCurrentTime(0)
     setDuration(0)
     setIsPlaying(false)
+    setHlsLevels([])
+    setQualityLevel(-1)
     const local = localResume(m)
     const localPosition = local?.episode === selected ? local.seconds : 0
     // Account synchronization must never block the media element indefinitely.
@@ -382,6 +456,11 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
         enableWorker: true,
         lowLatencyMode: true
       })
+      hlsInstance.current = hls
+      hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        if (!live || !hls) return
+        setHlsLevels(hls.levels.map((level, index) => ({ index, label: level.height ? level.height + "p" : Math.round(level.bitrate / 1000) + " kbps" })))
+      })
       hls.loadSource(streamUrl)
       hls.attachMedia(el)
       hls.on(Hls.Events.ERROR, (_, data) => {
@@ -407,6 +486,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     return () => {
       live = false
       el.removeEventListener("loadedmetadata", onLoadedMetadata)
+      if (hlsInstance.current === hls) hlsInstance.current = null
       hls?.destroy()
       el.pause()
       el.removeAttribute("src")
@@ -426,14 +506,154 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     return () => window.clearTimeout(timeout)
   }, [buffering, activeStream?.url, isLoadingStream, error, playbackRevision])
 
-  // Subtitle track toggle
+  // External subtitles use ordinary browser CORS, converted to local WebVTT.
+  // No media-source settings, credentials or access restrictions are changed.
+  React.useEffect(() => {
+    if (!watchMode) return
+    const abort = new AbortController()
+    const urls: string[] = []
+    setCaptionFiles([])
+    setCaptionMessage("")
+    setCaptionChoice("auto")
+    const candidates = tracks.map(captionSource).filter((item): item is CaptionFile => !!item)
+    if (!candidates.length) return () => abort.abort()
+    void Promise.all(candidates.map(async item => {
+      try {
+        const response = await fetch(item.url, { signal: abort.signal, credentials: "same-origin" })
+        if (!response.ok) throw Error("Subtitle request failed")
+        const raw = await response.text()
+        if (raw.length > 2_000_000 || abort.signal.aborted) return null
+        const url = URL.createObjectURL(new Blob([subtitleVtt(raw)], { type: "text/vtt" }))
+        urls.push(url)
+        return { ...item, url }
+      } catch { return null }
+    })).then(results => {
+      if (abort.signal.aborted) return
+      const files = results.filter((item): item is CaptionFile => !!item)
+      setCaptionFiles(files)
+      if (files.length < candidates.length) setCaptionMessage("Some subtitle files could not be loaded by this browser.")
+    })
+    return () => { abort.abort(); urls.forEach(url => URL.revokeObjectURL(url)) }
+  }, [watchMode, tracks])
+
+  React.useEffect(() => {
+    setUploadedCaption(null)
+    setCaptionDelay(0)
+    setCaptionText("")
+    if (uploadedUrl.current) { URL.revokeObjectURL(uploadedUrl.current); uploadedUrl.current = null }
+    return () => { if (uploadedUrl.current) { URL.revokeObjectURL(uploadedUrl.current); uploadedUrl.current = null } }
+  }, [entry.mediaId, selected])
+
+  React.useEffect(() => {
+    if (!watchMode) return
+    const el = video.current
+    if (!el) return
+    const list = el.textTracks
+    function refresh() {
+      const items = Array.from(list).flatMap((track, index) =>
+        track.kind === "subtitles" || track.kind === "captions" ? [{ index, label: track.label || track.language || "Subtitle " + (index + 1), language: track.language }] : [])
+      setCaptionOptions(items)
+    }
+    refresh()
+    list.addEventListener("addtrack", refresh)
+    list.addEventListener("removetrack", refresh)
+    el.addEventListener("loadedmetadata", refresh)
+    return () => { list.removeEventListener("addtrack", refresh); list.removeEventListener("removetrack", refresh); el.removeEventListener("loadedmetadata", refresh) }
+  }, [watchMode, captionFiles, uploadedCaption, activeStream?.url])
+
   React.useEffect(() => {
     const el = video.current
-    if (!el || !el.textTracks) return
-    for (let i = 0; i < el.textTracks.length; i++) {
-      el.textTracks[i].mode = subtitlesEnabled ? (i === 0 ? "showing" : "hidden") : "disabled"
+    if (!el) return
+    const index = subtitlesEnabled ? selectedCaptionIndex : undefined
+    const track = index === undefined ? null : el.textTracks[index]
+    for (const item of Array.from(el.textTracks)) {
+      if (item.kind !== "subtitles" && item.kind !== "captions") continue
+      const mode = item === track ? (pipActive ? "showing" : "hidden") : "disabled"
+      if (item.mode !== mode) item.mode = mode
     }
-  }, [subtitlesEnabled, tracks, activeStream?.url])
+    function refresh() {
+      if (!track || pipActive || !el) { setCaptionText(""); return }
+      const time = el.currentTime - captionDelay
+      const cues = Array.from(track.cues || [])
+      setCaptionText(cues.filter(cue => cue.startTime <= time && time < cue.endTime).map(captionPlainText).filter(Boolean).join("\n"))
+    }
+    refresh()
+    track?.addEventListener("cuechange", refresh)
+    el.addEventListener("timeupdate", refresh)
+    el.addEventListener("seeked", refresh)
+    el.addEventListener("loadeddata", refresh)
+    return () => { track?.removeEventListener("cuechange", refresh); el.removeEventListener("timeupdate", refresh); el.removeEventListener("seeked", refresh); el.removeEventListener("loadeddata", refresh) }
+  }, [watchMode, subtitlesEnabled, selectedCaptionIndex, captionOptions, captionDelay, pipActive, activeStream?.url])
+
+  React.useEffect(() => {
+    if (!watchMode) return
+    const el = video.current as PipVideo | null
+    if (!el) return
+    const doc = document as PipDocument
+    const refresh = () => {
+      setPipSupported(Boolean((doc.pictureInPictureEnabled && el.requestPictureInPicture) || el.webkitSupportsPresentationMode?.("picture-in-picture")))
+      setPipActive(doc.pictureInPictureElement === el || el.webkitPresentationMode === "picture-in-picture")
+    }
+    refresh()
+    for (const event of ["loadedmetadata", "enterpictureinpicture", "leavepictureinpicture", "webkitpresentationmodechanged"]) el.addEventListener(event, refresh)
+    return () => { for (const event of ["loadedmetadata", "enterpictureinpicture", "leavepictureinpicture", "webkitpresentationmodechanged"]) el.removeEventListener(event, refresh) }
+  }, [watchMode, activeStream?.url])
+
+  React.useEffect(() => {
+    setControlsVisible(true)
+    if (controlsTimer.current !== undefined) window.clearTimeout(controlsTimer.current)
+    if (isPlaying && !playerMenu && !error && !buffering) controlsTimer.current = window.setTimeout(() => setControlsVisible(false), 3000)
+    return () => { if (controlsTimer.current !== undefined) window.clearTimeout(controlsTimer.current) }
+  }, [isPlaying, playerMenu, error, buffering])
+
+  function wakeControls() {
+    setControlsVisible(true)
+    if (controlsTimer.current !== undefined) window.clearTimeout(controlsTimer.current)
+    if (isPlaying && !playerMenu && !error && !buffering) controlsTimer.current = window.setTimeout(() => setControlsVisible(false), 3000)
+  }
+
+  async function uploadCaption(file: File | undefined) {
+    if (!file) return
+    try {
+      if (file.size > 2_000_000) throw Error("Subtitle file must be under 2 MB.")
+      const converted = subtitleVtt(await file.text())
+      if (uploadedUrl.current) URL.revokeObjectURL(uploadedUrl.current)
+      const url = URL.createObjectURL(new Blob([converted], { type: "text/vtt" }))
+      uploadedUrl.current = url
+      setUploadedCaption({ id: "upload", url, label: file.name, language: "und" })
+      setCaptionChoice("auto")
+      setCaptionMessage("Subtitle uploaded. Select the uploaded track in this menu.")
+      updateCaptionEnabled(true)
+    } catch (reason) { setCaptionMessage(reason instanceof Error ? reason.message : "Subtitle upload failed.") }
+  }
+  function updateCaptionEnabled(enabled: boolean) {
+    setSubtitlesEnabled(enabled)
+    const st = getStore()
+    saveStore({ ...st, preferences: { ...st.preferences, playerSubtitles: enabled } })
+  }
+  function updateCaptionAppearance(size: number, background: boolean) {
+    setCaptionSize(size)
+    setCaptionBackground(background)
+    const st = getStore()
+    saveStore({ ...st, preferences: { ...st.preferences, playerCaptionSize: size, playerCaptionBackground: background } })
+  }
+  async function togglePip() {
+    const el = video.current as PipVideo | null
+    if (!el) return
+    const doc = document as PipDocument
+    try {
+      if (doc.pictureInPictureElement === el && doc.exitPictureInPicture) await doc.exitPictureInPicture()
+      else if (doc.pictureInPictureEnabled && el.requestPictureInPicture) await el.requestPictureInPicture()
+      else if (el.webkitSupportsPresentationMode?.("picture-in-picture")) el.webkitSetPresentationMode?.(el.webkitPresentationMode === "picture-in-picture" ? "inline" : "picture-in-picture")
+      else setPlayerNotice("Picture-in-Picture is not supported in this browser.")
+    } catch { setPlayerNotice("Picture-in-Picture is unavailable for the current video.") }
+  }
+  function chooseQuality(index: number) {
+    if (hlsInstance.current) {
+      hlsInstance.current.currentLevel = index
+      setQualityLevel(index)
+    }
+  }
 
   // Watch progress recording & AniList cross-device sync
   function record(force = false, ended = false) {
@@ -556,7 +776,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
   }
 
   function toggleSubtitles() {
-    setSubtitlesEnabled(prev => !prev)
+    updateCaptionEnabled(!subtitlesEnabled)
   }
 
   // Keyboard shortcuts
@@ -599,7 +819,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
 
     window.addEventListener("keydown", handleKeyDown)
     return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [watchMode, selected, total])
+  }, [watchMode, selected, total, subtitlesEnabled])
 
   const thumbnails = new Map<number, string>()
   for (const x of (m as any).streamingEpisodes || []) {
@@ -899,6 +1119,9 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
           {/* Video Player Wrapper */}
           <div
             data-player-wrapper
+            onMouseMove={wakeControls}
+            onTouchStart={wakeControls}
+            onFocusCapture={wakeControls}
             className="relative w-full aspect-video max-h-[78dvh] bg-black rounded-xl overflow-hidden border border-neutral-800 shadow-2xl flex flex-col justify-end group"
           >
             {/* Loading Indicator */}
@@ -949,7 +1172,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
               playsInline
               preload="auto"
               className="absolute inset-0 w-full h-full object-contain bg-black"
-              onClick={togglePlay}
+              onClick={() => { if (playerMenu) setPlayerMenu(null); else togglePlay(); wakeControls() }}
               onDoubleClick={toggleFullscreen}
               onLoadedMetadata={e => setDuration(Number.isFinite(e.currentTarget.duration) ? e.currentTarget.duration : 0)}
               onDurationChange={e => setDuration(Number.isFinite(e.currentTarget.duration) ? e.currentTarget.duration : 0)}
@@ -994,17 +1217,21 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
                 setError(message + " Retry playback.")
               }}
             >
-              {tracks.map((t, idx) => (
-                <track
-                  key={idx}
-                  kind="subtitles"
-                  src={t.url}
-                  srcLang={t.lang || "en"}
-                  label={t.lang || "English"}
-                  default={idx === 0}
-                />
+              {[...captionFiles, ...(uploadedCaption ? [uploadedCaption] : [])].map(t => (
+                <track key={t.id + t.url} kind="subtitles" src={t.url} srcLang={t.language} label={t.label}
+                  onError={() => setCaptionMessage("A subtitle track could not be read by the browser.")} />
               ))}
             </video>
+            <div className="absolute top-3 right-3 sm:top-5 sm:right-5 z-10 pointer-events-none flex items-center gap-2 text-white drop-shadow-lg">
+              <span className="hidden sm:inline text-[9px] tracking-[0.2em] uppercase text-white/75">Powered by</span>
+              <img src="/anidash-logo.png" alt="AniDash" className="size-6 sm:size-8 object-contain" />
+              <span className="text-xs sm:text-sm font-extrabold tracking-tight">AniDash</span>
+            </div>
+            {captionText && subtitlesEnabled && !pipActive && (
+              <div aria-live="off" className={`absolute inset-x-3 z-20 pointer-events-none text-center flex justify-center transition-all ${controlsVisible || playerMenu ? "bottom-24 sm:bottom-28" : "bottom-6 sm:bottom-10"}`}>
+                <span className="max-w-[90%] whitespace-pre-line rounded px-2 py-1 font-semibold leading-snug text-white" style={{ fontSize: `clamp(${12 * captionSize}px, ${2.4 * captionSize}vw, ${27 * captionSize}px)`, background: captionBackground ? "rgba(0,0,0,.75)" : "transparent", textShadow: "0 1px 3px #000, 0 0 2px #000" }}>{captionText}</span>
+              </div>
+            )}
             {!isPlaying && !buffering && !isLoadingStream && !error && activeStream?.url && (
               <button type="button" aria-label="Play video" onClick={togglePlay} className="absolute inset-0 m-auto z-10 size-14 sm:size-16 rounded-full bg-black/60 border border-white/30 text-white grid place-items-center hover:bg-white hover:text-black transition">
                 <LuPlay className="size-7 fill-current" />
@@ -1018,7 +1245,42 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
               </button>
             )}
           {/* AniDash custom player controls */}
-          <div className="absolute inset-x-0 bottom-0 z-30 flex flex-col gap-2 bg-gradient-to-t from-black via-black/80 to-transparent px-3 sm:px-5 pt-8 pb-3 text-white text-sm">
+          <div className={`absolute inset-x-0 bottom-0 z-30 flex flex-col gap-1.5 bg-gradient-to-t from-black/75 to-transparent px-2 sm:px-5 pt-8 pb-2 sm:pb-4 text-white text-sm transition-opacity duration-200 ${controlsVisible || playerMenu || !isPlaying ? "opacity-100" : "opacity-0 pointer-events-none"}`}>
+            <input ref={subtitleInput} type="file" accept=".vtt,.srt,text/vtt" className="hidden" onChange={e => { void uploadCaption(e.currentTarget.files?.[0]); e.currentTarget.value = "" }} />
+            {playerNotice && <button type="button" onClick={() => setPlayerNotice("")} className="self-end text-xs rounded-lg bg-black/85 px-3 py-2">{playerNotice} · Dismiss</button>}
+            {playerMenu && (
+              <div role="dialog" aria-label={playerMenu === "appearance" ? "Subtitle appearance" : playerMenu} className="absolute right-3 sm:right-5 bottom-[82px] w-[min(19rem,calc(100%-1.5rem))] max-h-[65%] sm:max-h-[70%] overflow-y-auto rounded-2xl border border-white/15 bg-[#13171e]/95 backdrop-blur-xl shadow-2xl text-white">
+                <div className="sticky top-0 flex items-center gap-2 border-b border-white/10 bg-[#171c23] px-4 py-3 text-sm font-semibold">
+                  {playerMenu === "quality" || playerMenu === "speed" || playerMenu === "appearance" ? <button type="button" className="grid size-6 place-items-center" aria-label="Back" onClick={() => setPlayerMenu(playerMenu === "appearance" ? "subtitles" : "settings")}><LuChevronLeft /></button> : playerMenu === "settings" ? <LuSettings /> : <LuCaptions />}
+                  {({ settings: "Settings", quality: "Quality", speed: "Speed", subtitles: "Subtitles", appearance: "Appearance" })[playerMenu]}
+                  <button type="button" aria-label="Close menu" className="ml-auto text-white/60 text-lg leading-none" onClick={() => setPlayerMenu(null)}>×</button>
+                </div>
+                <div className="p-2 space-y-1">
+                  {playerMenu === "settings" && <>
+                    <button type="button" className={menuRowClass} onClick={() => setPlayerMenu("quality")}><span>Quality</span><span className="flex items-center gap-2 text-xs text-white/65">{hlsLevels.length ? (qualityLevel === -1 ? "Auto" : hlsLevels.find(l => l.index === qualityLevel)?.label) : activeStream?.quality || "Source"}<LuChevronRight /></span></button>
+                    <button type="button" className={menuRowClass} onClick={() => setPlayerMenu("speed")}><span>Speed</span><span className="flex items-center gap-2 text-xs text-white/65">{playbackRate === 1 ? "Normal" : playbackRate + "×"}<LuChevronRight /></span></button>
+                  </>}
+                  {playerMenu === "quality" && <>
+                    {hlsLevels.length > 0 ? [{ index: -1, label: "Auto" }, ...hlsLevels].map(level => <button key={level.index} type="button" className={menuRowClass} onClick={() => { chooseQuality(level.index); setPlayerMenu("settings") }}><span>{level.label}</span><span>{qualityLevel === level.index ? "✓" : ""}</span></button>) : streams.length > 1 ? streams.map((stream, index) => <button key={index} type="button" className={menuRowClass} onClick={() => { record(true); setActiveStream(stream); setPlayerMenu("settings") }}><span>{stream.quality || "Stream " + (index + 1)}</span><span>{activeStream?.url === stream.url ? "✓" : ""}</span></button>) : <p className="p-3 text-xs text-white/60">Only the current media quality is available.</p>}
+                  </>}
+                  {playerMenu === "speed" && [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2].map(rate => <button key={rate} type="button" className={menuRowClass} onClick={() => { if (video.current) video.current.playbackRate = rate; setPlayerMenu("settings") }}><span>{rate === 1 ? "Normal" : rate + "×"}</span><span>{playbackRate === rate ? "✓" : ""}</span></button>)}
+                  {playerMenu === "subtitles" && <>
+                    <button type="button" className={menuRowClass + (!subtitlesEnabled ? " bg-white/15" : "")} onClick={() => updateCaptionEnabled(false)}><span>Off</span><span>{!subtitlesEnabled ? "✓" : ""}</span></button>
+                    {captionOptions.map(option => <button key={option.index} type="button" className={menuRowClass + (subtitlesEnabled && selectedCaptionIndex === option.index ? " bg-white/15" : "")} onClick={() => { setCaptionChoice(String(option.index)); updateCaptionEnabled(true) }}><span className="truncate">{option.label}</span><span>{subtitlesEnabled && selectedCaptionIndex === option.index ? "✓" : ""}</span></button>)}
+                    {!captionOptions.length && <p className="px-3 py-1 text-xs text-white/55">No subtitle tracks available for this media.</p>}
+                    {captionMessage && <p role="status" className="px-3 py-1 text-xs text-white/60">{captionMessage}</p>}
+                    <div className="border-t border-white/10 mt-2 pt-2 flex items-center justify-between px-3 py-2 text-sm"><span>Delay</span><div className="flex items-center gap-2"><button aria-label="Decrease subtitle delay" type="button" className="grid size-8 place-items-center rounded-lg bg-white/10" onClick={() => setCaptionDelay(v => Math.max(-10, Math.round((v - 0.25) * 100) / 100))}>−</button><button title="Reset delay" type="button" className="min-w-12 text-center text-xs tabular-nums" onClick={() => setCaptionDelay(0)}>{captionDelay.toFixed(2)}s</button><button aria-label="Increase subtitle delay" type="button" className="grid size-8 place-items-center rounded-lg bg-white/10" onClick={() => setCaptionDelay(v => Math.min(10, Math.round((v + 0.25) * 100) / 100))}>+</button></div></div>
+                    <button type="button" className={menuRowClass} onClick={() => subtitleInput.current?.click()}><span className="flex items-center gap-2"><LuUpload />Upload Subtitle</span><LuChevronRight /></button>
+                    <button type="button" className={menuRowClass} onClick={() => setPlayerMenu("appearance")}><span>Appearance</span><LuChevronRight /></button>
+                  </>}
+                  {playerMenu === "appearance" && <>
+                    <p className="px-3 pt-2 text-xs text-white/55">Text size</p>
+                    {[0.8, 1, 1.25, 1.5].map((size, i) => <button key={size} type="button" className={menuRowClass} onClick={() => updateCaptionAppearance(size, captionBackground)}><span>{["Small", "Normal", "Large", "Extra large"][i]}</span><span>{captionSize === size ? "✓" : ""}</span></button>)}
+                    <button type="button" className={menuRowClass} role="switch" aria-checked={captionBackground} onClick={() => updateCaptionAppearance(captionSize, !captionBackground)}><span>Text background</span><span>{captionBackground ? "On" : "Off"}</span></button>
+                  </>}
+                </div>
+              </div>
+            )}
             <div className="relative mx-1 h-5 flex items-center focus-within:ring-2 focus-within:ring-white/80 rounded">
               <div className="absolute inset-x-0 h-1.5 rounded-full bg-white/25 overflow-hidden pointer-events-none">
                 <div className="absolute inset-y-0 left-0 bg-white/75" style={{ width: progressPercent + "%" }} />
@@ -1035,85 +1297,23 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
                 className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
               />
             </div>
-            <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={togglePlay}
-                aria-label={isPlaying ? "Pause (Space/K)" : "Play (Space/K)"}
-                className="p-2 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-white transition"
-              >
-                {isPlaying ? <LuPause className="size-4" /> : <LuPlay className="size-4" />}
-              </button>
-              <button
-                type="button"
-                onClick={() => seekRel(-10)}
-                aria-label="Rewind 10 seconds (Left Arrow / J)"
-                className="p-2 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-white transition flex items-center gap-1 text-xs font-semibold"
-              >
-                <LuRotateCcw className="size-3.5" /> -10s
-              </button>
-              <button
-                type="button"
-                onClick={() => seekRel(10)}
-                aria-label="Forward 10 seconds (Right Arrow / L)"
-                className="p-2 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-white transition flex items-center gap-1 text-xs font-semibold"
-              >
-                <LuRotateCw className="size-3.5" /> +10s
-              </button>
-              {selected < total && (
-                <button
-                  type="button"
-                  onClick={() => openEpisode(selected + 1)}
-                  aria-label="Next episode (N)"
-                  className="px-2.5 py-1.5 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-white transition text-xs font-semibold flex items-center gap-1"
-                >
-                  Next ep <LuChevronRight className="size-3.5" />
-                </button>
-              )}
-              <span className="text-xs text-white/80 tabular-nums ml-1">
-                {formatSeconds(currentTime)} / {formatSeconds(duration)}
-              </span>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={toggleSubtitles}
-                aria-label="Toggle subtitles (C)"
-                aria-pressed={subtitlesEnabled}
-                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 ${
-                  subtitlesEnabled
-                    ? "bg-white text-black shadow"
-                    : "bg-neutral-800 text-neutral-400 hover:bg-neutral-700"
-                }`}
-              >
-                <LuCaptions className="size-3.5" /> CC {subtitlesEnabled ? "ON" : "OFF"}
-              </button>
-              <button
-                type="button"
-                onClick={toggleMute}
-                aria-label="Mute / Unmute (M)"
-                className="p-2 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-white transition"
-              >
-                {isMuted ? <LuVolumeX className="size-4" /> : <LuVolume2 className="size-4" />}
-              </button>
-              <input type="range" aria-label="Volume" min={0} max={1} step={0.05} value={isMuted ? 0 : volume}
-                onChange={e => { const el = video.current; if (el) { el.muted = false; el.volume = Number(e.target.value) } }}
-                className="hidden sm:block w-16 accent-white" />
-              <select aria-label="Playback speed" value={playbackRate} onChange={e => { if (video.current) video.current.playbackRate = Number(e.target.value) }}
-                className="bg-neutral-800 rounded-lg px-1.5 py-1.5 text-xs text-white">
-                {[0.5, 0.75, 1, 1.25, 1.5, 2].map(rate => <option key={rate} value={rate}>{rate}×</option>)}
-              </select>
-              <button
-                type="button"
-                onClick={toggleFullscreen}
-                aria-label="Fullscreen (F)"
-                className="p-2 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-white transition"
-              >
-                <LuMaximize className="size-4" />
-              </button>
-            </div>
+            <div className="flex items-center justify-between gap-1 rounded-xl sm:rounded-2xl border border-white/15 bg-black/35 backdrop-blur-md px-1.5 sm:px-3 py-1">
+              <div className="flex items-center gap-0.5 sm:gap-2 min-w-0">
+                <button type="button" className={controlClass} onClick={togglePlay} aria-label={isPlaying ? "Pause" : "Play"}>{isPlaying ? <LuPause className="size-5" /> : <LuPlay className="size-5 fill-current" />}</button>
+                <button type="button" className={controlClass} onClick={toggleMute} aria-label={isMuted ? "Unmute" : "Mute"}>{isMuted ? <LuVolumeX className="size-5" /> : <LuVolume2 className="size-5" />}</button>
+                <input type="range" aria-label="Volume" min={0} max={1} step={0.05} value={isMuted ? 0 : volume} onChange={e => { const el = video.current; if (el) { el.muted = false; el.volume = Number(e.target.value) } }} className="hidden lg:block w-16 accent-white" />
+                <span className="whitespace-nowrap text-[10px] sm:text-xs tabular-nums px-0.5 sm:px-2">{formatSeconds(currentTime)} <span className="text-white/50">| {formatSeconds(duration)}</span></span>
+              </div>
+              <div className="flex items-center gap-0 sm:gap-1">
+                <button type="button" className={controlClass + " hidden sm:grid"} aria-label="Back 10 seconds" onClick={() => seekRel(-10)}><LuRotateCcw className="size-5" /></button>
+                <button type="button" className={controlClass + " hidden sm:grid"} aria-label="Forward 10 seconds" onClick={() => seekRel(10)}><LuRotateCw className="size-5" /></button>
+                <button type="button" className={controlClass + (playerMenu === "subtitles" || playerMenu === "appearance" ? " bg-white/20" : "")} aria-label={"Subtitles: " + (subtitlesEnabled ? captionLabel : "Off")} aria-expanded={playerMenu === "subtitles" || playerMenu === "appearance"} onClick={() => setPlayerMenu(playerMenu === "subtitles" || playerMenu === "appearance" ? null : "subtitles")}><LuCaptions className="size-5" /></button>
+                <button type="button" className={controlClass + (pipActive ? " bg-white/20" : "")} title={pipSupported ? "Picture-in-Picture" : "Picture-in-Picture unavailable"} aria-label="Picture-in-Picture" aria-pressed={pipActive} disabled={!pipSupported || !duration} onClick={() => void togglePip()}><PipIcon /></button>
+                <button type="button" className={controlClass + (playerMenu === "settings" || playerMenu === "quality" || playerMenu === "speed" ? " bg-white/20" : "")} aria-label="Player settings" aria-expanded={playerMenu === "settings" || playerMenu === "quality" || playerMenu === "speed"} onClick={() => setPlayerMenu(playerMenu === "settings" || playerMenu === "quality" || playerMenu === "speed" ? null : "settings")}><LuSettings className="size-5" /></button>
+                <button type="button" className={controlClass + " hidden sm:grid"} aria-label="Next episode" disabled={selected >= total} onClick={() => openEpisode(selected + 1)}><NextIcon /></button>
+                <span className="hidden sm:block h-5 w-px bg-white/15 mx-1" />
+                <button type="button" className={controlClass} aria-label="Fullscreen" onClick={toggleFullscreen}><LuMaximize className="size-5" /></button>
+              </div>
             </div>
           </div>
           </div>
