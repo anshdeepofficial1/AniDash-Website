@@ -95,6 +95,9 @@ const PAGE_SIZE = 24
 const storageKey = "anidash.watch.web.v1"
 const JUSTANIME_SERVERS = ["momo", "onyx", "gigi", "nami", "calm", "revo"] as const
 const DEFAULT_SERVER = "onyx"
+const CONTROL_IDLE_MS = 3000
+const FULLSCREEN_DOUBLE_TAP_MS = 170
+const FULLSCREEN_DOUBLE_TAP_RADIUS = 24
 type SkipInterval = { start: number; end: number }
 type SkipSegments = { intro: SkipInterval | null; outro: SkipInterval | null }
 const EMPTY_SEGMENTS: SkipSegments = { intro: null, outro: null }
@@ -222,6 +225,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
   const video = React.useRef<HTMLVideoElement>(null)
   const playerWrapper = React.useRef<HTMLDivElement>(null)
   const surfaceClickTimer = React.useRef<number | undefined>(undefined)
+  const lastSurfaceTap = React.useRef<{ at: number; x: number; y: number } | null>(null)
   const pointerDragging = React.useRef(false)
   const lastPointer = React.useRef<{ x: number; y: number } | null>(null)
   const hlsInstance = React.useRef<Hls | null>(null)
@@ -606,8 +610,8 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     return () => { for (const event of ["loadedmetadata", "enterpictureinpicture", "leavepictureinpicture", "webkitpresentationmodechanged"]) el.removeEventListener(event, refresh) }
   }, [watchMode, activeStream?.url])
 
-  // One inactivity timer: never hide while paused, buffering, dragging or a menu is open.
-  const canHideControls = isPlaying && !playerMenu && !error && !buffering && !isLoadingStream
+  // The paused frame is also clean after inactivity; keep controls available for menus, loading and errors.
+  const canHideControls = !!activeStream?.url && !playerMenu && !error && !buffering && !isLoadingStream
   const hideAllowedRef = React.useRef(canHideControls)
   hideAllowedRef.current = canHideControls
 
@@ -624,16 +628,19 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
       if (!hideAllowedRef.current || pointerDragging.current) return
       const wrapper = playerWrapper.current
       const focused = document.activeElement
-      // Do not hide an actively keyboard-focused control.
-      if (wrapper && focused instanceof HTMLElement && focused !== wrapper && wrapper.contains(focused) && focused.matches(":focus-visible")) return
+      // A focused control must not block auto-hide indefinitely or retain hidden focus.
+      if (wrapper && focused instanceof HTMLElement && focused !== wrapper && wrapper.contains(focused)) {
+        wrapper.focus({ preventScroll: true })
+        cancelHide()
+      }
       setControlsVisible(false)
-    }, 3000)
+    }, CONTROL_IDLE_MS)
   }, [cancelHide])
 
   React.useEffect(() => {
     wakeControls()
     return cancelHide
-  }, [canHideControls, watchMode, wakeControls, cancelHide])
+  }, [canHideControls, isPlaying, watchMode, wakeControls, cancelHide])
 
   function focusPlayer() {
     playerWrapper.current?.focus({ preventScroll: true })
@@ -654,6 +661,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     if (!(target instanceof Element)) return
     if (target.closest('input:not([type="range"]),textarea,select,a,[contenteditable="true"]')) return
     if (target.closest('button,[role="button"],[data-player-wrapper]')) {
+      if (target.closest('button,[role="button"]')) cancelSurfaceTap()
       focusPlayer()
       wakeControls()
     }
@@ -685,25 +693,42 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
       document.removeEventListener("fullscreenchange", fullscreenChanged)
       document.removeEventListener("webkitfullscreenchange", fullscreenChanged)
       if (surfaceClickTimer.current !== undefined) window.clearTimeout(surfaceClickTimer.current)
+      surfaceClickTimer.current = undefined
+      lastSurfaceTap.current = null
       pointerDragging.current = false
     }
   }, [watchMode, wakeControls])
 
-  function clickVideoSurface(e: React.MouseEvent<HTMLVideoElement>) {
-    wakeControls()
-    if (playerMenu) { setPlayerMenu(null); focusPlayer(); return }
-    if (e.detail > 1) return
-    if (surfaceClickTimer.current !== undefined) window.clearTimeout(surfaceClickTimer.current)
-    surfaceClickTimer.current = window.setTimeout(() => {
-      surfaceClickTimer.current = undefined
-      togglePlay()
-    }, 220)
-  }
-
-  function doubleClickVideoSurface() {
+  function cancelSurfaceTap() {
     if (surfaceClickTimer.current !== undefined) window.clearTimeout(surfaceClickTimer.current)
     surfaceClickTimer.current = undefined
-    toggleFullscreen()
+    lastSurfaceTap.current = null
+  }
+
+  function clickVideoSurface(e: React.MouseEvent<HTMLVideoElement>) {
+    wakeControls()
+    if (playerMenu) { cancelSurfaceTap(); setPlayerMenu(null); focusPlayer(); return }
+    if (e.button !== 0) return
+    const now = performance.now()
+    const previous = lastSurfaceTap.current
+    const pending = surfaceClickTimer.current !== undefined
+    const closeEnough = previous && Math.hypot(e.clientX - previous.x, e.clientY - previous.y) <= FULLSCREEN_DOUBLE_TAP_RADIUS
+    // Do not use the browser's slower, OS-dependent dblclick interval.
+    if (pending && previous && closeEnough && now - previous.at <= FULLSCREEN_DOUBLE_TAP_MS) {
+      cancelSurfaceTap()
+      toggleFullscreen()
+      return
+    }
+    if (pending) {
+      cancelSurfaceTap()
+      togglePlay()
+    }
+    lastSurfaceTap.current = { at: now, x: e.clientX, y: e.clientY }
+    surfaceClickTimer.current = window.setTimeout(() => {
+      surfaceClickTimer.current = undefined
+      lastSurfaceTap.current = null
+      togglePlay()
+    }, FULLSCREEN_DOUBLE_TAP_MS)
   }
 
   async function uploadCaption(file: File | undefined) {
@@ -899,6 +924,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     const changeVolume = ["ArrowUp", "ArrowDown"].includes(e.code)
     const action = ["Space", "KeyK", "KeyN", "KeyC", "KeyM", "KeyF", "KeyP"].includes(e.code)
     if (!seek && !changeVolume && !action) return
+    cancelSurfaceTap()
     e.preventDefault()
     e.stopPropagation()
     if (e.repeat && !seek && !changeVolume) return
@@ -1229,8 +1255,8 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
             onPointerMove={onPlayerPointerMove}
             onPointerDown={wakeControls}
             onFocusCapture={wakeControls}
-            className={`relative w-full aspect-video max-h-[78dvh] bg-black rounded-xl overflow-hidden border border-neutral-800 shadow-2xl flex flex-col justify-end group outline-none ${controlsVisible || playerMenu || !isPlaying ? "" : "cursor-none"}`}
-            style={{ isolation: "isolate" }}
+            className={`relative w-full aspect-video max-h-[78dvh] bg-black rounded-xl overflow-hidden border border-neutral-800 shadow-2xl flex flex-col justify-end group outline-none ${controlsVisible || playerMenu ? "" : "cursor-none"}`}
+            style={{ isolation: "isolate", touchAction: "manipulation" }}
           >
             {/* Loading Indicator */}
             {isLoadingStream && (
@@ -1281,7 +1307,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
               preload="auto"
               className="absolute inset-0 w-full h-full object-contain bg-black"
               onClick={clickVideoSurface}
-              onDoubleClick={doubleClickVideoSurface}
+              onDoubleClick={e => e.preventDefault()}
               onLoadedMetadata={e => setDuration(Number.isFinite(e.currentTarget.duration) ? e.currentTarget.duration : 0)}
               onDurationChange={e => setDuration(Number.isFinite(e.currentTarget.duration) ? e.currentTarget.duration : 0)}
               onPlay={() => { setIsPlaying(true); setBuffering(true) }}
@@ -1341,13 +1367,13 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
                 <span className="max-w-[90%] whitespace-pre-line rounded px-2 py-1 font-semibold leading-snug text-white" style={{ fontSize: `clamp(${12 * captionSize}px, ${2.4 * captionSize}vw, ${27 * captionSize}px)`, background: captionBackground ? "rgba(0,0,0,.75)" : "transparent", textShadow: "0 1px 3px #000, 0 0 2px #000" }}>{captionText}</span>
               </div>
             )}
-            {!isPlaying && !buffering && !isLoadingStream && !error && activeStream?.url && (
+            {controlsVisible && !isPlaying && !buffering && !isLoadingStream && !error && activeStream?.url && (
               <button type="button" aria-label="Play video" onClick={togglePlay} className="absolute inset-0 m-auto z-10 size-14 sm:size-16 rounded-full bg-black/60 border border-white/30 text-white grid place-items-center hover:bg-white hover:text-black transition">
                 <LuPlay className="size-7 fill-current" />
               </button>
             )}
 
-            {currentSegment && !error && !isLoadingStream && !buffering && (
+            {controlsVisible && currentSegment && !error && !isLoadingStream && !buffering && (
               <button type="button" onClick={() => skipSegment(currentSegment)}
                 className="absolute right-4 bottom-24 sm:bottom-20 z-30 rounded-lg border border-white/40 bg-black/85 px-4 py-2 text-sm font-semibold text-white shadow-lg hover:bg-white hover:text-black transition">
                 Skip {currentSegment.kind === "intro" ? "Intro" : "Outro"} <LuChevronRight className="inline size-4" />
@@ -1387,7 +1413,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
               </div>
             )}
           {/* AniDash custom player controls */}
-          <div className={`absolute inset-x-0 bottom-0 z-30 flex flex-col gap-1.5 bg-gradient-to-t from-black/75 to-transparent px-2 sm:px-5 pt-8 pb-2 sm:pb-4 text-white text-sm transition-opacity duration-200 ${controlsVisible || playerMenu || !isPlaying ? "opacity-100" : "opacity-0 pointer-events-none"}`}>
+          <div className={`absolute inset-x-0 bottom-0 z-30 flex flex-col gap-1.5 bg-gradient-to-t from-black/75 to-transparent px-2 sm:px-5 pt-8 pb-2 sm:pb-4 text-white text-sm transition-opacity duration-200 ${controlsVisible || playerMenu ? "opacity-100" : "opacity-0 pointer-events-none"}`}>
             <input ref={subtitleInput} type="file" accept=".vtt,.srt,text/vtt" className="hidden" onChange={e => { void uploadCaption(e.currentTarget.files?.[0]); e.currentTarget.value = "" }} />
             {playerNotice && <button type="button" onClick={() => setPlayerNotice("")} className="self-end text-xs rounded-lg bg-black/85 px-3 py-2">{playerNotice} · Dismiss</button>}
             <div className="relative mx-1 h-5 flex items-center focus-within:ring-2 focus-within:ring-white/80 rounded">
