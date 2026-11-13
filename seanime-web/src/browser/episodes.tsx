@@ -220,6 +220,10 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
   const [metaRevision, setMetaRevision] = React.useState(0)
 
   const video = React.useRef<HTMLVideoElement>(null)
+  const playerWrapper = React.useRef<HTMLDivElement>(null)
+  const surfaceClickTimer = React.useRef<number | undefined>(undefined)
+  const pointerDragging = React.useRef(false)
+  const lastPointer = React.useRef<{ x: number; y: number } | null>(null)
   const hlsInstance = React.useRef<Hls | null>(null)
   const subtitleInput = React.useRef<HTMLInputElement>(null)
   const uploadedUrl = React.useRef<string | null>(null)
@@ -602,17 +606,104 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     return () => { for (const event of ["loadedmetadata", "enterpictureinpicture", "leavepictureinpicture", "webkitpresentationmodechanged"]) el.removeEventListener(event, refresh) }
   }, [watchMode, activeStream?.url])
 
-  React.useEffect(() => {
-    setControlsVisible(true)
-    if (controlsTimer.current !== undefined) window.clearTimeout(controlsTimer.current)
-    if (isPlaying && !playerMenu && !error && !buffering) controlsTimer.current = window.setTimeout(() => setControlsVisible(false), 3000)
-    return () => { if (controlsTimer.current !== undefined) window.clearTimeout(controlsTimer.current) }
-  }, [isPlaying, playerMenu, error, buffering])
+  // One inactivity timer: never hide while paused, buffering, dragging or a menu is open.
+  const canHideControls = isPlaying && !playerMenu && !error && !buffering && !isLoadingStream
+  const hideAllowedRef = React.useRef(canHideControls)
+  hideAllowedRef.current = canHideControls
 
-  function wakeControls() {
-    setControlsVisible(true)
+  const cancelHide = React.useCallback(() => {
     if (controlsTimer.current !== undefined) window.clearTimeout(controlsTimer.current)
-    if (isPlaying && !playerMenu && !error && !buffering) controlsTimer.current = window.setTimeout(() => setControlsVisible(false), 3000)
+    controlsTimer.current = undefined
+  }, [])
+  const wakeControls = React.useCallback(() => {
+    setControlsVisible(true)
+    cancelHide()
+    if (!hideAllowedRef.current || pointerDragging.current) return
+    controlsTimer.current = window.setTimeout(() => {
+      controlsTimer.current = undefined
+      if (!hideAllowedRef.current || pointerDragging.current) return
+      const wrapper = playerWrapper.current
+      const focused = document.activeElement
+      // Do not hide an actively keyboard-focused control.
+      if (wrapper && focused instanceof HTMLElement && focused !== wrapper && wrapper.contains(focused) && focused.matches(":focus-visible")) return
+      setControlsVisible(false)
+    }, 3000)
+  }, [cancelHide])
+
+  React.useEffect(() => {
+    wakeControls()
+    return cancelHide
+  }, [canHideControls, watchMode, wakeControls, cancelHide])
+
+  function focusPlayer() {
+    playerWrapper.current?.focus({ preventScroll: true })
+  }
+
+  function onPlayerPointerMove(e: React.PointerEvent<HTMLDivElement>) {
+    const last = lastPointer.current
+    if (last && last.x === e.clientX && last.y === e.clientY) return
+    lastPointer.current = { x: e.clientX, y: e.clientY }
+    wakeControls()
+  }
+
+  function returnPointerFocus(e: React.MouseEvent<HTMLElement>) {
+    // A pointer click performs its original action first; then restore player focus.
+    // Keyboard-generated clicks (detail === 0) retain normal accessible focus.
+    if (e.detail === 0) return
+    const target = e.target
+    if (!(target instanceof Element)) return
+    if (target.closest('input:not([type="range"]),textarea,select,a,[contenteditable="true"]')) return
+    if (target.closest('button,[role="button"],[data-player-wrapper]')) {
+      focusPlayer()
+      wakeControls()
+    }
+  }
+
+  function startSliderDrag() {
+    pointerDragging.current = true
+    wakeControls()
+  }
+
+  React.useEffect(() => {
+    if (!watchMode) return
+    const finish = () => {
+      if (!pointerDragging.current) return
+      pointerDragging.current = false
+      focusPlayer()
+      wakeControls()
+    }
+    const fullscreenChanged = () => { focusPlayer(); wakeControls() }
+    window.addEventListener("pointerup", finish)
+    window.addEventListener("pointercancel", finish)
+    window.addEventListener("blur", finish)
+    document.addEventListener("fullscreenchange", fullscreenChanged)
+    document.addEventListener("webkitfullscreenchange", fullscreenChanged)
+    return () => {
+      window.removeEventListener("pointerup", finish)
+      window.removeEventListener("pointercancel", finish)
+      window.removeEventListener("blur", finish)
+      document.removeEventListener("fullscreenchange", fullscreenChanged)
+      document.removeEventListener("webkitfullscreenchange", fullscreenChanged)
+      if (surfaceClickTimer.current !== undefined) window.clearTimeout(surfaceClickTimer.current)
+      pointerDragging.current = false
+    }
+  }, [watchMode, wakeControls])
+
+  function clickVideoSurface(e: React.MouseEvent<HTMLVideoElement>) {
+    wakeControls()
+    if (playerMenu) { setPlayerMenu(null); focusPlayer(); return }
+    if (e.detail > 1) return
+    if (surfaceClickTimer.current !== undefined) window.clearTimeout(surfaceClickTimer.current)
+    surfaceClickTimer.current = window.setTimeout(() => {
+      surfaceClickTimer.current = undefined
+      togglePlay()
+    }, 220)
+  }
+
+  function doubleClickVideoSurface() {
+    if (surfaceClickTimer.current !== undefined) window.clearTimeout(surfaceClickTimer.current)
+    surfaceClickTimer.current = undefined
+    toggleFullscreen()
   }
 
   async function uploadCaption(file: File | undefined) {
@@ -766,8 +857,11 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
   }
 
   function toggleFullscreen() {
-    const container = document.querySelector("[data-player-wrapper]") || video.current
+    const container = playerWrapper.current || video.current
     if (!container) return
+    setPlayerMenu(null)
+    wakeControls()
+    focusPlayer()
     if (document.fullscreenElement) {
       void document.exitFullscreen().catch(() => {})
     } else if (container.requestFullscreen) {
@@ -782,47 +876,52 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     updateCaptionEnabled(!subtitlesEnabled)
   }
 
-  // Keyboard shortcuts
+  // Capture playback shortcuts before a mouse-clicked control can consume Space.
+  // Preserve text editing, Tab navigation and keyboard activation of real controls.
+  const shortcutHandler = React.useRef<(e: KeyboardEvent) => void>(() => {})
+  shortcutHandler.current = (e: KeyboardEvent) => {
+    if (!watchMode || e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey || e.isComposing) return
+    const target = e.target instanceof Element ? e.target : null
+    if (target?.closest('input,textarea,select,[contenteditable]:not([contenteditable="false"]),[role="textbox"]')) return
+    if (e.code === "Escape" && playerMenu) {
+      e.preventDefault()
+      e.stopPropagation()
+      setPlayerMenu(null)
+      focusPlayer()
+      wakeControls()
+      return
+    }
+    const focusedControl = target?.closest('button,[role="button"],[role="switch"],a')
+    if (focusedControl && (e.code === "Space" || e.code === "Enter") && focusedControl.matches(":focus-visible")) return
+    const el = video.current
+    if (!el) return
+    const seek = ["ArrowLeft", "ArrowRight", "KeyJ", "KeyL"].includes(e.code)
+    const changeVolume = ["ArrowUp", "ArrowDown"].includes(e.code)
+    const action = ["Space", "KeyK", "KeyN", "KeyC", "KeyM", "KeyF", "KeyP"].includes(e.code)
+    if (!seek && !changeVolume && !action) return
+    e.preventDefault()
+    e.stopPropagation()
+    if (e.repeat && !seek && !changeVolume) return
+    wakeControls()
+    if (e.code === "Space" || e.code === "KeyK") togglePlay()
+    else if (e.code === "ArrowLeft" || e.code === "KeyJ") seekRel(-10)
+    else if (e.code === "ArrowRight" || e.code === "KeyL") seekRel(10)
+    else if (changeVolume) {
+      el.muted = false
+      el.volume = Math.max(0, Math.min(1, el.volume + (e.code === "ArrowUp" ? 0.05 : -0.05)))
+    }
+    else if (e.code === "KeyN" && selected < total) openEpisode(selected + 1)
+    else if (e.code === "KeyC") toggleSubtitles()
+    else if (e.code === "KeyM") toggleMute()
+    else if (e.code === "KeyF") toggleFullscreen()
+    else if (e.code === "KeyP" && pipSupported) void togglePip()
+  }
   React.useEffect(() => {
     if (!watchMode) return
-    const handleKeyDown = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement | null
-      if (
-        target &&
-        (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "BUTTON" || target.tagName === "SELECT" || target.isContentEditable)
-      ) {
-        return
-      }
-      const el = video.current
-      if (!el) return
-
-      if (e.code === "Space" || e.code === "KeyK") {
-        e.preventDefault()
-        togglePlay()
-      } else if (e.code === "ArrowLeft" || e.code === "KeyJ") {
-        e.preventDefault()
-        seekRel(-10)
-      } else if (e.code === "ArrowRight" || e.code === "KeyL") {
-        e.preventDefault()
-        seekRel(10)
-      } else if (e.code === "KeyN") {
-        e.preventDefault()
-        if (selected < total) openEpisode(selected + 1)
-      } else if (e.code === "KeyC") {
-        e.preventDefault()
-        toggleSubtitles()
-      } else if (e.code === "KeyM") {
-        e.preventDefault()
-        toggleMute()
-      } else if (e.code === "KeyF") {
-        e.preventDefault()
-        toggleFullscreen()
-      }
-    }
-
-    window.addEventListener("keydown", handleKeyDown)
-    return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [watchMode, selected, total, subtitlesEnabled])
+    const handle = (e: KeyboardEvent) => shortcutHandler.current(e)
+    window.addEventListener("keydown", handle, true)
+    return () => window.removeEventListener("keydown", handle, true)
+  }, [watchMode])
 
   const thumbnails = new Map<number, string>()
   for (const x of (m as any).streamingEpisodes || []) {
@@ -846,6 +945,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
   return (
     <section className="space-y-5" data-anidash-browser-episodes>
       <style>{`
+        [data-player-wrapper]:fullscreen, [data-player-wrapper]:-webkit-full-screen { width: 100%; height: 100%; max-width: none; max-height: none; aspect-ratio: auto; border: 0; border-radius: 0; }
         video::cue {
           background-color: rgba(0, 0, 0, 0.8) !important;
           color: #ffffff !important;
@@ -1065,7 +1165,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
 
       {/* Full Watch Player View */}
       {watchMode && (
-        <div data-anidash-watch-page className="w-full max-w-6xl mx-auto p-2 sm:p-4 md:p-6 space-y-4">
+        <div data-anidash-watch-page onClick={returnPointerFocus} className="w-full max-w-6xl mx-auto p-2 sm:p-4 md:p-6 space-y-4">
           {/* Header */}
           <header className="flex items-start justify-between gap-4">
             <div>
@@ -1122,10 +1222,15 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
           {/* Video Player Wrapper */}
           <div
             data-player-wrapper
-            onMouseMove={wakeControls}
-            onTouchStart={wakeControls}
+            ref={playerWrapper}
+            tabIndex={0}
+            role="region"
+            aria-label="AniDash video player"
+            onPointerMove={onPlayerPointerMove}
+            onPointerDown={wakeControls}
             onFocusCapture={wakeControls}
-            className="relative w-full aspect-video max-h-[78dvh] bg-black rounded-xl overflow-hidden border border-neutral-800 shadow-2xl flex flex-col justify-end group"
+            className={`relative w-full aspect-video max-h-[78dvh] bg-black rounded-xl overflow-hidden border border-neutral-800 shadow-2xl flex flex-col justify-end group outline-none ${controlsVisible || playerMenu || !isPlaying ? "" : "cursor-none"}`}
+            style={{ isolation: "isolate" }}
           >
             {/* Loading Indicator */}
             {isLoadingStream && (
@@ -1175,8 +1280,8 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
               playsInline
               preload="auto"
               className="absolute inset-0 w-full h-full object-contain bg-black"
-              onClick={() => { if (playerMenu) setPlayerMenu(null); else togglePlay(); wakeControls() }}
-              onDoubleClick={toggleFullscreen}
+              onClick={clickVideoSurface}
+              onDoubleClick={doubleClickVideoSurface}
               onLoadedMetadata={e => setDuration(Number.isFinite(e.currentTarget.duration) ? e.currentTarget.duration : 0)}
               onDurationChange={e => setDuration(Number.isFinite(e.currentTarget.duration) ? e.currentTarget.duration : 0)}
               onPlay={() => { setIsPlaying(true); setBuffering(true) }}
@@ -1297,6 +1402,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
               <input
                 type="range" aria-label="Playback position" min={0} max={duration > 0 ? duration : 1} step={0.1}
                 disabled={!duration} value={Math.min(currentTime, duration || 1)}
+                onPointerDown={startSliderDrag}
                 onChange={e => { const el = video.current; if (el && duration > 0) { el.currentTime = Number(e.target.value); setCurrentTime(el.currentTime) } }}
                 className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
               />
@@ -1305,7 +1411,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
               <div className="flex items-center gap-0.5 sm:gap-2 min-w-0">
                 <button type="button" className={controlClass} onClick={togglePlay} aria-label={isPlaying ? "Pause" : "Play"}>{isPlaying ? <LuPause className="size-5" /> : <LuPlay className="size-5 fill-current" />}</button>
                 <button type="button" className={controlClass} onClick={toggleMute} aria-label={isMuted ? "Unmute" : "Mute"}>{isMuted ? <LuVolumeX className="size-5" /> : <LuVolume2 className="size-5" />}</button>
-                <input type="range" aria-label="Volume" min={0} max={1} step={0.05} value={isMuted ? 0 : volume} onChange={e => { const el = video.current; if (el) { el.muted = false; el.volume = Number(e.target.value) } }} className="hidden lg:block w-16 accent-white" />
+                <input type="range" aria-label="Volume" min={0} max={1} step={0.05} value={isMuted ? 0 : volume} onPointerDown={startSliderDrag} onChange={e => { const el = video.current; if (el) { el.muted = false; el.volume = Number(e.target.value) } }} className="hidden lg:block w-16 accent-white" />
                 <span className="whitespace-nowrap text-[10px] sm:text-xs tabular-nums px-0.5 sm:px-2">{formatSeconds(currentTime)} <span className="text-white/50">| {formatSeconds(duration)}</span></span>
               </div>
               <div className="flex items-center gap-0 sm:gap-1">
