@@ -356,6 +356,8 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
   // A revision makes a freshly decoded frame available while the pointer stays still.
   void previewRevision
   const manualPlaybackIntent = React.useRef<"play" | "pause" | null>(null)
+  const requestedEpisode = React.useRef<number | null>(null)
+  const mountedMediaEpisode = React.useRef<number | null>(null)
   const playbackStarted = React.useRef(false)
   const autoplayRef = React.useRef(autoplay)
   autoplayRef.current = autoplay
@@ -397,19 +399,41 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
       ? Array.from(new Set([Math.ceil(selected / 100), ...(navigatorMode === "details" ? [activeNavigatorPage] : [])])).join(",")
       : Array.from(new Set(visible.map(e => Math.ceil(e.episodeNumber / 100)))).join(",")
 
-  // Reset episode state when route changes
-  React.useEffect(() => {
-    setSelected(watchEpisode || 0)
-    setNavigatorPage(Math.max(1, Math.ceil((watchEpisode || 1) / 100)))
+  // An episode transition must not replace the fullscreen wrapper or video element.
+  // Clear the previous episode's media before committing the next selected episode.
+  React.useLayoutEffect(() => {
+    const next = watchEpisode || 0
+    const playRequested = requestedEpisode.current === next && next > 0
+    requestedEpisode.current = null
+    mountedMediaEpisode.current = null
+    manualPlaybackIntent.current = playRequested ? "play" : null
+    setActiveStream(null)
+    setStreams([])
+    setTracks([])
+    setSegments(EMPTY_SEGMENTS)
+    setSelected(next)
+    setNavigatorPage(Math.max(1, Math.ceil((next || 1) / 100)))
     setNavigatorJump("")
     setNavigatorError("")
     setError("")
+    setPlayerNotice("")
+    setPlayerMenu(null)
+    setSyncState("")
+    setIsLoadingStream(next > 0)
+    setBuffering(false)
+    setIsPlaying(false)
+    setCurrentTime(0)
+    setDuration(0)
+    setBufferedRanges([])
+    setSeekHover(null)
+    setSeekDraft(null)
+    seekDraftRef.current = null
     setArc("all")
     setPage(1)
-    setMetadata(cachedEpisodeMetadata(m.id, [Math.max(1, Math.ceil((watchEpisode || 1) / 100))]))
-    manualPlaybackIntent.current = null
+    setMetadata(cachedEpisodeMetadata(m.id, [Math.max(1, Math.ceil((next || 1) / 100))]))
     setJump("")
     lastSaved.current = 0
+    lastSynced.current = 0
   }, [entry.mediaId, watchEpisode])
 
   // Scroll the selected episode into view inside the navigator, without moving the video page.
@@ -564,6 +588,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     setError("")
     const el = video.current
     if (!el || !activeStream?.url || !selected) return
+    mountedMediaEpisode.current = selected
 
     let hls: Hls | undefined
     let live = true
@@ -664,6 +689,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
 
     return () => {
       live = false
+      if (mountedMediaEpisode.current === selected) mountedMediaEpisode.current = null
       el.removeEventListener("loadedmetadata", onLoadedMetadata)
       if (hlsInstance.current === hls) hlsInstance.current = null
       hls?.destroy()
@@ -1040,7 +1066,8 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
   // Watch progress recording & AniList cross-device sync
   function record(force = false, ended = false) {
     const el = video.current
-    if (!el || !selected || !Number.isFinite(el.duration) || el.duration <= 0) return
+    if (!el || !selected || mountedMediaEpisode.current !== selected || !Number.isFinite(el.duration) || el.duration <= 0) return
+    ended = ended || el.ended
     if (!force && Date.now() - lastSaved.current < 5000) return
     const position = ended ? el.duration : el.currentTime
     if (position < 1 && !ended) return
@@ -1074,8 +1101,17 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
 
   // Navigation handlers
   function openEpisode(n: number, alreadyRecorded = false) {
-    if (n < 1 || n > total) return
-    if (watchMode && !alreadyRecorded) record(true)
+    if (!Number.isSafeInteger(n) || n < 1 || n > total || (watchMode && n === selected)) return
+    if (watchMode) {
+      if (!alreadyRecorded) record(true)
+      requestedEpisode.current = n
+      mountedMediaEpisode.current = null
+      cancelSurfaceTap()
+      setPlayerMenu(null)
+      // A deliberate episode change is a play request, even if initial autoplay is disabled.
+      router.push(`/entry?id=${entry.mediaId}&episode=${n}`, { resetScroll: false })
+      return
+    }
     router.push(`/entry?id=${entry.mediaId}&episode=${n}`)
   }
 
@@ -1605,11 +1641,13 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
               }}
               onSeeked={e => { updateBuffered(e.currentTarget); rememberDecodedFrame(e.currentTarget); record(true) }}
               onEnded={() => {
+                if (mountedMediaEpisode.current !== selected) return
                 setIsPlaying(false)
                 record(true, true)
                 if (autoNext && selected < total) openEpisode(selected + 1, true)
               }}
               onError={() => {
+                if (mountedMediaEpisode.current !== selected) return
                 setBuffering(false)
                 setIsPlaying(false)
                 const code = video.current?.error?.code
