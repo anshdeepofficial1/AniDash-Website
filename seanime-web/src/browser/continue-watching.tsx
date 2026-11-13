@@ -46,6 +46,10 @@ function ContinueWatchingCard({ resume }: { resume: any }) {
     queryFn: ({ signal }) => fetchEpisodePage(m.id, m.idMal || 0, page, signal),
     enabled: Number.isSafeInteger(episode) && page >= 1 && page <= 30,
     initialData: () => cachedPage(m.id, page),
+    initialDataUpdatedAt: () => {
+      const rows = cachedPage(m.id, page)
+      return rows?.some(item => item.number === episode && secureImage(item.image)) ? Date.now() : 0
+    },
     staleTime: 30 * 60 * 1000,
     retry: 1,
   })
@@ -54,15 +58,15 @@ function ContinueWatchingCard({ resume }: { resume: any }) {
     Number(String(item.title || "").match(/(?:episode|ep\.?)\s*(\d+)/i)?.[1]) === episode)
   const episodeImage = [episodeMeta?.image, catalogArt?.thumbnail].find(secureImage)
   const fallback = [m.bannerImage, m.coverImage?.extraLarge, m.coverImage?.large].find(secureImage)
-  const [failedImage, setFailedImage] = React.useState("")
-  const art = episodeImage && episodeImage !== failedImage ? episodeImage : fallback && fallback !== failedImage ? fallback : undefined
+  const [failedImages, setFailedImages] = React.useState<string[]>([])
+  const art = [episodeImage, fallback, m.coverImage?.extraLarge, m.coverImage?.large].find(value => secureImage(value) && !failedImages.includes(value))
   const progress = resume.duration > 0 ? Math.max(0, Math.min(100, resume.seconds / resume.duration * 100)) : 0
   return (
     <button type="button" className="group shrink-0 w-56 sm:w-64 rounded-xl overflow-hidden border bg-[--paper] text-left transition hover:border-white/40"
       aria-label={"Resume " + title + " episode " + episode} onClick={() => router.push("/entry?id=" + m.id + "&episode=" + episode)}>
       <div className="relative aspect-video w-full overflow-hidden bg-[--subtle]">
         {art && <img key={art} src={art} alt={episodeImage === art ? title + " episode " + episode + " thumbnail" : ""} decoding="async"
-          onError={() => setFailedImage(art)} className="absolute inset-0 h-full w-full object-cover" />}
+          onError={() => setFailedImages(previous => [...previous, art])} className="absolute inset-0 h-full w-full object-cover" />}
         <div className="absolute inset-0 bg-gradient-to-t from-black/65 via-transparent to-transparent" />
         <div className="absolute left-3 bottom-3 grid size-9 place-items-center rounded-full bg-black/45 text-white transition group-hover:bg-white group-hover:text-black">
           <LuPlay className="size-5 fill-current" />
