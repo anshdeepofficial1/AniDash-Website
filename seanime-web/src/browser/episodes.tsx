@@ -44,7 +44,24 @@ type StreamSource = {
 
 type StreamTrack = { url?: string; file?: string; src?: string; lang?: string; label?: string; language?: string; kind?: string; type?: string }
 type CaptionFile = { id: string; url: string; label: string; language: string }
-type CaptionOption = { index: number; label: string; language: string }
+type CaptionOption = { id: string; index: number; label: string; language: string }
+function captionLanguage(language: string, label: string): string {
+  if (/^(?:en|eng|english)(?:[-_\s]|$)/i.test(language.trim()) || /\benglish\b/i.test(label) || /^(?:en|eng)(?:[-_]|$)/i.test(label.trim())) return "en"
+  return /^[a-z]{2,3}(?:-[A-Za-z0-9]+)*$/i.test(language.trim()) ? language.trim().toLowerCase() : "und"
+}
+function captionDisplayName(language: string, label: string): string {
+  const name = label.trim()
+  if (language === "en") {
+    if (!name || /^(?:en|eng|english)$/i.test(name)) return "English"
+    if (/^en[-_](?:us|gb|uk)$/i.test(name)) return "English (" + name.slice(3).toUpperCase() + ")"
+    return /english/i.test(name) ? name : "English · " + name
+  }
+  return name || (language !== "und" ? language : "Subtitle")
+}
+function preferredEnglishTrack(options: CaptionOption[]) {
+  const english = options.filter(option => option.language === "en")
+  return english.find(option => !/signs|songs|forced/i.test(option.label)) || english[0]
+}
 type BufferedSpan = { start: number; end: number }
 type SeekImage = { start: number; end: number; url: string; crop?: { x: number; y: number; w: number; h: number } }
 type SeekHover = { time: number; fraction: number }
@@ -134,8 +151,8 @@ function captionSource(track: StreamTrack, index: number) {
     if (u.protocol !== "https:" && u.origin !== window.location.origin) return null
     if (u.username || u.password) return null
     const lang = String(track.language || track.lang || "").trim()
-    const language = /^(en|eng|english)(?:[-_ ].*)?$/i.test(lang) || /english/i.test(label) ? "en" : /^[a-z]{2,3}(-[A-Za-z0-9]+)*$/i.test(lang) ? lang : "und"
-    return { id: "remote-" + index, url: u.href, label, language }
+    const language = captionLanguage(lang, label)
+    return { id: "remote-" + index, url: u.href, label: captionDisplayName(language, label), language }
   } catch { return null }
 }
 function captionPlainText(cue: TextTrackCue) {
@@ -288,6 +305,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
   const [captionText, setCaptionText] = React.useState("")
   const [captionRevision, setCaptionRevision] = React.useState(0)
   const [captionMessage, setCaptionMessage] = React.useState("")
+  const [captionLoading, setCaptionLoading] = React.useState(false)
   const [captionDelay, setCaptionDelay] = React.useState(0)
   const [captionSize, setCaptionSize] = React.useState<number>([0.8, 1, 1.25, 1.5].includes(initial.preferences?.playerCaptionSize) ? initial.preferences.playerCaptionSize : 1)
   const [captionBackground, setCaptionBackground] = React.useState(initial.preferences?.playerCaptionBackground !== false)
@@ -312,7 +330,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
   const [playbackRevision, setPlaybackRevision] = React.useState(0)
   const [volume, setVolume] = React.useState(1)
   const [playbackRate, setPlaybackRate] = React.useState(1)
-  const [autoplay, setAutoplay] = React.useState(initial.preferences?.playerAutoplay === true)
+  const [autoplay, setAutoplay] = React.useState(initial.preferences?.playerAutoplay !== false)
   const [autoSkip, setAutoSkip] = React.useState(initial.preferences?.playerAutoSkip !== false)
   const [autoNext, setAutoNext] = React.useState(initial.preferences?.playerAutoNext !== false)
   const [segments, setSegments] = React.useState<SkipSegments>(EMPTY_SEGMENTS)
@@ -372,11 +390,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
   const subtitleInput = React.useRef<HTMLInputElement>(null)
   const uploadedUrl = React.useRef<string | null>(null)
   const controlsTimer = React.useRef<number | undefined>(undefined)
-  const selectedCaptionIndex = captionChoice === "upload" && uploadedCaption
-    ? captionOptions.find(t => t.label === uploadedCaption.label)?.index
-    : captionChoice !== "auto" && captionOptions.some(t => String(t.index) === captionChoice)
-      ? Number(captionChoice)
-      : (captionOptions.find(t => /^en(?:[-_]|$)/i.test(t.language) || /english/i.test(t.label)) || captionOptions[0])?.index
+  const selectedCaptionIndex = captionChoice === "auto" ? preferredEnglishTrack(captionOptions)?.index : captionOptions.find(t => t.id === captionChoice)?.index
   const captionLabel = captionOptions.find(t => t.index === selectedCaptionIndex)?.label || "Unavailable"
   const controlClass = "shrink-0 grid size-8 sm:size-10 place-items-center rounded-full text-white/90 hover:bg-white/10 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-white disabled:opacity-35 disabled:pointer-events-none transition"
   const menuRowClass = "w-full flex items-center justify-between gap-3 rounded-xl px-3 py-2.5 text-left text-sm hover:bg-white/10 focus-visible:outline focus-visible:outline-white transition"
@@ -639,7 +653,10 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
         if (!live) return
         setBuffering(false)
         setIsPlaying(false)
-        if (reason instanceof DOMException && reason.name === "NotAllowedError") return
+        if (reason instanceof DOMException && reason.name === "NotAllowedError") {
+          setPlayerNotice("Your browser blocked automatic playback with sound. Press Play to continue.")
+          return
+        }
         if (reason instanceof DOMException && reason.name === "AbortError") return
         setError("The browser rejected playback. Check that the media format is supported.")
       })
@@ -746,10 +763,13 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     const abort = new AbortController()
     const urls: string[] = []
     setCaptionFiles([])
+    setCaptionText("")
     setCaptionMessage("")
+    setCaptionLoading(false)
     setCaptionChoice("auto")
     const candidates = tracks.map(captionSource).filter((item): item is CaptionFile => !!item)
     if (!candidates.length) return () => abort.abort()
+    setCaptionLoading(true)
     void Promise.all(candidates.map(async item => {
       try {
         const response = await fetch(item.url, { signal: abort.signal, credentials: "same-origin" })
@@ -758,13 +778,15 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
         if (raw.length > 2_000_000 || abort.signal.aborted) return null
         const url = URL.createObjectURL(new Blob([subtitleVtt(raw)], { type: "text/vtt" }))
         urls.push(url)
-        return { ...item, url }
+        const file = { ...item, url }
+        setCaptionFiles(previous => [...previous.filter(t => t.id !== file.id), file].sort((a, b) => Number(a.id.slice(7)) - Number(b.id.slice(7))))
+        return file
       } catch { return null }
     })).then(results => {
       if (abort.signal.aborted) return
       const files = results.filter((item): item is CaptionFile => !!item)
-      setCaptionFiles(files)
-      if (files.length < candidates.length) setCaptionMessage("Some subtitle files could not be loaded by this browser.")
+      setCaptionLoading(false)
+      if (files.length < candidates.length) setCaptionMessage((candidates.length - files.length) + " subtitle track(s) could not be loaded by this browser.")
     })
     return () => { abort.abort(); urls.forEach(url => URL.revokeObjectURL(url)) }
   }, [watchMode, tracks])
@@ -783,9 +805,19 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     if (!el) return
     const list = el.textTracks
     function refresh() {
-      const items = Array.from(list).flatMap((track, index) =>
-        track.kind === "subtitles" || track.kind === "captions" ? [{ index, label: track.label || track.language || "Subtitle " + (index + 1), language: track.language }] : [])
-      setCaptionOptions(items)
+      const items = Array.from(list).flatMap((track, index) => {
+        if (track.kind !== "subtitles" && track.kind !== "captions") return []
+        const language = captionLanguage(track.language || "", track.label || "")
+        const element = Array.from(el!.querySelectorAll("track")).find(item => item.track === track)
+        const id = element?.id || "native-" + index
+        return [{ id, index, label: captionDisplayName(language, track.label || track.language || ""), language }]
+      })
+      const seen = new Map<string, number>()
+      setCaptionOptions(items.map(item => {
+        const count = (seen.get(item.label) || 0) + 1
+        seen.set(item.label, count)
+        return count > 1 ? { ...item, label: item.label + " (" + count + ")" } : item
+      }))
     }
     refresh()
     list.addEventListener("addtrack", refresh)
@@ -807,8 +839,8 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     function refresh() {
       if (!track || pipActive || !el) { setCaptionText(""); return }
       const time = el.currentTime - captionDelay
-      const cues = Array.from(track.cues || [])
-      setCaptionText(cues.filter(cue => cue.startTime <= time && time < cue.endTime).map(captionPlainText).filter(Boolean).join("\n"))
+      const cues = captionDelay === 0 ? Array.from(track.activeCues || []) : Array.from(track.cues || []).filter(cue => cue.startTime <= time && time < cue.endTime)
+      setCaptionText(cues.map(captionPlainText).filter(Boolean).join("\n"))
     }
     refresh()
     track?.addEventListener("cuechange", refresh)
@@ -1679,7 +1711,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
               }}
             >
               {[...captionFiles, ...(uploadedCaption ? [uploadedCaption] : [])].map(t => (
-                <track key={t.id + t.url} kind="subtitles" src={t.url} srcLang={t.language} label={t.label}
+                <track key={t.id + t.url} id={t.id} kind="subtitles" src={t.url} srcLang={t.language} label={t.label}
                   onLoad={() => setCaptionRevision(n => n + 1)}
                   onError={() => setCaptionMessage("A subtitle track could not be read by the browser.")} />
               ))}
@@ -1742,8 +1774,17 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
                   {playerMenu === "speed" && [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2].map(rate => <button key={rate} type="button" className={menuRowClass} onClick={() => { if (video.current) video.current.playbackRate = rate; setPlayerMenu("settings") }}><span>{rate === 1 ? "Normal" : rate + "×"}</span><span>{playbackRate === rate ? "✓" : ""}</span></button>)}
                   {playerMenu === "subtitles" && <>
                     <button type="button" className={menuRowClass + (!subtitlesEnabled ? " bg-white/15" : "")} onClick={() => updateCaptionEnabled(false)}><span>Off</span><span>{!subtitlesEnabled ? "✓" : ""}</span></button>
-                    {captionOptions.map(option => <button key={option.index} type="button" className={menuRowClass + (subtitlesEnabled && selectedCaptionIndex === option.index ? " bg-white/15" : "")} onClick={() => { setCaptionChoice(String(option.index)); updateCaptionEnabled(true) }}><span className="truncate">{option.label}</span><span>{subtitlesEnabled && selectedCaptionIndex === option.index ? "✓" : ""}</span></button>)}
-                    {!captionOptions.length && <p className="px-3 py-1 text-xs text-white/55">No subtitle tracks available for this media.</p>}
+                    <button type="button" className={menuRowClass + (subtitlesEnabled && captionChoice === "auto" ? " bg-white/15" : "")} onClick={() => { setCaptionChoice("auto"); updateCaptionEnabled(true) }}><span>Auto (English preferred)</span><span>{subtitlesEnabled && captionChoice === "auto" ? "✓" : ""}</span></button>
+                    {(["en", "other"] as const).map(group => {
+                      const options = captionOptions.filter(option => group === "en" ? option.language === "en" : option.language !== "en")
+                      if (!options.length) return null
+                      return <React.Fragment key={group}>
+                        <p className="px-3 pt-2 text-[10px] font-semibold uppercase tracking-wider text-white/50">{group === "en" ? "English subtitles" : "Other subtitle tracks"}</p>
+                        {options.map(option => <button key={option.id} type="button" className={menuRowClass + (subtitlesEnabled && selectedCaptionIndex === option.index ? " bg-white/15" : "")} onClick={() => { setCaptionChoice(option.id); updateCaptionEnabled(true) }}><span className="truncate">{option.label}</span><span>{subtitlesEnabled && selectedCaptionIndex === option.index ? "✓" : ""}</span></button>)}
+                      </React.Fragment>
+                    })}
+                    {captionLoading && <p role="status" className="px-3 py-1 text-xs text-white/55">Loading available subtitle tracks…</p>}
+                    {!captionLoading && !captionOptions.some(option => option.language === "en") && <p className="px-3 py-1 text-xs text-white/55">No English subtitle tracks are available for this media.</p>}
                     {captionMessage && <p role="status" className="px-3 py-1 text-xs text-white/60">{captionMessage}</p>}
                     <div className="border-t border-white/10 mt-2 pt-2 flex items-center justify-between px-3 py-2 text-sm"><span>Delay</span><div className="flex items-center gap-2"><button aria-label="Decrease subtitle delay" type="button" className="grid size-8 place-items-center rounded-lg bg-white/10" onClick={() => setCaptionDelay(v => Math.max(-10, Math.round((v - 0.25) * 100) / 100))}>−</button><button title="Reset delay" type="button" className="min-w-12 text-center text-xs tabular-nums" onClick={() => setCaptionDelay(0)}>{captionDelay.toFixed(2)}s</button><button aria-label="Increase subtitle delay" type="button" className="grid size-8 place-items-center rounded-lg bg-white/10" onClick={() => setCaptionDelay(v => Math.min(10, Math.round((v + 0.25) * 100) / 100))}>+</button></div></div>
                     <button type="button" className={menuRowClass} onClick={() => subtitleInput.current?.click()}><span className="flex items-center gap-2"><LuUpload />Upload Subtitle</span><LuChevronRight /></button>
