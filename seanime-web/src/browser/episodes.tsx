@@ -332,6 +332,11 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
   const [arc, setArc] = React.useState("all")
   const [page, setPage] = React.useState(1)
   const [jump, setJump] = React.useState("")
+  const [navigatorPage, setNavigatorPage] = React.useState(() => Math.max(1, Math.ceil((watchEpisode || 1) / 100)))
+  const [navigatorMode, setNavigatorMode] = React.useState<"numbers" | "details">("numbers")
+  const [navigatorJump, setNavigatorJump] = React.useState("")
+  const [navigatorError, setNavigatorError] = React.useState("")
+  const navigatorScroll = React.useRef<HTMLDivElement>(null)
   const [layout, setLayout] = React.useState<"grid" | "list">(
     initial.preferences?.episodeViewMode === "list" ? "list" : "grid"
   )
@@ -384,14 +389,20 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
   const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
   const currentPage = Math.min(page, pageCount)
   const visible = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE)
+  const navigatorPageCount = Math.max(1, Math.ceil(total / 100))
+  const activeNavigatorPage = Math.min(navigatorPage, navigatorPageCount)
+  const navigatorRows = rows.filter(e => Math.ceil(e.episodeNumber / 100) === activeNavigatorPage)
   const pages =
     watchMode && selected > 0
-      ? String(Math.ceil(selected / 100))
+      ? Array.from(new Set([Math.ceil(selected / 100), ...(navigatorMode === "details" ? [activeNavigatorPage] : [])])).join(",")
       : Array.from(new Set(visible.map(e => Math.ceil(e.episodeNumber / 100)))).join(",")
 
   // Reset episode state when route changes
   React.useEffect(() => {
     setSelected(watchEpisode || 0)
+    setNavigatorPage(Math.max(1, Math.ceil((watchEpisode || 1) / 100)))
+    setNavigatorJump("")
+    setNavigatorError("")
     setError("")
     setArc("all")
     setPage(1)
@@ -400,6 +411,17 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     setJump("")
     lastSaved.current = 0
   }, [entry.mediaId, watchEpisode])
+
+  // Scroll the selected episode into view inside the navigator, without moving the video page.
+  React.useEffect(() => {
+    if (!watchMode) return
+    const panel = navigatorScroll.current
+    if (!panel) return
+    const target = panel.querySelector<HTMLElement>('[aria-current="true"]')
+    if (!target) { panel.scrollTop = 0; return }
+    const panelRect = panel.getBoundingClientRect(), targetRect = target.getBoundingClientRect()
+    panel.scrollTop += targetRect.top - panelRect.top - (panel.clientHeight - targetRect.height) / 2
+  }, [watchMode, selected, activeNavigatorPage, navigatorMode])
 
   // Show cached titles immediately, fetch visible pages concurrently and preload neighboring pages.
   React.useEffect(() => {
@@ -1057,6 +1079,17 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     router.push(`/entry?id=${entry.mediaId}&episode=${n}`)
   }
 
+  function submitNavigatorJump(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault()
+    const n = Number(navigatorJump.trim())
+    if (!navigatorJump.trim() || !Number.isSafeInteger(n) || !rows.some(row => row.episodeNumber === n)) {
+      setNavigatorError("Enter a released episode number from 1 to " + total + ".")
+      return
+    }
+    setNavigatorError("")
+    openEpisode(n)
+  }
+
   function closePlayer() {
     if (watchMode) record(true)
     router.push(`/entry?id=${entry.mediaId}`)
@@ -1149,6 +1182,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
   shortcutHandler.current = (e: KeyboardEvent) => {
     if (!watchMode || e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey || e.isComposing) return
     const target = e.target instanceof Element ? e.target : null
+    if (target?.closest('aside[aria-label="Episode navigator"]')) return
     if (target?.closest('input,textarea,select,[contenteditable]:not([contenteditable="false"]),[role="textbox"]')) return
     if (e.code === "Escape" && playerMenu) {
       e.preventDefault()
@@ -1209,6 +1243,21 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     m.coverImage?.large ||
     "/icons/icon-192.png"
 
+  const currentArc = arcs.find(item => selected >= item.start && selected <= item.end)
+  const animeTitle = m.title?.userPreferred || m.title?.english || m.title?.romaji || "Anime"
+  const mediaDetails = m as any
+  const synopsis = typeof mediaDetails.description === "string" ? mediaDetails.description.replace(/<br\s*\/?\s*>/gi, " ").replace(/<[^>]*>/g, "").replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'").replace(/&nbsp;/g, " ").trim() : ""
+  const episodeDateRaw = metadata[selected]?.aired
+  const episodeDate = episodeDateRaw && Number.isFinite(Date.parse(episodeDateRaw)) ? new Date(episodeDateRaw).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric", timeZone: "UTC" }) : ""
+  const episodeFacts = [
+    ["Episode", String(selected) + (total > 0 ? " of " + total : "")],
+    ...(currentArc ? [["Saga / arc", currentArc.title]] : []),
+    ...(episodeDate ? [["Aired", episodeDate]] : []),
+    ...(duration > 0 ? [["Runtime", formatSeconds(duration)]] : typeof mediaDetails.duration === "number" && mediaDetails.duration > 0 ? [["Typical runtime", mediaDetails.duration + " min"]] : []),
+    ["Audio", audio === "dub" ? "English DUB" : "Japanese SUB"],
+    ...(metadata[selected]?.filler === true ? [["Episode type", "Filler"]] : metadata[selected]?.recap === true ? [["Episode type", "Recap"]] : [])
+  ]
+
   const nextAiring = m.nextAiringEpisode
   const hasNextAiring =
     nextAiring && nextAiring.episode && Number(nextAiring.timeUntilAiring || 0) > 0
@@ -1216,6 +1265,12 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
   return (
     <section className="space-y-5" data-anidash-browser-episodes>
       <style>{`
+        [data-anidash-watch-page] { display: grid; grid-template-columns: minmax(0,1fr); align-items: start; gap: 1.25rem; }
+        [data-episode-navigator-scroll] { max-height: min(58dvh, 600px); min-height: 9rem; overflow-y: auto; overscroll-behavior-y: contain; scrollbar-width: thin; scrollbar-color: #555 transparent; }
+        @media (min-width: 1100px) {
+          [data-anidash-watch-page] { grid-template-columns: minmax(0, 1fr) minmax(280px, 23%); gap: 1.25rem; }
+          [data-episode-navigator-scroll] { max-height: min(62dvh, 760px); }
+        }
         [data-player-wrapper]:fullscreen, [data-player-wrapper]:-webkit-full-screen { width: 100%; height: 100%; max-width: none; max-height: none; aspect-ratio: auto; border: 0; border-radius: 0; }
         video::cue {
           background-color: rgba(0, 0, 0, 0.8) !important;
@@ -1436,7 +1491,8 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
 
       {/* Full Watch Player View */}
       {watchMode && (
-        <div data-anidash-watch-page onClick={returnPointerFocus} className="w-full max-w-6xl mx-auto p-2 sm:p-4 md:p-6 space-y-4">
+        <div data-anidash-watch-page className="w-full max-w-[1920px] mx-auto p-2 sm:p-4 lg:p-6">
+          <main className="min-w-0 space-y-4" onClick={returnPointerFocus}>
           <header>
              <h3 className="text-lg sm:text-2xl font-bold leading-tight">
                {m.format === "MOVIE" ? "Movie" : "Episode " + selected}
@@ -1720,7 +1776,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
           {/* Exact Server Selector Card (Matching Screenshot) */}
           <div className="rounded-xl border border-neutral-800 bg-[#0d0d0d] overflow-hidden flex flex-col md:flex-row shadow-lg">
             {/* Left box: You are watching */}
-            <div className="p-4 md:w-72 shrink-0 flex items-center gap-3.5 bg-[#121212] border-b md:border-b-0 md:border-r border-neutral-800/80">
+            <div className="p-4 md:w-60 shrink-0 flex items-center gap-3.5 bg-[#121212] border-b md:border-b-0 md:border-r border-neutral-800/80">
               <div className="relative w-20 sm:w-24 aspect-video rounded-lg overflow-hidden bg-neutral-900 border border-neutral-800 shrink-0">
                 <img
                   src={currentEpThumb}
@@ -1863,25 +1919,95 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
             </div>
           )}
 
-          {/* Bottom Episode Navigation */}
-          {m.format !== "MOVIE" && (
-            <div className="flex justify-between items-center gap-2 pt-2">
-              <Button
-                intent="gray-outline"
-                disabled={selected <= 1}
-                onClick={() => openEpisode(selected - 1)}
-              >
-                <LuChevronLeft /> Previous
-              </Button>
-              <Button
-                intent="gray-outline"
-                disabled={selected >= total}
-                onClick={() => openEpisode(selected + 1)}
-              >
-                Next episode <LuChevronRight />
-              </Button>
+          {/* Episode information */}
+          <section aria-label="Episode details" className="rounded-xl border border-neutral-800 bg-[#0d0d0d] p-4 sm:p-5 space-y-4">
+            <div className="flex items-start gap-4">
+              <div className="relative w-28 sm:w-40 aspect-video shrink-0 overflow-hidden rounded-lg bg-neutral-900">
+                <img src={currentEpThumb} alt="" className="h-full w-full object-cover" loading="lazy" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-[10px] uppercase tracking-widest text-neutral-400 font-semibold">Episode details</p>
+                <h2 className="text-base sm:text-xl font-bold leading-snug">{selectedEpisodeTitle || "Episode " + selected}</h2>
+                <p className="text-sm text-neutral-400 mt-1">{animeTitle}</p>
+              </div>
             </div>
-          )}
+            <dl className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-4 border-t border-neutral-800 pt-4">
+              {episodeFacts.map(([label, value]) => <div key={label} className="min-w-0"><dt className="text-xs text-neutral-500">{label}</dt><dd className="text-sm font-medium mt-1 break-words">{value}</dd></div>)}
+            </dl>
+          </section>
+
+          <section aria-label="About the anime" className="rounded-xl border border-neutral-800 bg-[#0d0d0d] p-4 sm:p-5">
+            <div className="flex items-start gap-4">
+              {m.coverImage?.large && <img src={m.coverImage.large} alt="" loading="lazy" className="w-20 sm:w-28 shrink-0 rounded-lg aspect-[2/3] object-cover bg-neutral-900" />}
+              <div className="min-w-0 flex-1 space-y-3">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div><p className="text-[10px] font-semibold tracking-widest uppercase text-neutral-500">About the series</p><h2 className="font-bold text-lg">{animeTitle}</h2></div>
+                  <button type="button" onClick={closePlayer} className="text-xs font-medium text-neutral-300 hover:text-white underline underline-offset-4">View anime details</button>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {typeof mediaDetails.averageScore === "number" && mediaDetails.averageScore > 0 && <span className="rounded-md bg-white/10 px-2 py-1 text-xs">★ {(mediaDetails.averageScore / 10).toFixed(1)}</span>}
+                  {m.format && <span className="rounded-md bg-white/10 px-2 py-1 text-xs">{m.format.replace(/_/g, " ")}</span>}
+                  {Array.isArray(mediaDetails.genres) && mediaDetails.genres.slice(0, 6).map((genre: string) => <span key={genre} className="rounded-md border border-neutral-800 px-2 py-1 text-xs text-neutral-300">{genre}</span>)}
+                </div>
+                {synopsis && <details className="text-sm leading-relaxed text-neutral-300"><summary className="cursor-pointer text-white text-sm font-medium">Series synopsis</summary><p className="mt-2">{synopsis}</p></details>}
+              </div>
+            </div>
+          </section>
+          </main>
+
+          <aside aria-label="Episode navigator" className="min-w-0 space-y-4">
+            {m.format !== "MOVIE" && (
+              <section className="rounded-xl border border-neutral-800 bg-[#0d0d0d] overflow-hidden">
+                <div className="p-4 space-y-3 border-b border-neutral-800">
+                  <div className="flex items-center justify-between gap-2">
+                    <div><h2 className="text-base font-bold">Episodes</h2><p className="text-xs text-neutral-400 mt-1">{total} released · Episode {selected} selected</p></div>
+                    <div className="flex rounded-lg border border-neutral-700 p-0.5">
+                      <button type="button" title="Episode numbers" aria-label="Episode numbers" aria-pressed={navigatorMode === "numbers"} onClick={() => setNavigatorMode("numbers")} className={`grid size-8 place-items-center rounded-md ${navigatorMode === "numbers" ? "bg-white text-black" : "text-neutral-400 hover:text-white"}`}><LuLayoutGrid className="size-4" /></button>
+                      <button type="button" title="Episode details" aria-label="Episode details" aria-pressed={navigatorMode === "details"} onClick={() => setNavigatorMode("details")} className={`grid size-8 place-items-center rounded-md ${navigatorMode === "details" ? "bg-white text-black" : "text-neutral-400 hover:text-white"}`}><LuList className="size-4" /></button>
+                    </div>
+                  </div>
+                  <form onSubmit={submitNavigatorJump} className="flex gap-2">
+                    <input aria-label="Jump to episode number" inputMode="numeric" pattern="[0-9]*" placeholder="Episode number" value={navigatorJump} onChange={e => { setNavigatorJump(e.target.value); setNavigatorError("") }} className="min-w-0 flex-1 rounded-lg border border-neutral-700 bg-black/35 px-3 py-2 text-sm outline-none focus:border-white/60" />
+                    <button type="submit" className="rounded-lg bg-white text-black px-3 text-xs font-semibold">Go</button>
+                  </form>
+                  {navigatorError && <p role="alert" className="text-xs text-red-400">{navigatorError}</p>}
+                  <div className="flex items-center gap-2">
+                    <label className="text-xs text-neutral-400 shrink-0" htmlFor="watch-episode-range">Range</label>
+                    <select id="watch-episode-range" value={activeNavigatorPage} onChange={e => setNavigatorPage(Number(e.target.value))} className="min-w-0 flex-1 rounded-lg bg-neutral-900 border border-neutral-700 px-2 py-2 text-xs">
+                      {Array.from({ length: navigatorPageCount }, (_, i) => <option key={i+1} value={i+1}>{i*100+1}–{Math.min((i+1)*100,total)}</option>)}
+                    </select>
+                    {activeNavigatorPage !== Math.ceil(selected/100) && <button type="button" onClick={() => setNavigatorPage(Math.ceil(selected/100))} className="text-xs text-neutral-300 underline">Current</button>}
+                  </div>
+                </div>
+                <div ref={navigatorScroll} data-episode-navigator-scroll tabIndex={0} aria-label="Scrollable episodes" className="p-3">
+                  {navigatorRows.length === 0 ? <p className="text-sm text-neutral-400 p-3">No released episodes in this range.</p> : navigatorMode === "numbers" ? (
+                    <div className="grid grid-cols-5 gap-1.5">
+                      {navigatorRows.map(e => {
+                        const n=e.episodeNumber, active=n===selected
+                        return <button key={n} type="button" aria-current={active ? "true" : undefined} aria-label={"Episode " + n} title={metadata[n]?.title || e.episodeTitle || "Episode " + n} onClick={() => { if (!active) openEpisode(n) }} className={`min-w-0 h-10 rounded-md text-xs sm:text-sm font-semibold tabular-nums transition focus-visible:outline focus-visible:outline-white ${active ? "bg-white text-black" : "bg-neutral-800/80 text-neutral-200 hover:bg-neutral-700"}`}>{n}</button>
+                      })}
+                    </div>
+                  ) : <div className="space-y-1.5">
+                    {navigatorRows.map(e => {
+                      const n=e.episodeNumber, active=n===selected, md=metadata[n], art=md?.image || thumbnails.get(n) || e.episodeMetadata?.image
+                      return <button key={n} type="button" aria-current={active ? "true" : undefined} aria-label={"Episode " + n} onClick={() => { if (!active) openEpisode(n) }} className={`w-full flex items-center gap-2 rounded-lg border p-2 text-left transition ${active ? "border-white/60 bg-white/10" : "border-transparent hover:bg-neutral-800"}`}>
+                        <div className="w-20 aspect-video shrink-0 rounded bg-neutral-900 overflow-hidden grid place-items-center">{art ? <img src={art} alt="" loading="lazy" className="w-full h-full object-cover" /> : <LuPlay className="size-4 text-neutral-500" />}</div>
+                        <div className="flex-1 min-w-0"><p className="text-xs font-semibold">{active ? "Playing · " : ""}Episode {n}</p><p className="text-xs text-neutral-400 line-clamp-2 mt-1">{md?.title || e.episodeTitle || "Episode " + n}</p></div>
+                      </button>
+                    })}
+                  </div>}
+                </div>
+                <div className="px-4 py-3 border-t border-neutral-800 text-xs text-neutral-400 flex justify-between gap-2"><span>{navigatorRows.length} episodes in range</span>{currentArc && <span className="truncate" title={currentArc.title}>{currentArc.title}</span>}</div>
+              </section>
+            )}
+            <section className="rounded-xl border border-neutral-800 bg-[#0d0d0d] p-4 space-y-3">
+              <h2 className="font-semibold text-sm">Now watching</h2>
+              <div className="aspect-video overflow-hidden rounded-lg bg-neutral-900"><img src={currentEpThumb} alt="" loading="lazy" className="w-full h-full object-cover" /></div>
+              <p className="font-semibold text-sm leading-snug">{selectedEpisodeTitle || "Episode " + selected}</p>
+              <p className="text-xs text-neutral-400">{animeTitle} · Episode {selected}</p>
+              {duration > 0 && <div><div className="h-1 rounded-full bg-white/15 overflow-hidden"><div className="h-full bg-white" style={{width: progressPercent + "%"}} /></div><p className="mt-2 text-xs text-neutral-400 tabular-nums">{formatSeconds(currentTime)} / {formatSeconds(duration)}</p></div>}
+            </section>
+          </aside>
         </div>
       )}
     </section>
