@@ -689,13 +689,24 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
       hls.on(Hls.Events.ERROR, (_, data) => {
         if (!live || mediaAccessDenied.current) return
         const status = data.response?.code
-        // A rejected media request is not a bandwidth problem. Do not retry access denial.
+        // Optional subtitle tracks must not terminate an otherwise authorized video.
+        // Classify by the HLS fragment type or explicit subtitle event, never by URL.
+        const detail = String(data.details || "")
+        const optionalSubtitle = data.frag?.type === "subtitle" || /^subtitleTrack(?:LoadError|LoadTimeOut)$/i.test(detail)
+        if ((status === 401 || status === 403) && optionalSubtitle) {
+          if (hls) hls.subtitleTrack = -1
+          setCaptionMessage("An embedded subtitle track was denied access (HTTP " + status + "). Other authorized subtitle tracks may remain available.")
+          return
+        }
+        // A rejected video/audio/manifest request is not a bandwidth problem.
+        // Stop loading on access denial; do not retry or substitute media endpoints.
         if (status === 401 || status === 403) {
           mediaAccessDenied.current = true
           setAccessDenied(true)
           setBuffering(false)
           setIsPlaying(false)
-          setError("The media server denied access (HTTP " + status + "). The media provider must authorize this playback.")
+          const resource = data.frag?.type === "audio" ? "audio" : data.frag?.type === "main" ? "video segment" : "media request"
+          setError("The provider denied the " + resource + " (HTTP " + status + "). Authorized playback is required.")
           hls?.stopLoad()
           el.pause()
           return
@@ -709,11 +720,11 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
         }
         setBuffering(false)
         setIsPlaying(false)
-        const detail = String(data.details || "").replace(/[^a-zA-Z0-9_ -]/g, "").slice(0, 80)
+        const safeDetail = detail.replace(/[^a-zA-Z0-9_ -]/g, "").slice(0, 80)
         const reason = data.type === Hls.ErrorTypes.NETWORK_ERROR ? "The media data could not be downloaded."
           : data.type === Hls.ErrorTypes.MEDIA_ERROR ? "The browser could not decode the media."
           : "The stream could not be played."
-        setError(reason + (status ? " HTTP " + status + "." : "") + (detail ? " (" + detail + ")" : ""))
+        setError(reason + (status ? " HTTP " + status + "." : "") + (safeDetail ? " (" + safeDetail + ")" : ""))
         hls?.stopLoad()
       })
     } else {
