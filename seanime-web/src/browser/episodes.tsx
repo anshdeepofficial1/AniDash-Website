@@ -45,6 +45,68 @@ type StreamSource = {
 type StreamTrack = { url?: string; file?: string; src?: string; lang?: string; label?: string; language?: string; kind?: string; type?: string }
 type CaptionFile = { id: string; url: string; label: string; language: string }
 type CaptionOption = { index: number; label: string; language: string }
+type BufferedSpan = { start: number; end: number }
+type SeekImage = { start: number; end: number; url: string; crop?: { x: number; y: number; w: number; h: number } }
+type SeekHover = { time: number; fraction: number }
+
+function readBufferedRanges(ranges: TimeRanges, duration: number): BufferedSpan[] {
+  if (!Number.isFinite(duration) || duration <= 0) return []
+  return Array.from({ length: ranges.length }, (_, i) => ({ start: Math.max(0, ranges.start(i)), end: Math.min(duration, ranges.end(i)) }))
+    .filter(range => Number.isFinite(range.start) && Number.isFinite(range.end) && range.end > range.start)
+}
+function bufferedAhead(ranges: BufferedSpan[], position: number): number {
+  const range = ranges.find(item => position >= item.start - 0.25 && position <= item.end)
+  return range ? Math.max(0, range.end - position) : 0
+}
+function previewTime(value: string): number {
+  const parts = value.trim().split(":")
+  if (parts.length < 2 || parts.length > 3 || parts.some(part => !/^\d+(?:\.\d+)?$/.test(part))) return NaN
+  return parts.reduce((seconds, part) => seconds * 60 + Number(part), 0)
+}
+function parsePreviewVtt(input: string, base: string): SeekImage[] {
+  const rows: SeekImage[] = []
+  const lines = input.replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n").split("\n")
+  for (let i = 0; i < lines.length && rows.length < 4000; i++) {
+    const match = lines[i].match(/^\s*(\d{1,2}(?::\d{2}){1,2}\.\d+)\s*-->\s*(\d{1,2}(?::\d{2}){1,2}\.\d+)/)
+    if (!match) continue
+    const start = previewTime(match[1]), end = previewTime(match[2]), raw = lines[i + 1]?.trim()
+    if (!raw || !Number.isFinite(start) || !Number.isFinite(end) || end <= start) continue
+    try {
+      const url = new URL(raw, base)
+      if ((url.protocol !== "https:" && url.origin !== window.location.origin) || url.username || url.password) continue
+      const crop = url.hash.match(/^#xywh=(?:pixel:)?(\d+),(\d+),(\d+),(\d+)$/)
+      if (crop) {
+        const [x,y,w,h] = crop.slice(1).map(Number)
+        if (w <= 0 || h <= 0 || w > 4096 || h > 4096) continue
+        url.hash = ""
+        rows.push({ start, end, url: url.href, crop: { x, y, w, h } })
+      } else if (!url.hash) rows.push({ start, end, url: url.href })
+    } catch {}
+  }
+  return rows.sort((a,b) => a.start - b.start)
+}
+function previewTrackUrl(track: StreamTrack): string | null {
+  const tag = String(track.kind || "") + " " + String(track.type || "") + " " + String(track.label || "")
+  if (!/thumbnail|storyboard|sprite|preview/i.test(tag)) return null
+  const raw = track.url || track.file || track.src
+  if (!raw || typeof raw !== "string") return null
+  try {
+    const url = new URL(raw, window.location.href)
+    return (url.protocol === "https:" || url.origin === window.location.origin) && !url.username && !url.password ? url.href : null
+  } catch { return null }
+}
+function SeekThumbnail({ image }: { image: SeekImage }) {
+  const [failed, setFailed] = React.useState(false)
+  React.useEffect(() => setFailed(false), [image.url])
+  const crop = image.crop
+  const scale = crop ? Math.min(160 / crop.w, 90 / crop.h) : 1
+  return <div className="relative flex h-[90px] w-40 items-center justify-center overflow-hidden bg-neutral-950">
+    {failed ? <span className="text-[10px] text-white/60">Preview unavailable</span> : crop ?
+      <div className="relative overflow-hidden" style={{ width: crop.w * scale, height: crop.h * scale }}>
+        <img alt="" draggable={false} src={image.url} onError={() => setFailed(true)} className="absolute left-0 top-0 max-w-none origin-top-left" style={{ transform: `translate(${-crop.x * scale}px,${-crop.y * scale}px) scale(${scale})` }} />
+      </div> : <img alt="" draggable={false} src={image.url} onError={() => setFailed(true)} className="h-full w-full object-contain" />}
+  </div>
+}
 type PlayerMenu = "settings" | "quality" | "speed" | "subtitles" | "appearance" | null
 type PipVideo = HTMLVideoElement & {
   requestPictureInPicture?: () => Promise<unknown>
@@ -96,6 +158,8 @@ const storageKey = "anidash.watch.web.v1"
 const JUSTANIME_SERVERS = ["momo", "onyx", "gigi", "nami", "calm", "revo"] as const
 const DEFAULT_SERVER = "onyx"
 const CONTROL_IDLE_MS = 3000
+const PLAYER_BUFFER_TARGET = 100
+const PREVIEW_STEP = 5
 const FULLSCREEN_DOUBLE_TAP_MS = 170
 const FULLSCREEN_DOUBLE_TAP_RADIUS = 24
 type SkipInterval = { start: number; end: number }
@@ -240,6 +304,10 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
   const [isMuted, setIsMuted] = React.useState(false)
   const [currentTime, setCurrentTime] = React.useState(0)
   const [duration, setDuration] = React.useState(0)
+  const [bufferedRanges, setBufferedRanges] = React.useState<BufferedSpan[]>([])
+  const [seekHover, setSeekHover] = React.useState<SeekHover | null>(null)
+  const [seekDraft, setSeekDraft] = React.useState<number | null>(null)
+  const [storyboard, setStoryboard] = React.useState<SeekImage[]>([])
   const [buffering, setBuffering] = React.useState(false)
   const [playbackRevision, setPlaybackRevision] = React.useState(0)
   const [volume, setVolume] = React.useState(1)
@@ -256,7 +324,10 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     ...(outro ? [{ ...outro, kind: "outro" as const }] : [])
   ]
   const currentSegment = availableSegments.find(segment => currentTime >= segment.start && currentTime < segment.end)
-  const progressPercent = duration > 0 ? Math.max(0, Math.min(100, currentTime / duration * 100)) : 0
+  const displayedTime = seekDraft ?? currentTime
+  const progressPercent = duration > 0 ? Math.max(0, Math.min(100, displayedTime / duration * 100)) : 0
+  const aheadSeconds = bufferedAhead(bufferedRanges, currentTime)
+  const hoverPreview = seekHover && storyboard.find(image => seekHover.time >= image.start && seekHover.time < image.end)
 
   const [arc, setArc] = React.useState("all")
   const [page, setPage] = React.useState(1)
@@ -269,6 +340,16 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
   const [metaRevision, setMetaRevision] = React.useState(0)
 
   const video = React.useRef<HTMLVideoElement>(null)
+  const seekDraftRef = React.useRef<number | null>(null)
+  const seekDragging = React.useRef(false)
+  const decodedPreviews = React.useRef(new Map<number, SeekImage>())
+  const previewCanvas = React.useRef<HTMLCanvasElement | null>(null)
+  const previewCaptureBlocked = React.useRef(false)
+  const lastPreviewBucket = React.useRef(-1)
+  const [previewRevision, setPreviewRevision] = React.useState(0)
+  const currentHoverImage = hoverPreview || (seekHover ? decodedPreviews.current.get(Math.floor(seekHover.time / PREVIEW_STEP)) : undefined)
+  // A revision makes a freshly decoded frame available while the pointer stays still.
+  void previewRevision
   const manualPlaybackIntent = React.useRef<"play" | "pause" | null>(null)
   const autoplayRef = React.useRef(autoplay)
   autoplayRef.current = autoplay
@@ -287,7 +368,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
       ? Number(captionChoice)
       : (captionOptions.find(t => /^en(?:[-_]|$)/i.test(t.language) || /english/i.test(t.label)) || captionOptions[0])?.index
   const captionLabel = captionOptions.find(t => t.index === selectedCaptionIndex)?.label || "Unavailable"
-  const controlClass = "shrink-0 grid size-8 sm:size-10 place-items-center rounded-xl text-white/90 hover:bg-white/15 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-white disabled:opacity-35 disabled:pointer-events-none transition"
+  const controlClass = "shrink-0 grid size-8 sm:size-10 place-items-center rounded-full text-white/90 hover:bg-white/10 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-white disabled:opacity-35 disabled:pointer-events-none transition"
   const menuRowClass = "w-full flex items-center justify-between gap-3 rounded-xl px-3 py-2.5 text-left text-sm hover:bg-white/10 focus-visible:outline focus-visible:outline-white transition"
   const lastSaved = React.useRef(0)
   const lastSynced = React.useRef(0)
@@ -467,6 +548,14 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     setBuffering(true)
     setCurrentTime(0)
     setDuration(0)
+    setBufferedRanges([])
+    setSeekHover(null)
+    setSeekDraft(null)
+    seekDraftRef.current = null
+    decodedPreviews.current.clear()
+    lastPreviewBucket.current = -1
+    previewCaptureBlocked.current = false
+    previewCanvas.current = null
     setIsPlaying(false)
     setHlsLevels([])
     setQualityLevel(-1)
@@ -513,13 +602,16 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     if (isHls && Hls.isSupported()) {
       hls = new Hls({
         enableWorker: true,
-        lowLatencyMode: true
+        lowLatencyMode: true,
+        maxBufferLength: PLAYER_BUFFER_TARGET,
+        maxMaxBufferLength: PLAYER_BUFFER_TARGET
       })
       hlsInstance.current = hls
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         if (!live || !hls) return
         setHlsLevels(hls.levels.map((level, index) => ({ index, label: level.height ? level.height + "p" : Math.round(level.bitrate / 1000) + " kbps" })))
       })
+      hls.on(Hls.Events.FRAG_BUFFERED, () => { if (live) updateBuffered(el) })
       hls.loadSource(streamUrl)
       hls.attachMedia(el)
       hls.on(Hls.Events.ERROR, (_, data) => {
@@ -658,6 +750,76 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     return () => { for (const event of ["loadedmetadata", "enterpictureinpicture", "leavepictureinpicture", "webkitpresentationmodechanged"]) el.removeEventListener(event, refresh) }
   }, [watchMode, activeStream?.url])
 
+  // Only use already supplied, browser-accessible storyboard metadata. No additional media source or hidden video is opened.
+  React.useEffect(() => {
+    if (!watchMode) return
+    const controller = new AbortController()
+    setStoryboard([])
+    const url = tracks.map(previewTrackUrl).find((value): value is string => !!value)
+    if (!url) return () => controller.abort()
+    void fetch(url, { signal: controller.signal, credentials: "same-origin" }).then(async response => {
+      if (!response.ok) return
+      const text = await response.text()
+      if (text.length > 2_000_000 || controller.signal.aborted) return
+      const images = parsePreviewVtt(text, response.url || url)
+      if (!controller.signal.aborted) setStoryboard(images)
+    }).catch(() => {})
+    return () => controller.abort()
+  }, [watchMode, tracks])
+
+  function updateBuffered(el: HTMLVideoElement) {
+    const ranges = readBufferedRanges(el.buffered, el.duration)
+    setBufferedRanges(previous => previous.length === ranges.length && previous.every((item, i) => item.start === ranges[i].start && item.end === ranges[i].end) ? previous : ranges)
+  }
+
+  function rememberDecodedFrame(el: HTMLVideoElement) {
+    if (previewCaptureBlocked.current || el.seeking || el.readyState < 2 || !el.videoWidth || !el.videoHeight || storyboard.length) return
+    const bucket = Math.floor(el.currentTime / PREVIEW_STEP)
+    if (bucket === lastPreviewBucket.current || decodedPreviews.current.has(bucket)) return
+    lastPreviewBucket.current = bucket
+    try {
+      const canvas = previewCanvas.current || document.createElement("canvas")
+      previewCanvas.current = canvas
+      canvas.width = 160
+      canvas.height = Math.max(1, Math.round(160 * el.videoHeight / el.videoWidth))
+      const ctx = canvas.getContext("2d")
+      if (!ctx) return
+      ctx.drawImage(el, 0, 0, canvas.width, canvas.height)
+      const url = canvas.toDataURL("image/jpeg", 0.55)
+      if (url === "data:,") return
+      const cache = decodedPreviews.current
+      cache.set(bucket, { start: el.currentTime, end: el.currentTime + PREVIEW_STEP, url })
+      while (cache.size > 180) cache.delete(cache.keys().next().value!)
+      setPreviewRevision(n => n + 1)
+    } catch {
+      // Browser origin restrictions are respected; use timestamp-only preview if frames cannot be read.
+      previewCaptureBlocked.current = true
+    }
+  }
+
+  function hoverTimeline(e: React.PointerEvent<HTMLElement>) {
+    if (!duration) return
+    const rect = e.currentTarget.getBoundingClientRect()
+    if (!rect.width) return
+    const fraction = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
+    setSeekHover({ fraction, time: fraction * duration })
+    wakeControls()
+  }
+
+  function changeSeek(value: number) {
+    const el = video.current
+    if (!el || !duration) return
+    const time = Math.max(0, Math.min(duration, value))
+    if (seekDragging.current) {
+      seekDraftRef.current = time
+      setSeekDraft(time)
+      setSeekHover({ fraction: time / duration, time })
+    } else {
+      el.currentTime = time
+      setCurrentTime(time)
+    }
+  }
+
   // The paused frame is also clean after inactivity; keep controls available for menus, loading and errors.
   const canHideControls = !!activeStream?.url && !playerMenu && !error && !buffering && !isLoadingStream
   const hideAllowedRef = React.useRef(canHideControls)
@@ -722,9 +884,20 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
 
   React.useEffect(() => {
     if (!watchMode) return
-    const finish = () => {
+    const finish = (event: Event) => {
       if (!pointerDragging.current) return
       pointerDragging.current = false
+      if (seekDragging.current) {
+        const el = video.current, draft = seekDraftRef.current
+        if (event.type === "pointerup" && el && draft !== null && Number.isFinite(el.duration)) {
+          el.currentTime = Math.max(0, Math.min(el.duration, draft))
+          setCurrentTime(el.currentTime)
+        }
+        seekDragging.current = false
+        seekDraftRef.current = null
+        setSeekDraft(null)
+        setSeekHover(null)
+      }
       focusPlayer()
       wakeControls()
     }
@@ -744,6 +917,8 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
       surfaceClickTimer.current = undefined
       lastSurfaceTap.current = null
       pointerDragging.current = false
+      seekDragging.current = false
+      seekDraftRef.current = null
     }
   }, [watchMode, wakeControls])
 
@@ -1360,7 +1535,9 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
               className="absolute inset-0 w-full h-full object-contain bg-black"
               onClick={clickVideoSurface}
               onDoubleClick={e => e.preventDefault()}
-              onLoadedMetadata={e => setDuration(Number.isFinite(e.currentTarget.duration) ? e.currentTarget.duration : 0)}
+              onLoadedMetadata={e => { setDuration(Number.isFinite(e.currentTarget.duration) ? e.currentTarget.duration : 0); updateBuffered(e.currentTarget) }}
+              onProgress={e => updateBuffered(e.currentTarget)}
+              onLoadedData={e => { updateBuffered(e.currentTarget); rememberDecodedFrame(e.currentTarget) }}
               onDurationChange={e => setDuration(Number.isFinite(e.currentTarget.duration) ? e.currentTarget.duration : 0)}
               onPlay={() => { setIsPlaying(true); setBuffering(true) }}
               onPlaying={() => { setIsPlaying(true); setBuffering(false); setError("") }}
@@ -1378,6 +1555,8 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
                 const el = video.current
                 if (el) {
                   setCurrentTime(el.currentTime)
+                  updateBuffered(el)
+                  rememberDecodedFrame(el)
                   if (autoSkip && !el.paused && !el.seeking && !isLoadingStream) {
                     const segment = availableSegments.find(item =>
                       el.currentTime >= item.start && el.currentTime < item.end && !skippedSegments.current.has(item.kind))
@@ -1386,7 +1565,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
                   record()
                 }
               }}
-              onSeeked={() => record(true)}
+              onSeeked={e => { updateBuffered(e.currentTarget); rememberDecodedFrame(e.currentTarget); record(true) }}
               onEnded={() => {
                 setIsPlaying(false)
                 record(true, true)
@@ -1410,10 +1589,15 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
               ))}
             </video>
             {(controlsVisible || playerMenu) && (
-              <div className="absolute top-3 right-3 sm:top-5 sm:right-5 z-10 pointer-events-none flex items-center gap-2 text-white drop-shadow-lg" data-player-watermark>
-                <span className="hidden sm:inline text-[9px] tracking-[0.2em] uppercase text-white/75">Powered by</span>
-                <img src="/anidash-watermark.png" alt="" className="w-8 h-5 sm:w-10 sm:h-6 object-contain" />
-                <span className="text-xs sm:text-sm font-extrabold tracking-tight">AniDash</span>
+              <div className="absolute inset-x-0 top-0 z-20 flex items-start justify-between gap-3 bg-gradient-to-b from-black/85 to-transparent px-3 pb-10 pt-3 sm:px-6 sm:pt-5 pointer-events-none">
+                <div className="min-w-0 text-white drop-shadow-md">
+                  <div className="truncate text-[9px] sm:text-[11px] font-bold tracking-[0.18em] uppercase text-white/70">{m.title?.userPreferred || m.title?.english || m.title?.romaji}</div>
+                  <div className="truncate text-xs sm:text-lg font-semibold">{m.format === "MOVIE" ? "Movie" : "Episode " + selected}{selectedEpisodeTitle ? " · " + selectedEpisodeTitle : ""}</div>
+                </div>
+                <div className="flex shrink-0 items-center gap-1.5 text-white drop-shadow-md" data-player-watermark>
+                  <img src="/anidash-watermark.png" alt="" className="h-4 w-7 sm:h-6 sm:w-10 object-contain" />
+                  <span className="text-[10px] sm:text-sm font-extrabold tracking-tight">AniDash</span>
+                </div>
               </div>
             )}
             {captionText && subtitlesEnabled && !pipActive && (
@@ -1421,10 +1605,20 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
                 <span className="max-w-[90%] whitespace-pre-line rounded px-2 py-1 font-semibold leading-snug text-white" style={{ fontSize: `clamp(${12 * captionSize}px, ${2.4 * captionSize}vw, ${27 * captionSize}px)`, background: captionBackground ? "rgba(0,0,0,.75)" : "transparent", textShadow: "0 1px 3px #000, 0 0 2px #000" }}>{captionText}</span>
               </div>
             )}
-            {controlsVisible && !isPlaying && !buffering && !isLoadingStream && !error && activeStream?.url && (
-              <button type="button" data-player-surface-action aria-label="Play video" onClick={e => { if (e.detail === 0) { cancelSurfaceTap(); togglePlay() } else clickVideoSurface(e) }} onDoubleClick={e => e.preventDefault()} className="absolute inset-0 m-auto z-10 size-14 sm:size-16 rounded-full bg-black/60 border border-white/30 text-white grid place-items-center hover:bg-white hover:text-black transition">
-                <LuPlay className="size-7 fill-current" />
-              </button>
+            {controlsVisible && !buffering && !isLoadingStream && !error && activeStream?.url && (
+              <div className="absolute inset-0 z-10 pointer-events-none grid place-items-center">
+                <div className="flex items-center gap-6 sm:gap-12 pointer-events-auto text-white drop-shadow-lg">
+                  <button type="button" title="Back 10 seconds" aria-label="Back 10 seconds" onClick={() => seekRel(-10)} className="relative grid size-9 sm:size-14 place-items-center rounded-full hover:bg-black/30 transition">
+                    <LuRotateCcw className="size-7 sm:size-10" /><span className="absolute text-[9px] sm:text-xs font-bold">10</span>
+                  </button>
+                  <button type="button" data-player-surface-action aria-label={isPlaying ? "Pause video" : "Play video"} onClick={e => { if (e.detail === 0) { cancelSurfaceTap(); togglePlay() } else clickVideoSurface(e) }} onDoubleClick={e => e.preventDefault()} className="grid size-14 sm:size-20 place-items-center rounded-full hover:bg-black/25 transition">
+                    {isPlaying ? <LuPause className="size-10 sm:size-14 fill-current" /> : <LuPlay className="size-10 sm:size-14 fill-current" />}
+                  </button>
+                  <button type="button" title="Forward 10 seconds" aria-label="Forward 10 seconds" onClick={() => seekRel(10)} className="relative grid size-9 sm:size-14 place-items-center rounded-full hover:bg-black/30 transition">
+                    <LuRotateCw className="size-7 sm:size-10" /><span className="absolute text-[9px] sm:text-xs font-bold">10</span>
+                  </button>
+                </div>
+              </div>
             )}
 
             {controlsVisible && currentSegment && !error && !isLoadingStream && !buffering && (
@@ -1467,41 +1661,48 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
               </div>
             )}
           {/* AniDash custom player controls */}
-          <div className={`absolute inset-x-0 bottom-0 z-30 flex flex-col gap-1.5 bg-gradient-to-t from-black/75 to-transparent px-2 sm:px-5 pt-8 pb-2 sm:pb-4 text-white text-sm transition-opacity duration-200 ${controlsVisible || playerMenu ? "opacity-100" : "opacity-0 pointer-events-none"}`}>
+          <div className={`absolute inset-x-0 bottom-0 z-30 flex flex-col gap-1 bg-gradient-to-t from-black via-black/80 to-transparent px-3 sm:px-6 pt-10 pb-2 sm:pb-4 text-white text-sm transition-opacity duration-200 ${controlsVisible || playerMenu ? "opacity-100" : "opacity-0 pointer-events-none"}`}>
             <input ref={subtitleInput} type="file" accept=".vtt,.srt,text/vtt" className="hidden" onChange={e => { void uploadCaption(e.currentTarget.files?.[0]); e.currentTarget.value = "" }} />
             {playerNotice && <button type="button" onClick={() => setPlayerNotice("")} className="self-end text-xs rounded-lg bg-black/85 px-3 py-2">{playerNotice} · Dismiss</button>}
-            <div className="relative mx-1 h-5 flex items-center focus-within:ring-2 focus-within:ring-white/80 rounded">
-              <div className="absolute inset-x-0 h-1.5 rounded-full bg-white/25 overflow-hidden pointer-events-none">
-                <div className="absolute inset-y-0 left-0 bg-white/75" style={{ width: progressPercent + "%" }} />
+            <div className="relative mx-1 h-5 flex items-center focus-within:ring-2 focus-within:ring-white/80 rounded" onPointerMove={hoverTimeline} onPointerLeave={() => { if (!seekDragging.current) setSeekHover(null) }}>
+              {(controlsVisible || playerMenu) && seekHover && duration > 0 && (
+                <div className="absolute bottom-7 z-50 flex flex-col items-center overflow-hidden rounded-lg border border-white/20 bg-black/90 shadow-xl pointer-events-none" style={{ left: `clamp(84px, ${seekHover.fraction * 100}%, calc(100% - 84px))`, transform: "translateX(-50%)" }}>
+                  {currentHoverImage && <SeekThumbnail image={currentHoverImage} />}
+                  <span className="px-3 py-1.5 text-xs font-semibold tabular-nums">{formatSeconds(seekHover.time)}</span>
+                </div>
+              )}
+              <div className="absolute inset-x-0 h-1 rounded-full bg-white/25 overflow-hidden pointer-events-none">
+                {bufferedRanges.map((range, index) => duration > 0 && <span key={index} className="absolute inset-y-0 bg-white/45" style={{ left: (range.start / duration * 100) + "%", width: ((range.end - range.start) / duration * 100) + "%" }} />)}
+                <div className="absolute inset-y-0 left-0 bg-[var(--brand)]" style={{ width: progressPercent + "%", backgroundColor: "var(--brand, #ffffff)" }} />
                 {availableSegments.map(segment => (
-                  <span key={segment.kind} className="absolute inset-y-0 bg-amber-400/90"
+                  <span key={segment.kind} className="absolute inset-y-0 bg-amber-300/85"
                     style={{ left: (segment.start / duration * 100) + "%", width: ((segment.end - segment.start) / duration * 100) + "%" }} />
                 ))}
               </div>
               <span aria-hidden="true" className="absolute size-3 rounded-full bg-white shadow pointer-events-none -translate-x-1/2" style={{ left: progressPercent + "%" }} />
               <input
                 type="range" aria-label="Playback position" min={0} max={duration > 0 ? duration : 1} step={0.1}
-                disabled={!duration} value={Math.min(currentTime, duration || 1)}
-                onPointerDown={startSliderDrag}
-                onChange={e => { const el = video.current; if (el && duration > 0) { el.currentTime = Number(e.target.value); setCurrentTime(el.currentTime) } }}
+                disabled={!duration} value={Math.min(displayedTime, duration || 1)}
+                onPointerDown={() => { seekDragging.current = true; seekDraftRef.current = currentTime; startSliderDrag() }}
+                onChange={e => changeSeek(Number(e.target.value))}
                 className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
               />
             </div>
-            <div className="flex items-center justify-between gap-1 rounded-xl sm:rounded-2xl border border-white/15 bg-black/35 backdrop-blur-md px-1.5 sm:px-3 py-1">
+            <div className="flex items-center justify-between gap-1 px-0.5 sm:px-2">
               <div className="flex items-center gap-0.5 sm:gap-2 min-w-0">
                 <button type="button" className={controlClass} onClick={togglePlay} aria-label={isPlaying ? "Pause" : "Play"}>{isPlaying ? <LuPause className="size-5" /> : <LuPlay className="size-5 fill-current" />}</button>
                 <button type="button" className={controlClass} onClick={toggleMute} aria-label={isMuted ? "Unmute" : "Mute"}>{isMuted ? <LuVolumeX className="size-5" /> : <LuVolume2 className="size-5" />}</button>
                 <input type="range" aria-label="Volume" min={0} max={1} step={0.05} value={isMuted ? 0 : volume} onPointerDown={startSliderDrag} onChange={e => { const el = video.current; if (el) { el.muted = false; el.volume = Number(e.target.value) } }} className="hidden lg:block w-16 accent-white" />
-                <span className="whitespace-nowrap text-[10px] sm:text-xs tabular-nums px-0.5 sm:px-2">{formatSeconds(currentTime)} <span className="text-white/50">| {formatSeconds(duration)}</span></span>
+                <span className="whitespace-nowrap text-[10px] sm:text-xs tabular-nums px-0.5 sm:px-2">{formatSeconds(displayedTime)} <span className="text-white/50">/ {formatSeconds(duration)}</span></span>
+                {duration > 0 && <span title="Actual playable media buffered ahead of the current position" className="hidden md:inline-flex items-center gap-1 rounded-full bg-white/10 px-2 py-1 text-[10px] font-medium tabular-nums text-white/70"><span className={`size-1.5 rounded-full ${aheadSeconds >= 10 ? "bg-emerald-400" : "bg-amber-300"}`} />{Math.floor(aheadSeconds)}s buffered</span>}
               </div>
               <div className="flex items-center gap-0 sm:gap-1">
-                <button type="button" className={controlClass + " hidden sm:grid"} aria-label="Back 10 seconds" onClick={() => seekRel(-10)}><LuRotateCcw className="size-5" /></button>
-                <button type="button" className={controlClass + " hidden sm:grid"} aria-label="Forward 10 seconds" onClick={() => seekRel(10)}><LuRotateCw className="size-5" /></button>
+                <button type="button" className={controlClass + " hidden sm:grid"} aria-label="Previous episode" disabled={selected <= 1} onClick={() => openEpisode(selected - 1)}><span className="rotate-180"><NextIcon /></span></button>
                 <button type="button" className={controlClass + (playerMenu === "subtitles" || playerMenu === "appearance" ? " bg-white/20" : "")} aria-label={"Subtitles: " + (subtitlesEnabled ? captionLabel : "Off")} aria-expanded={playerMenu === "subtitles" || playerMenu === "appearance"} onClick={() => setPlayerMenu(playerMenu === "subtitles" || playerMenu === "appearance" ? null : "subtitles")}><LuCaptions className="size-5" /></button>
                 <button type="button" className={controlClass + (pipActive ? " bg-white/20" : "")} title={pipSupported ? "Picture-in-Picture" : "Picture-in-Picture unavailable"} aria-label="Picture-in-Picture" aria-pressed={pipActive} disabled={!pipSupported || !duration} onClick={() => void togglePip()}><PipIcon /></button>
                 <button type="button" className={controlClass + (playerMenu === "settings" || playerMenu === "quality" || playerMenu === "speed" ? " bg-white/20" : "")} aria-label="Player settings" aria-expanded={playerMenu === "settings" || playerMenu === "quality" || playerMenu === "speed"} onClick={() => setPlayerMenu(playerMenu === "settings" || playerMenu === "quality" || playerMenu === "speed" ? null : "settings")}><LuSettings className="size-5" /></button>
                 <button type="button" className={controlClass + " hidden sm:grid"} aria-label="Next episode" disabled={selected >= total} onClick={() => openEpisode(selected + 1)}><NextIcon /></button>
-                <span className="hidden sm:block h-5 w-px bg-white/15 mx-1" />
+
                 <button type="button" className={controlClass} aria-label="Fullscreen" onClick={toggleFullscreen}><LuMaximize className="size-5" /></button>
               </div>
             </div>
