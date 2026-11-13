@@ -545,6 +545,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
 
     let hls: Hls | undefined
     let live = true
+    let mediaRecoveryAttempted = false
 
     playbackStarted.current = false
     setPlayerNotice("")
@@ -605,10 +606,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     if (isHls && Hls.isSupported()) {
       hls = new Hls({
         enableWorker: true,
-        lowLatencyMode: true,
-        // Begin with the normal startup buffer; extend the target only after playback starts.
-        maxBufferLength: 30,
-        maxMaxBufferLength: PLAYER_BUFFER_TARGET
+        lowLatencyMode: true
       })
       hlsInstance.current = hls
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
@@ -619,20 +617,24 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
       hls.loadSource(streamUrl)
       hls.attachMedia(el)
       hls.on(Hls.Events.ERROR, (_, data) => {
-        if (data.fatal) {
-          switch (data.type) {
-            case Hls.ErrorTypes.NETWORK_ERROR:
-              hls?.startLoad()
-              break
-            case Hls.ErrorTypes.MEDIA_ERROR:
-              hls?.recoverMediaError()
-              break
-            default:
-              setError("Stream could not be played. Switch to another server below.")
-              hls?.destroy()
-              break
-          }
+        if (!live || !data.fatal) return
+        // HLS has already exhausted its normal retries when it reports a fatal error.
+        // Do not loop indefinitely or retry a server's access denial.
+        if (data.type === Hls.ErrorTypes.MEDIA_ERROR && !mediaRecoveryAttempted) {
+          mediaRecoveryAttempted = true
+          hls?.recoverMediaError()
+          return
         }
+        setBuffering(false)
+        setIsPlaying(false)
+        const status = data.response?.code
+        const detail = String(data.details || "").replace(/[^a-zA-Z0-9_ -]/g, "").slice(0, 80)
+        const reason = status === 401 || status === 403 ? "The media server denied access."
+          : data.type === Hls.ErrorTypes.NETWORK_ERROR ? "The media data could not be downloaded."
+          : data.type === Hls.ErrorTypes.MEDIA_ERROR ? "The browser could not decode the media."
+          : "The stream could not be played."
+        setError(reason + (status ? " HTTP " + status + "." : "") + (detail ? " (" + detail + ")" : ""))
+        hls?.stopLoad()
       })
     } else {
       el.src = streamUrl
@@ -664,7 +666,10 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
       previousEnd = end
       previousTime = el.currentTime
       if (performance.now() - lastProgress < 30000) return
-      setPlayerNotice("Video loading is taking longer than expected.")
+      setBuffering(false)
+      setIsPlaying(false)
+      const state = el.readyState < 2 ? "No decoded video frames are available." : "Playback has not advanced."
+      setError(state + " No media progress for 30 seconds. Retry playback.")
       window.clearInterval(timer)
     }, 1000)
     return () => window.clearInterval(timer)
@@ -1509,7 +1514,10 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
               onPlay={() => { setIsPlaying(true); setBuffering(true) }}
               onPlaying={() => {
                 playbackStarted.current = true
-                if (hlsInstance.current) hlsInstance.current.config.maxBufferLength = PLAYER_BUFFER_TARGET
+                if (hlsInstance.current) {
+                  hlsInstance.current.config.maxMaxBufferLength = PLAYER_BUFFER_TARGET
+                  hlsInstance.current.config.maxBufferLength = PLAYER_BUFFER_TARGET
+                }
                 setIsPlaying(true)
                 setBuffering(false)
                 setError("")
