@@ -351,6 +351,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
   // A revision makes a freshly decoded frame available while the pointer stays still.
   void previewRevision
   const manualPlaybackIntent = React.useRef<"play" | "pause" | null>(null)
+  const playbackStarted = React.useRef(false)
   const autoplayRef = React.useRef(autoplay)
   autoplayRef.current = autoplay
   const playerWrapper = React.useRef<HTMLDivElement>(null)
@@ -545,6 +546,8 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     let hls: Hls | undefined
     let live = true
 
+    playbackStarted.current = false
+    setPlayerNotice("")
     setBuffering(true)
     setCurrentTime(0)
     setDuration(0)
@@ -603,7 +606,8 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
       hls = new Hls({
         enableWorker: true,
         lowLatencyMode: true,
-        maxBufferLength: PLAYER_BUFFER_TARGET,
+        // Begin with the normal startup buffer; extend the target only after playback starts.
+        maxBufferLength: 30,
         maxMaxBufferLength: PLAYER_BUFFER_TARGET
       })
       hlsInstance.current = hls
@@ -648,13 +652,22 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
   // Surface media stalls rather than displaying an endless loading indicator.
   React.useEffect(() => {
     if (!buffering || !activeStream?.url || isLoadingStream || error) return
-    const timeout = window.setTimeout(() => {
-      setBuffering(false)
-      setIsPlaying(false)
-      video.current?.pause()
-      setError("The media did not deliver playable frames. Retry playback or check your connection.")
-    }, 20000)
-    return () => window.clearTimeout(timeout)
+    // A short initial stall should not forcibly pause a media element that is still loading.
+    const el = video.current
+    if (!el) return
+    let previousEnd = el.buffered.length ? el.buffered.end(el.buffered.length - 1) : 0
+    let previousTime = el.currentTime
+    let lastProgress = performance.now()
+    const timer = window.setInterval(() => {
+      const end = el.buffered.length ? el.buffered.end(el.buffered.length - 1) : 0
+      if (end > previousEnd + 0.05 || el.currentTime > previousTime + 0.05) lastProgress = performance.now()
+      previousEnd = end
+      previousTime = el.currentTime
+      if (performance.now() - lastProgress < 30000) return
+      setPlayerNotice("Video loading is taking longer than expected.")
+      window.clearInterval(timer)
+    }, 1000)
+    return () => window.clearInterval(timer)
   }, [buffering, activeStream?.url, isLoadingStream, error, playbackRevision])
 
   // External subtitles use ordinary browser CORS, converted to local WebVTT.
@@ -1419,60 +1432,14 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
       {/* Full Watch Player View */}
       {watchMode && (
         <div data-anidash-watch-page onClick={returnPointerFocus} className="w-full max-w-6xl mx-auto p-2 sm:p-4 md:p-6 space-y-4">
-          {/* Header */}
-          <header className="flex items-start justify-between gap-4">
-            <div>
-              <p className="text-xs sm:text-sm text-[--muted]">
-                {m.title?.userPreferred || m.title?.english || m.title?.romaji}
-              </p>
-              <h3 className="text-lg sm:text-2xl font-bold">
-                {m.format === "MOVIE" ? "Movie" : "Episode " + selected}
-                {selectedEpisodeTitle && selectedEpisodeTitle !== "Episode " + selected ? " — " + selectedEpisodeTitle : ""}
-              </h3>
-            </div>
-            <Button intent="gray-outline" aria-label="Back to anime details" onClick={closePlayer}>
-              <LuChevronLeft /> Details
-            </Button>
-          </header>
+          <header>
+             <h3 className="text-lg sm:text-2xl font-bold leading-tight">
+               {m.format === "MOVIE" ? "Movie" : "Episode " + selected}
+               {selectedEpisodeTitle && selectedEpisodeTitle !== "Episode " + selected ? " — " + selectedEpisodeTitle : ""}
+             </h3>
+           </header>
 
-          {/* Audio Language & Available Streams Bar */}
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex flex-wrap gap-2">
-              <Button
-                intent={audio === "dub" ? "white" : "gray-outline"}
-                onClick={() => changeAudio("dub")}
-              >
-                English DUB
-              </Button>
-              <Button
-                intent={audio === "sub" ? "white" : "gray-outline"}
-                onClick={() => changeAudio("sub")}
-              >
-                Japanese SUB
-              </Button>
-            </div>
-
-            {streams.length > 1 && (
-              <div className="flex items-center gap-1.5 overflow-x-auto text-xs text-[--muted]">
-                <span>Quality:</span>
-                {streams.map((s, idx) => (
-                  <button
-                    key={idx}
-                    onClick={() => setActiveStream(s)}
-                    className={`px-2 py-1 rounded text-xs transition ${
-                      activeStream?.url === s.url
-                        ? "bg-white text-black font-semibold"
-                        : "bg-neutral-800 text-neutral-300 hover:bg-neutral-700"
-                    }`}
-                  >
-                    {s.quality || s.server || `Stream ${idx + 1}`}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Video Player Wrapper */}
+           {/* Video Player Wrapper */}
           <div
             data-player-wrapper
             ref={playerWrapper}
@@ -1540,7 +1507,14 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
               onLoadedData={e => { updateBuffered(e.currentTarget); rememberDecodedFrame(e.currentTarget) }}
               onDurationChange={e => setDuration(Number.isFinite(e.currentTarget.duration) ? e.currentTarget.duration : 0)}
               onPlay={() => { setIsPlaying(true); setBuffering(true) }}
-              onPlaying={() => { setIsPlaying(true); setBuffering(false); setError("") }}
+              onPlaying={() => {
+                playbackStarted.current = true
+                if (hlsInstance.current) hlsInstance.current.config.maxBufferLength = PLAYER_BUFFER_TARGET
+                setIsPlaying(true)
+                setBuffering(false)
+                setError("")
+                setPlayerNotice("")
+              }}
               onCanPlay={() => setBuffering(false)}
               onWaiting={e => { if (!e.currentTarget.paused) setBuffering(true) }}
               onStalled={e => { if (!e.currentTarget.paused) setBuffering(true) }}
@@ -1557,7 +1531,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
                   setCurrentTime(el.currentTime)
                   updateBuffered(el)
                   rememberDecodedFrame(el)
-                  if (autoSkip && !el.paused && !el.seeking && !isLoadingStream) {
+                  if (autoSkip && playbackStarted.current && el.currentTime > 0 && el.readyState >= 2 && !el.paused && !el.seeking && !isLoadingStream) {
                     const segment = availableSegments.find(item =>
                       el.currentTime >= item.start && el.currentTime < item.end && !skippedSegments.current.has(item.kind))
                     if (segment) skipSegment(segment)
@@ -1638,6 +1612,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
                   {playerMenu === "settings" && <>
                     <button type="button" className={menuRowClass} onClick={() => setPlayerMenu("quality")}><span>Quality</span><span className="flex items-center gap-2 text-xs text-white/65">{hlsLevels.length ? (qualityLevel === -1 ? "Auto" : hlsLevels.find(l => l.index === qualityLevel)?.label) : activeStream?.quality || "Source"}<LuChevronRight /></span></button>
                     <button type="button" className={menuRowClass} onClick={() => setPlayerMenu("speed")}><span>Speed</span><span className="flex items-center gap-2 text-xs text-white/65">{playbackRate === 1 ? "Normal" : playbackRate + "×"}<LuChevronRight /></span></button>
+                    <button type="button" className={menuRowClass} onClick={() => { setPlayerMenu(null); closePlayer() }}><span>Anime details</span><LuChevronRight /></button>
                   </>}
                   {playerMenu === "quality" && <>
                     {hlsLevels.length > 0 ? [{ index: -1, label: "Auto" }, ...hlsLevels].map(level => <button key={level.index} type="button" className={menuRowClass} onClick={() => { chooseQuality(level.index); setPlayerMenu("settings") }}><span>{level.label}</span><span>{qualityLevel === level.index ? "✓" : ""}</span></button>) : streams.length > 1 ? streams.map((stream, index) => <button key={index} type="button" className={menuRowClass} onClick={() => { record(true); setActiveStream(stream); setPlayerMenu("settings") }}><span>{stream.quality || "Stream " + (index + 1)}</span><span>{activeStream?.url === stream.url ? "✓" : ""}</span></button>) : <p className="p-3 text-xs text-white/60">Only the current media quality is available.</p>}
