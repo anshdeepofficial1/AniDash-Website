@@ -1,4 +1,4 @@
-import { getEpisodeResume, persistPlayback, syncPlayback } from "./resume"
+import { getEpisodeResume, localResume, persistPlayback, syncPlayback } from "./resume"
 import React from "react"
 import { useRouter } from "@/lib/navigation"
 import Hls from "hls.js"
@@ -112,6 +112,10 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
   const [isMuted, setIsMuted] = React.useState(false)
   const [currentTime, setCurrentTime] = React.useState(0)
   const [duration, setDuration] = React.useState(0)
+  const [buffering, setBuffering] = React.useState(false)
+  const [playbackRevision, setPlaybackRevision] = React.useState(0)
+  const [volume, setVolume] = React.useState(1)
+  const [playbackRate, setPlaybackRate] = React.useState(1)
 
   const [arc, setArc] = React.useState("all")
   const [page, setPage] = React.useState(1)
@@ -292,16 +296,28 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     let hls: Hls | undefined
     let live = true
 
-    const resumePromise = getEpisodeResume(m, selected)
+    setBuffering(true)
+    setCurrentTime(0)
+    setDuration(0)
+    setIsPlaying(false)
+    const local = localResume(m)
+    const localPosition = local?.episode === selected ? local.seconds : 0
+    // Account synchronization must never block the media element indefinitely.
+    const resumePromise = Promise.race([
+      getEpisodeResume(m, selected).catch(() => localPosition),
+      new Promise<number>(resolve => window.setTimeout(() => resolve(localPosition), 1500))
+    ])
 
     const onLoadedMetadata = async () => {
+      setDuration(Number.isFinite(el.duration) ? el.duration : 0)
       const pos = await resumePromise
       if (!live) return
-      if (pos > 0 && Number.isFinite(el.duration) && pos < el.duration) {
+      if (pos > 0 && Number.isFinite(el.duration) && pos < el.duration && el.currentTime < 1) {
         el.currentTime = pos
       }
-      setDuration(el.duration || 0)
-      void el.play().catch(() => {})
+      void el.play().catch(() => {
+        if (live) setBuffering(false)
+      })
     }
 
     el.addEventListener("loadedmetadata", onLoadedMetadata, { once: true })
@@ -346,7 +362,17 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
       el.removeAttribute("src")
       el.load()
     }
-  }, [activeStream?.url, selected])
+  }, [activeStream?.url, selected, playbackRevision])
+
+  // Surface media stalls rather than displaying an endless loading indicator.
+  React.useEffect(() => {
+    if (!buffering || !activeStream?.url || isLoadingStream || error) return
+    const timeout = window.setTimeout(() => {
+      setBuffering(false)
+      setError("The media has not started loading. Retry playback or check your connection.")
+    }, 20000)
+    return () => window.clearTimeout(timeout)
+  }, [buffering, activeStream?.url, isLoadingStream, error, playbackRevision])
 
   // Subtitle track toggle
   React.useEffect(() => {
@@ -423,8 +449,10 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
   function togglePlay() {
     const el = video.current
     if (!el) return
-    if (el.paused) el.play().catch(() => {})
-    else el.pause()
+    if (el.paused) {
+      setError("")
+      void el.play().catch(() => setBuffering(false))
+    } else el.pause()
   }
 
   function seekRel(deltaSeconds: number) {
@@ -445,9 +473,12 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     const container = document.querySelector("[data-player-wrapper]") || video.current
     if (!container) return
     if (document.fullscreenElement) {
-      document.exitFullscreen().catch(() => {})
+      void document.exitFullscreen().catch(() => {})
+    } else if (container.requestFullscreen) {
+      void container.requestFullscreen().catch(() => {})
     } else {
-      container.requestFullscreen().catch(() => {})
+      const nativeVideo = video.current as (HTMLVideoElement & { webkitEnterFullscreen?: () => void }) | null
+      nativeVideo?.webkitEnterFullscreen?.()
     }
   }
 
@@ -462,7 +493,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
       const target = e.target as HTMLElement | null
       if (
         target &&
-        (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)
+        (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "BUTTON" || target.tagName === "SELECT" || target.isContentEditable)
       ) {
         return
       }
@@ -805,11 +836,18 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
               </div>
             )}
 
+            {buffering && !isLoadingStream && !error && (
+              <div className="absolute inset-0 z-10 pointer-events-none flex flex-col items-center justify-center gap-3 bg-black/25 text-white" role="status">
+                <div className="size-10 border-2 border-white/25 border-t-white rounded-full animate-spin" />
+                <span className="text-xs font-medium">Buffering video…</span>
+              </div>
+            )}
             {/* Error Overlay */}
             {error && !isLoadingStream && (
               <div className="absolute inset-0 z-20 bg-black/85 flex flex-col items-center justify-center gap-3 p-6 text-center">
                 <p className="text-sm text-red-400 max-w-md">{error}</p>
-                <div className="flex flex-wrap gap-2">
+                <div className="flex flex-wrap justify-center gap-2">
+                  {activeStream?.url && <Button size="sm" intent="gray-outline" onClick={() => { setError(""); setPlaybackRevision(n => n + 1) }}>Retry playback</Button>}
                   <Button
                     size="sm"
                     intent="white"
@@ -835,13 +873,23 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
             {/* Video Element */}
             <video
               ref={video}
-              controls
               playsInline
-              preload="metadata"
-              className="w-full h-full object-contain bg-black"
-              onPlay={() => setIsPlaying(true)}
+              preload="auto"
+              className="absolute inset-0 w-full h-full object-contain bg-black"
+              onClick={togglePlay}
+              onDoubleClick={toggleFullscreen}
+              onLoadedMetadata={e => setDuration(Number.isFinite(e.currentTarget.duration) ? e.currentTarget.duration : 0)}
+              onDurationChange={e => setDuration(Number.isFinite(e.currentTarget.duration) ? e.currentTarget.duration : 0)}
+              onPlay={() => { setIsPlaying(true); setBuffering(true) }}
+              onPlaying={() => { setIsPlaying(true); setBuffering(false); setError("") }}
+              onCanPlay={() => setBuffering(false)}
+              onWaiting={e => { if (!e.currentTarget.paused) setBuffering(true) }}
+              onStalled={e => { if (!e.currentTarget.paused) setBuffering(true) }}
+              onVolumeChange={e => { setVolume(e.currentTarget.volume); setIsMuted(e.currentTarget.muted) }}
+              onRateChange={e => setPlaybackRate(e.currentTarget.playbackRate)}
               onPause={() => {
                 setIsPlaying(false)
+                setBuffering(false)
                 record(true)
               }}
               onTimeUpdate={() => {
@@ -857,11 +905,11 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
                 record(true, true)
                 if (selected < total) openEpisode(selected + 1)
               }}
-              onError={() =>
-                setError(
-                  "Playback error on this server. Switch to another server below."
-                )
-              }
+              onError={() => {
+                setBuffering(false)
+                setIsPlaying(false)
+                setError("The browser could not play this media. Retry playback or use a compatible source.")
+              }}
             >
               {tracks.map((t, idx) => (
                 <track
@@ -874,10 +922,21 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
                 />
               ))}
             </video>
-          </div>
+            {!isPlaying && !buffering && !isLoadingStream && !error && activeStream?.url && (
+              <button type="button" aria-label="Play video" onClick={togglePlay} className="absolute inset-0 m-auto z-10 size-14 sm:size-16 rounded-full bg-black/60 border border-white/30 text-white grid place-items-center hover:bg-white hover:text-black transition">
+                <LuPlay className="size-7 fill-current" />
+              </button>
+            )}
 
-          {/* Quick Player Toolbar */}
-          <div className="flex flex-wrap items-center justify-between gap-3 px-3 py-2 rounded-xl bg-neutral-900/80 border border-neutral-800 text-sm">
+          {/* AniDash custom player controls */}
+          <div className="absolute inset-x-0 bottom-0 z-30 flex flex-col gap-2 bg-gradient-to-t from-black via-black/80 to-transparent px-3 sm:px-5 pt-8 pb-3 text-white text-sm">
+            <input
+              type="range" aria-label="Playback position" min={0} max={duration > 0 ? duration : 1} step={0.1}
+              disabled={!duration} value={Math.min(currentTime, duration || 1)}
+              onChange={e => { const el = video.current; if (el && duration > 0) { el.currentTime = Number(e.target.value); setCurrentTime(el.currentTime) } }}
+              className="w-full h-1.5 accent-white cursor-pointer"
+            />
+            <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <button
                 type="button"
@@ -913,7 +972,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
                   Next ep <LuChevronRight className="size-3.5" />
                 </button>
               )}
-              <span className="text-xs text-neutral-400 ml-2 hidden sm:inline">
+              <span className="text-xs text-white/80 tabular-nums ml-1">
                 {formatSeconds(currentTime)} / {formatSeconds(duration)}
               </span>
             </div>
@@ -940,6 +999,13 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
               >
                 {isMuted ? <LuVolumeX className="size-4" /> : <LuVolume2 className="size-4" />}
               </button>
+              <input type="range" aria-label="Volume" min={0} max={1} step={0.05} value={isMuted ? 0 : volume}
+                onChange={e => { const el = video.current; if (el) { el.muted = false; el.volume = Number(e.target.value) } }}
+                className="hidden sm:block w-16 accent-white" />
+              <select aria-label="Playback speed" value={playbackRate} onChange={e => { if (video.current) video.current.playbackRate = Number(e.target.value) }}
+                className="bg-neutral-800 rounded-lg px-1.5 py-1.5 text-xs text-white">
+                {[0.5, 0.75, 1, 1.25, 1.5, 2].map(rate => <option key={rate} value={rate}>{rate}×</option>)}
+              </select>
               <button
                 type="button"
                 onClick={toggleFullscreen}
@@ -949,6 +1015,8 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
                 <LuMaximize className="size-4" />
               </button>
             </div>
+            </div>
+          </div>
           </div>
 
           {syncState && (
