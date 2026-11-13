@@ -173,6 +173,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
   const [uploadedCaption, setUploadedCaption] = React.useState<CaptionFile | null>(null)
   const [captionOptions, setCaptionOptions] = React.useState<CaptionOption[]>([])
   const [captionText, setCaptionText] = React.useState("")
+  const [captionRevision, setCaptionRevision] = React.useState(0)
   const [captionMessage, setCaptionMessage] = React.useState("")
   const [captionDelay, setCaptionDelay] = React.useState(0)
   const [captionSize, setCaptionSize] = React.useState<number>([0.8, 1, 1.25, 1.5].includes(initial.preferences?.playerCaptionSize) ? initial.preferences.playerCaptionSize : 1)
@@ -223,11 +224,13 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
   const subtitleInput = React.useRef<HTMLInputElement>(null)
   const uploadedUrl = React.useRef<string | null>(null)
   const controlsTimer = React.useRef<number | undefined>(undefined)
-  const selectedCaptionIndex = captionChoice !== "auto" && captionOptions.some(t => String(t.index) === captionChoice)
-    ? Number(captionChoice)
-    : (captionOptions.find(t => /^en(?:[-_]|$)|english/i.test(t.language + " " + t.label)) || captionOptions.find(t => /english/i.test(t.label)) || captionOptions[0])?.index
+  const selectedCaptionIndex = captionChoice === "upload" && uploadedCaption
+    ? captionOptions.find(t => t.label === uploadedCaption.label)?.index
+    : captionChoice !== "auto" && captionOptions.some(t => String(t.index) === captionChoice)
+      ? Number(captionChoice)
+      : (captionOptions.find(t => /^en(?:[-_]|$)/i.test(t.language) || /english/i.test(t.label)) || captionOptions[0])?.index
   const captionLabel = captionOptions.find(t => t.index === selectedCaptionIndex)?.label || "Unavailable"
-  const controlClass = "shrink-0 grid size-9 sm:size-10 place-items-center rounded-xl text-white/90 hover:bg-white/15 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-white disabled:opacity-35 disabled:pointer-events-none transition"
+  const controlClass = "shrink-0 grid size-8 sm:size-10 place-items-center rounded-xl text-white/90 hover:bg-white/15 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-white disabled:opacity-35 disabled:pointer-events-none transition"
   const menuRowClass = "w-full flex items-center justify-between gap-3 rounded-xl px-3 py-2.5 text-left text-sm hover:bg-white/10 focus-visible:outline focus-visible:outline-white transition"
   const lastSaved = React.useRef(0)
   const lastSynced = React.useRef(0)
@@ -583,7 +586,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     el.addEventListener("seeked", refresh)
     el.addEventListener("loadeddata", refresh)
     return () => { track?.removeEventListener("cuechange", refresh); el.removeEventListener("timeupdate", refresh); el.removeEventListener("seeked", refresh); el.removeEventListener("loadeddata", refresh) }
-  }, [watchMode, subtitlesEnabled, selectedCaptionIndex, captionOptions, captionDelay, pipActive, activeStream?.url])
+  }, [watchMode, subtitlesEnabled, selectedCaptionIndex, captionOptions, captionDelay, pipActive, activeStream?.url, captionRevision])
 
   React.useEffect(() => {
     if (!watchMode) return
@@ -621,8 +624,8 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
       const url = URL.createObjectURL(new Blob([converted], { type: "text/vtt" }))
       uploadedUrl.current = url
       setUploadedCaption({ id: "upload", url, label: file.name, language: "und" })
-      setCaptionChoice("auto")
-      setCaptionMessage("Subtitle uploaded. Select the uploaded track in this menu.")
+      setCaptionChoice("upload")
+      setCaptionMessage("Uploaded subtitle selected.")
       updateCaptionEnabled(true)
     } catch (reason) { setCaptionMessage(reason instanceof Error ? reason.message : "Subtitle upload failed.") }
   }
@@ -1219,6 +1222,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
             >
               {[...captionFiles, ...(uploadedCaption ? [uploadedCaption] : [])].map(t => (
                 <track key={t.id + t.url} kind="subtitles" src={t.url} srcLang={t.language} label={t.label}
+                  onLoad={() => setCaptionRevision(n => n + 1)}
                   onError={() => setCaptionMessage("A subtitle track could not be read by the browser.")} />
               ))}
             </video>
@@ -1244,12 +1248,8 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
                 Skip {currentSegment.kind === "intro" ? "Intro" : "Outro"} <LuChevronRight className="inline size-4" />
               </button>
             )}
-          {/* AniDash custom player controls */}
-          <div className={`absolute inset-x-0 bottom-0 z-30 flex flex-col gap-1.5 bg-gradient-to-t from-black/75 to-transparent px-2 sm:px-5 pt-8 pb-2 sm:pb-4 text-white text-sm transition-opacity duration-200 ${controlsVisible || playerMenu || !isPlaying ? "opacity-100" : "opacity-0 pointer-events-none"}`}>
-            <input ref={subtitleInput} type="file" accept=".vtt,.srt,text/vtt" className="hidden" onChange={e => { void uploadCaption(e.currentTarget.files?.[0]); e.currentTarget.value = "" }} />
-            {playerNotice && <button type="button" onClick={() => setPlayerNotice("")} className="self-end text-xs rounded-lg bg-black/85 px-3 py-2">{playerNotice} · Dismiss</button>}
             {playerMenu && (
-              <div role="dialog" aria-label={playerMenu === "appearance" ? "Subtitle appearance" : playerMenu} className="absolute right-3 sm:right-5 bottom-[82px] w-[min(19rem,calc(100%-1.5rem))] max-h-[65%] sm:max-h-[70%] overflow-y-auto rounded-2xl border border-white/15 bg-[#13171e]/95 backdrop-blur-xl shadow-2xl text-white">
+              <div role="dialog" aria-label={playerMenu === "appearance" ? "Subtitle appearance" : playerMenu} className="absolute right-3 sm:right-5 bottom-[76px] sm:bottom-[90px] z-40 w-[min(19rem,calc(100%-1.5rem))] max-h-[calc(100%-84px)] sm:max-h-[calc(100%-100px)] overflow-y-auto rounded-2xl border border-white/15 bg-[#13171e]/95 backdrop-blur-xl shadow-2xl text-white">
                 <div className="sticky top-0 flex items-center gap-2 border-b border-white/10 bg-[#171c23] px-4 py-3 text-sm font-semibold">
                   {playerMenu === "quality" || playerMenu === "speed" || playerMenu === "appearance" ? <button type="button" className="grid size-6 place-items-center" aria-label="Back" onClick={() => setPlayerMenu(playerMenu === "appearance" ? "subtitles" : "settings")}><LuChevronLeft /></button> : playerMenu === "settings" ? <LuSettings /> : <LuCaptions />}
                   {({ settings: "Settings", quality: "Quality", speed: "Speed", subtitles: "Subtitles", appearance: "Appearance" })[playerMenu]}
@@ -1281,6 +1281,10 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
                 </div>
               </div>
             )}
+          {/* AniDash custom player controls */}
+          <div className={`absolute inset-x-0 bottom-0 z-30 flex flex-col gap-1.5 bg-gradient-to-t from-black/75 to-transparent px-2 sm:px-5 pt-8 pb-2 sm:pb-4 text-white text-sm transition-opacity duration-200 ${controlsVisible || playerMenu || !isPlaying ? "opacity-100" : "opacity-0 pointer-events-none"}`}>
+            <input ref={subtitleInput} type="file" accept=".vtt,.srt,text/vtt" className="hidden" onChange={e => { void uploadCaption(e.currentTarget.files?.[0]); e.currentTarget.value = "" }} />
+            {playerNotice && <button type="button" onClick={() => setPlayerNotice("")} className="self-end text-xs rounded-lg bg-black/85 px-3 py-2">{playerNotice} · Dismiss</button>}
             <div className="relative mx-1 h-5 flex items-center focus-within:ring-2 focus-within:ring-white/80 rounded">
               <div className="absolute inset-x-0 h-1.5 rounded-full bg-white/25 overflow-hidden pointer-events-none">
                 <div className="absolute inset-y-0 left-0 bg-white/75" style={{ width: progressPercent + "%" }} />
