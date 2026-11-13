@@ -49,6 +49,23 @@ type StreamTrack = {
 const PAGE_SIZE = 24
 const storageKey = "anidash.watch.web.v1"
 const JUSTANIME_SERVERS = ["momo", "onyx", "gigi", "nami", "calm", "revo"] as const
+const DEFAULT_SERVER = "onyx"
+type SkipInterval = { start: number; end: number }
+type SkipSegments = { intro: SkipInterval | null; outro: SkipInterval | null }
+const EMPTY_SEGMENTS: SkipSegments = { intro: null, outro: null }
+
+function parseSkipInterval(value: unknown): SkipInterval | null {
+  if (!value || typeof value !== "object") return null
+  const item = value as Record<string, unknown>
+  if (item.start == null || item.end == null || item.start === "" || item.end === "") return null
+  const start = Number(item.start), end = Number(item.end)
+  return Number.isFinite(start) && Number.isFinite(end) && start >= 0 && end > start
+    ? { start, end } : null
+}
+function withinDuration(interval: SkipInterval | null, duration: number): SkipInterval | null {
+  return interval && duration > 0 && interval.start < duration && interval.end <= duration + 1
+    ? { start: interval.start, end: Math.min(interval.end, duration) } : null
+}
 
 function getStore() {
   try {
@@ -100,7 +117,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
   const [audio, setAudio] = React.useState<"dub" | "sub">(
     initial.preferences?.preferredAudio === "sub" ? "sub" : "dub"
   )
-  const [selectedServer, setSelectedServer] = React.useState<string>("momo")
+  const [selectedServer, setSelectedServer] = React.useState<string>(DEFAULT_SERVER)
   const [serverMap, setServerMap] = React.useState<Record<string, { sub?: boolean; dub?: boolean }>>({})
   const [streams, setStreams] = React.useState<StreamSource[]>([])
   const [activeStream, setActiveStream] = React.useState<StreamSource | null>(null)
@@ -116,6 +133,19 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
   const [playbackRevision, setPlaybackRevision] = React.useState(0)
   const [volume, setVolume] = React.useState(1)
   const [playbackRate, setPlaybackRate] = React.useState(1)
+  const [autoplay, setAutoplay] = React.useState(initial.preferences?.playerAutoplay !== false)
+  const [autoSkip, setAutoSkip] = React.useState(initial.preferences?.playerAutoSkip !== false)
+  const [autoNext, setAutoNext] = React.useState(initial.preferences?.playerAutoNext !== false)
+  const [segments, setSegments] = React.useState<SkipSegments>(EMPTY_SEGMENTS)
+  const skippedSegments = React.useRef(new Set<string>())
+  const intro = withinDuration(segments.intro, duration)
+  const outro = withinDuration(segments.outro, duration)
+  const availableSegments = [
+    ...(intro ? [{ ...intro, kind: "intro" as const }] : []),
+    ...(outro ? [{ ...outro, kind: "outro" as const }] : [])
+  ]
+  const currentSegment = availableSegments.find(segment => currentTime >= segment.start && currentTime < segment.end)
+  const progressPercent = duration > 0 ? Math.max(0, Math.min(100, currentTime / duration * 100)) : 0
 
   const [arc, setArc] = React.useState("all")
   const [page, setPage] = React.useState(1)
@@ -193,6 +223,9 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     let live = true
     setIsLoadingStream(true)
     setError("")
+    setSegments(EMPTY_SEGMENTS)
+    setTracks([])
+    skippedSegments.current.clear()
 
     // Fetch server availability map in background
     fetch(`/api/justanime?action=servers&id=${entry.mediaId}&episode=${selected}&category=${audio}`)
@@ -203,7 +236,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
       .catch(() => {})
 
     async function resolveStreams() {
-      const serverParam = selectedServer || "momo"
+      const serverParam = selectedServer || DEFAULT_SERVER
 
       // 1. Try JustAnime with selected server
       try {
@@ -215,7 +248,8 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
           if (live && Array.isArray(data.sources) && data.sources.length > 0) {
             setStreams(data.sources)
             setActiveStream(data.sources[0])
-            if (Array.isArray(data.tracks)) setTracks(data.tracks)
+            setTracks(Array.isArray(data.tracks) ? data.tracks : [])
+            setSegments({ intro: parseSkipInterval(data.intro), outro: parseSkipInterval(data.outro) })
             setIsLoadingStream(false)
             return
           }
@@ -232,7 +266,8 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
           if (live && Array.isArray(data.sources) && data.sources.length > 0) {
             setStreams(data.sources)
             setActiveStream(data.sources[0])
-            if (Array.isArray(data.tracks)) setTracks(data.tracks)
+            setTracks(Array.isArray(data.tracks) ? data.tracks : [])
+            setSegments({ intro: parseSkipInterval(data.intro), outro: parseSkipInterval(data.outro) })
             setIsLoadingStream(false)
             return
           }
@@ -249,7 +284,8 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
           if (live && Array.isArray(data.sources) && data.sources.length > 0) {
             setStreams(data.sources)
             setActiveStream(data.sources[0])
-            if (Array.isArray(data.tracks)) setTracks(data.tracks)
+            setTracks(Array.isArray(data.tracks) ? data.tracks : [])
+            setSegments({ intro: parseSkipInterval(data.intro), outro: parseSkipInterval(data.outro) })
             setIsLoadingStream(false)
             return
           }
@@ -266,7 +302,8 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
           if (live && Array.isArray(data.sources) && data.sources.length > 0) {
             setStreams(data.sources)
             setActiveStream(data.sources[0])
-            if (Array.isArray(data.tracks)) setTracks(data.tracks)
+            setTracks(Array.isArray(data.tracks) ? data.tracks : [])
+            setSegments({ intro: parseSkipInterval(data.intro), outro: parseSkipInterval(data.outro) })
             setIsLoadingStream(false)
             return
           }
@@ -314,6 +351,10 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
       if (!live) return
       if (pos > 0 && Number.isFinite(el.duration) && pos < el.duration && el.currentTime < 1) {
         el.currentTime = pos
+      }
+      if (getStore().preferences?.playerAutoplay === false) {
+        setBuffering(false)
+        return
       }
       void el.play().catch((reason: unknown) => {
         if (!live) return
@@ -430,9 +471,9 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
   }, [watchMode, selected, activeStream?.url])
 
   // Navigation handlers
-  function openEpisode(n: number) {
+  function openEpisode(n: number, alreadyRecorded = false) {
     if (n < 1 || n > total) return
-    if (watchMode) record(true)
+    if (watchMode && !alreadyRecorded) record(true)
     router.push(`/entry?id=${entry.mediaId}&episode=${n}`)
   }
 
@@ -454,6 +495,22 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     setSelectedServer(serverKey)
     const s = getStore()
     saveStore({ ...s, preferences: { ...s.preferences, preferredAudio: channel } })
+  }
+
+  function setPlaybackPreference(key: "playerAutoplay" | "playerAutoSkip" | "playerAutoNext", enabled: boolean) {
+    if (key === "playerAutoplay") setAutoplay(enabled)
+    if (key === "playerAutoSkip") setAutoSkip(enabled)
+    if (key === "playerAutoNext") setAutoNext(enabled)
+    const s = getStore()
+    saveStore({ ...s, preferences: { ...s.preferences, [key]: enabled } })
+  }
+
+  function skipSegment(segment: SkipInterval & { kind: "intro" | "outro" }) {
+    const el = video.current
+    if (!el || !Number.isFinite(el.duration) || segment.end > el.duration + 1) return
+    skippedSegments.current.add(segment.kind)
+    el.currentTime = Math.min(el.duration, segment.end)
+    setCurrentTime(el.currentTime)
   }
 
   // Player control actions
@@ -912,6 +969,11 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
                 const el = video.current
                 if (el) {
                   setCurrentTime(el.currentTime)
+                  if (autoSkip && !el.paused && !el.seeking && !isLoadingStream) {
+                    const segment = availableSegments.find(item =>
+                      el.currentTime >= item.start && el.currentTime < item.end && !skippedSegments.current.has(item.kind))
+                    if (segment) skipSegment(segment)
+                  }
                   record()
                 }
               }}
@@ -919,7 +981,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
               onEnded={() => {
                 setIsPlaying(false)
                 record(true, true)
-                if (selected < total) openEpisode(selected + 1)
+                if (autoNext && selected < total) openEpisode(selected + 1, true)
               }}
               onError={() => {
                 setBuffering(false)
@@ -949,14 +1011,30 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
               </button>
             )}
 
+            {currentSegment && !error && !isLoadingStream && !buffering && (
+              <button type="button" onClick={() => skipSegment(currentSegment)}
+                className="absolute right-4 bottom-24 sm:bottom-20 z-30 rounded-lg border border-white/40 bg-black/85 px-4 py-2 text-sm font-semibold text-white shadow-lg hover:bg-white hover:text-black transition">
+                Skip {currentSegment.kind === "intro" ? "Intro" : "Outro"} <LuChevronRight className="inline size-4" />
+              </button>
+            )}
           {/* AniDash custom player controls */}
           <div className="absolute inset-x-0 bottom-0 z-30 flex flex-col gap-2 bg-gradient-to-t from-black via-black/80 to-transparent px-3 sm:px-5 pt-8 pb-3 text-white text-sm">
-            <input
-              type="range" aria-label="Playback position" min={0} max={duration > 0 ? duration : 1} step={0.1}
-              disabled={!duration} value={Math.min(currentTime, duration || 1)}
-              onChange={e => { const el = video.current; if (el && duration > 0) { el.currentTime = Number(e.target.value); setCurrentTime(el.currentTime) } }}
-              className="w-full h-1.5 accent-white cursor-pointer"
-            />
+            <div className="relative mx-1 h-5 flex items-center focus-within:ring-2 focus-within:ring-white/80 rounded">
+              <div className="absolute inset-x-0 h-1.5 rounded-full bg-white/25 overflow-hidden pointer-events-none">
+                <div className="absolute inset-y-0 left-0 bg-white/75" style={{ width: progressPercent + "%" }} />
+                {availableSegments.map(segment => (
+                  <span key={segment.kind} className="absolute inset-y-0 bg-amber-400/90"
+                    style={{ left: (segment.start / duration * 100) + "%", width: ((segment.end - segment.start) / duration * 100) + "%" }} />
+                ))}
+              </div>
+              <span aria-hidden="true" className="absolute size-3 rounded-full bg-white shadow pointer-events-none -translate-x-1/2" style={{ left: progressPercent + "%" }} />
+              <input
+                type="range" aria-label="Playback position" min={0} max={duration > 0 ? duration : 1} step={0.1}
+                disabled={!duration} value={Math.min(currentTime, duration || 1)}
+                onChange={e => { const el = video.current; if (el && duration > 0) { el.currentTime = Number(e.target.value); setCurrentTime(el.currentTime) } }}
+                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+              />
+            </div>
             <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <button
@@ -1046,6 +1124,25 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
             </p>
           )}
 
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-neutral-800 bg-[#0d0d0d] px-4 py-3">
+            <div className="flex flex-wrap items-center gap-4">
+              {([
+                ["Autoplay", autoplay, "playerAutoplay"],
+                ["Auto Skip", autoSkip, "playerAutoSkip"],
+                ["Auto Next", autoNext, "playerAutoNext"]
+              ] as const).map(([label, enabled, key]) => (
+                <button key={key} type="button" role="switch" aria-checked={enabled} onClick={() => setPlaybackPreference(key, !enabled)}
+                  className="inline-flex items-center gap-2 text-xs font-medium text-neutral-200 hover:text-white">
+                  <span aria-hidden="true" className={`grid size-4 place-items-center rounded-full border text-[10px] font-bold ${enabled ? "bg-white border-white text-black" : "border-neutral-500 text-transparent"}`}>✓</span>{label}
+                </button>
+              ))}
+            </div>
+            {availableSegments.length > 0 && (
+              <div className="flex flex-wrap items-center gap-3 text-xs text-neutral-400">
+                {availableSegments.map(segment => <span key={segment.kind} className="inline-flex items-center gap-1.5"><span className="size-2 rounded-sm bg-amber-400" />{segment.kind === "intro" ? "Intro" : "Outro"} {formatSeconds(segment.start)}–{formatSeconds(segment.end)}</span>)}
+              </div>
+            )}
+          </div>
           {/* Exact Server Selector Card (Matching Screenshot) */}
           <div className="rounded-xl border border-neutral-800 bg-[#0d0d0d] overflow-hidden flex flex-col md:flex-row shadow-lg">
             {/* Left box: You are watching */}
