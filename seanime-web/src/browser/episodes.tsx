@@ -1357,7 +1357,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
                   onError={() => setCaptionMessage("A subtitle track could not be read by the browser.")} />
               ))}
             </video>
-            <div className="absolute top-3 right-3 sm:top-5 sm:right-5 z-10 pointer-events-none flex items-center gap-2 text-white drop-shadow-lg">
+            <div className={`absolute top-3 right-3 sm:top-5 sm:right-5 z-10 pointer-events-none flex items-center gap-2 text-white drop-shadow-lg transition-opacity duration-200 ${controlsVisible || playerMenu ? "opacity-100" : "opacity-0"}`}>
               <span className="hidden sm:inline text-[9px] tracking-[0.2em] uppercase text-white/75">Powered by</span>
               <img src="/anidash-logo.png" alt="AniDash" className="size-6 sm:size-8 object-contain" />
               <span className="text-xs sm:text-sm font-extrabold tracking-tight">AniDash</span>
