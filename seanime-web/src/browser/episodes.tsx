@@ -661,7 +661,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     if (!(target instanceof Element)) return
     if (target.closest('input:not([type="range"]),textarea,select,a,[contenteditable="true"]')) return
     if (target.closest('button,[role="button"],[data-player-wrapper]')) {
-      if (target.closest('button,[role="button"]')) cancelSurfaceTap()
+      if (target.closest('button,[role="button"]') && !target.closest("[data-player-surface-action]")) cancelSurfaceTap()
       focusPlayer()
       wakeControls()
     }
@@ -705,7 +705,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     lastSurfaceTap.current = null
   }
 
-  function clickVideoSurface(e: React.MouseEvent<HTMLVideoElement>) {
+  function clickVideoSurface(e: React.MouseEvent<HTMLElement>) {
     wakeControls()
     if (playerMenu) { cancelSurfaceTap(); setPlayerMenu(null); focusPlayer(); return }
     if (e.button !== 0) return
@@ -1368,7 +1368,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
               </div>
             )}
             {controlsVisible && !isPlaying && !buffering && !isLoadingStream && !error && activeStream?.url && (
-              <button type="button" aria-label="Play video" onClick={togglePlay} className="absolute inset-0 m-auto z-10 size-14 sm:size-16 rounded-full bg-black/60 border border-white/30 text-white grid place-items-center hover:bg-white hover:text-black transition">
+              <button type="button" data-player-surface-action aria-label="Play video" onClick={e => { if (e.detail === 0) { cancelSurfaceTap(); togglePlay() } else clickVideoSurface(e) }} onDoubleClick={e => e.preventDefault()} className="absolute inset-0 m-auto z-10 size-14 sm:size-16 rounded-full bg-black/60 border border-white/30 text-white grid place-items-center hover:bg-white hover:text-black transition">
                 <LuPlay className="size-7 fill-current" />
               </button>
             )}
