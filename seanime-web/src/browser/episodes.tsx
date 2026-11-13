@@ -359,6 +359,8 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
   const requestedEpisode = React.useRef<number | null>(null)
   const mountedMediaEpisode = React.useRef<number | null>(null)
   const playbackStarted = React.useRef(false)
+  const mediaAccessDenied = React.useRef(false)
+  const [accessDenied, setAccessDenied] = React.useState(false)
   const autoplayRef = React.useRef(autoplay)
   autoplayRef.current = autoplay
   const playerWrapper = React.useRef<HTMLDivElement>(null)
@@ -407,6 +409,8 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     requestedEpisode.current = null
     mountedMediaEpisode.current = null
     manualPlaybackIntent.current = playRequested ? "play" : null
+    mediaAccessDenied.current = false
+    setAccessDenied(false)
     setActiveStream(null)
     setStreams([])
     setTracks([])
@@ -595,6 +599,8 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     let mediaRecoveryAttempted = false
 
     playbackStarted.current = false
+    mediaAccessDenied.current = false
+    setAccessDenied(false)
     setPlayerNotice("")
     setBuffering(true)
     setCurrentTime(0)
@@ -621,7 +627,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     const onLoadedMetadata = async () => {
       setDuration(Number.isFinite(el.duration) ? el.duration : 0)
       const pos = await resumePromise
-      if (!live) return
+      if (!live || mediaAccessDenied.current) return
       if (pos > 0 && Number.isFinite(el.duration) && pos < el.duration && el.currentTime < 1) {
         el.currentTime = pos
       }
@@ -664,9 +670,21 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
       hls.loadSource(streamUrl)
       hls.attachMedia(el)
       hls.on(Hls.Events.ERROR, (_, data) => {
-        if (!live || !data.fatal) return
+        if (!live || mediaAccessDenied.current) return
+        const status = data.response?.code
+        // A rejected media request is not a bandwidth problem. Do not retry access denial.
+        if (status === 401 || status === 403) {
+          mediaAccessDenied.current = true
+          setAccessDenied(true)
+          setBuffering(false)
+          setIsPlaying(false)
+          setError("The media server denied access (HTTP " + status + "). The media provider must authorize this playback.")
+          hls?.stopLoad()
+          el.pause()
+          return
+        }
+        if (!data.fatal) return
         // HLS has already exhausted its normal retries when it reports a fatal error.
-        // Do not loop indefinitely or retry a server's access denial.
         if (data.type === Hls.ErrorTypes.MEDIA_ERROR && !mediaRecoveryAttempted) {
           mediaRecoveryAttempted = true
           hls?.recoverMediaError()
@@ -674,10 +692,8 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
         }
         setBuffering(false)
         setIsPlaying(false)
-        const status = data.response?.code
         const detail = String(data.details || "").replace(/[^a-zA-Z0-9_ -]/g, "").slice(0, 80)
-        const reason = status === 401 || status === 403 ? "The media server denied access."
-          : data.type === Hls.ErrorTypes.NETWORK_ERROR ? "The media data could not be downloaded."
+        const reason = data.type === Hls.ErrorTypes.NETWORK_ERROR ? "The media data could not be downloaded."
           : data.type === Hls.ErrorTypes.MEDIA_ERROR ? "The browser could not decode the media."
           : "The stream could not be played."
         setError(reason + (status ? " HTTP " + status + "." : "") + (detail ? " (" + detail + ")" : ""))
@@ -839,7 +855,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
   }
 
   function rememberDecodedFrame(el: HTMLVideoElement) {
-    if (previewCaptureBlocked.current || el.seeking || el.readyState < 2 || !el.videoWidth || !el.videoHeight || storyboard.length) return
+    if (!playbackStarted.current || mediaAccessDenied.current || previewCaptureBlocked.current || el.seeking || el.readyState < 3 || !el.videoWidth || !el.videoHeight || storyboard.length) return
     const bucket = Math.floor(el.currentTime / PREVIEW_STEP)
     if (bucket === lastPreviewBucket.current || decodedPreviews.current.has(bucket)) return
     lastPreviewBucket.current = bucket
@@ -1165,7 +1181,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
   // Player control actions
   function togglePlay() {
     const el = video.current
-    if (!el) return
+    if (!el || mediaAccessDenied.current) return
     if (el.paused) {
       manualPlaybackIntent.current = "play"
       setError("")
@@ -1567,7 +1583,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
             {error && !isLoadingStream && (
               <div className="absolute inset-0 z-20 bg-black/85 flex flex-col items-center justify-center gap-3 p-6 text-center">
                 <p className="text-sm text-red-400 max-w-md">{error}</p>
-                <div className="flex flex-wrap justify-center gap-2">
+                {accessDenied ? <p className="text-xs text-neutral-400 max-w-md">This is an access error, not a buffering or video-quality issue. Contact the media provider for authorized playback.</p> : <div className="flex flex-wrap justify-center gap-2">
                   {activeStream?.url && <Button size="sm" intent="gray-outline" onClick={() => { setError(""); setPlaybackRevision(n => n + 1) }}>Retry playback</Button>}
                   <Button
                     size="sm"
@@ -1587,7 +1603,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
                   >
                     Switch to {audio === "dub" ? "SUB" : "DUB"}
                   </Button>
-                </div>
+                </div>}
               </div>
             )}
 
@@ -1603,8 +1619,9 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
               onProgress={e => updateBuffered(e.currentTarget)}
               onLoadedData={e => { updateBuffered(e.currentTarget); rememberDecodedFrame(e.currentTarget) }}
               onDurationChange={e => setDuration(Number.isFinite(e.currentTarget.duration) ? e.currentTarget.duration : 0)}
-              onPlay={() => { setIsPlaying(true); setBuffering(true) }}
+              onPlay={e => { if (!mediaAccessDenied.current) { setIsPlaying(true); setBuffering(e.currentTarget.readyState < 3) } }}
               onPlaying={() => {
+                if (mediaAccessDenied.current) return
                 playbackStarted.current = true
                 if (hlsInstance.current) {
                   hlsInstance.current.config.maxMaxBufferLength = PLAYER_BUFFER_TARGET
@@ -1616,8 +1633,8 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
                 setPlayerNotice("")
               }}
               onCanPlay={() => setBuffering(false)}
-              onWaiting={e => { if (!e.currentTarget.paused) setBuffering(true) }}
-              onStalled={e => { if (!e.currentTarget.paused) setBuffering(true) }}
+              onWaiting={e => { if (!mediaAccessDenied.current && !e.currentTarget.paused && e.currentTarget.readyState < 3) setBuffering(true) }}
+              onStalled={e => { if (!mediaAccessDenied.current && !e.currentTarget.paused && e.currentTarget.readyState < 3) setBuffering(true) }}
               onVolumeChange={e => { setVolume(e.currentTarget.volume); setIsMuted(e.currentTarget.muted) }}
               onRateChange={e => setPlaybackRate(e.currentTarget.playbackRate)}
               onPause={() => {
@@ -1629,6 +1646,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
                 const el = video.current
                 if (el) {
                   setCurrentTime(el.currentTime)
+                  if (!mediaAccessDenied.current && !el.paused && !el.seeking && el.readyState >= 3) setBuffering(false)
                   updateBuffered(el)
                   rememberDecodedFrame(el)
                   if (autoSkip && playbackStarted.current && el.currentTime > 0 && el.readyState >= 2 && !el.paused && !el.seeking && !isLoadingStream) {
@@ -1647,7 +1665,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
                 if (autoNext && selected < total) openEpisode(selected + 1, true)
               }}
               onError={() => {
-                if (mountedMediaEpisode.current !== selected) return
+                if (mountedMediaEpisode.current !== selected || mediaAccessDenied.current) return
                 setBuffering(false)
                 setIsPlaying(false)
                 const code = video.current?.error?.code
