@@ -152,6 +152,52 @@ function formatSeconds(secs: number) {
 }
 
 const metadataCache = new Map<string, Metadata[]>()
+const metadataPending = new Map<string, Promise<Metadata[]>>()
+const metadataStoragePrefix = "anidash.episodes.v2:"
+function cachedEpisodePage(id: number, page: number): Metadata[] | undefined {
+  const key = id + ":" + page
+  const memory = metadataCache.get(key)
+  if (memory) return memory
+  try {
+    const item = JSON.parse(localStorage.getItem(metadataStoragePrefix + key) || "null")
+    if (item && Date.now() - item.at < 7 * 86400000 && Array.isArray(item.episodes)) {
+      metadataCache.set(key, item.episodes)
+      return item.episodes
+    }
+  } catch {}
+}
+function loadEpisodePage(id: number, mal: number, page: number, fast = true, force = false): Promise<Metadata[]> {
+  const key = id + ":" + page
+  const old = cachedEpisodePage(id, page)
+  if (old?.length && !force) return Promise.resolve(old)
+  const pending = metadataPending.get(key)
+  if (pending) return pending
+  const request = fetch("/api/episode-metadata?anilist=" + id + "&id=" + mal + "&page=" + page + (fast ? "&fast=1" : ""), { signal: AbortSignal.timeout(12000) })
+    .then(async response => {
+      if (!response.ok) throw Error("Metadata unavailable")
+      const items = (await response.json()).episodes
+      if (!Array.isArray(items) || !items.length) throw Error("Episode metadata empty")
+      const byNumber = new Map<number, Metadata>((old || []).map(item => [item.number, item]))
+      for (const item of items as Metadata[]) {
+        const prior = byNumber.get(item.number)
+        byNumber.set(item.number, { ...prior, ...item, title: item.title || prior?.title || "", image: item.image || prior?.image })
+      }
+      const merged = [...byNumber.values()]
+      if (metadataCache.size >= 120) metadataCache.delete(metadataCache.keys().next().value!)
+      metadataCache.set(key, merged)
+      try {
+        localStorage.setItem(metadataStoragePrefix + key, JSON.stringify({ at: Date.now(), episodes: merged }))
+        const keys = Object.keys(localStorage).filter(k => k.startsWith(metadataStoragePrefix))
+        while (keys.length > 50) localStorage.removeItem(keys.shift()!)
+      } catch {}
+      return merged
+    }).finally(() => metadataPending.delete(key))
+  metadataPending.set(key, request)
+  return request
+}
+function cachedEpisodeMetadata(id: number, pages: number[]) {
+  return Object.fromEntries(pages.flatMap(page => cachedEpisodePage(id, page) || []).map(item => [item.number, item])) as Record<number, Metadata>
+}
 
 export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; watchEpisode?: number }) {
   const router = useRouter()
@@ -198,7 +244,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
   const [playbackRevision, setPlaybackRevision] = React.useState(0)
   const [volume, setVolume] = React.useState(1)
   const [playbackRate, setPlaybackRate] = React.useState(1)
-  const [autoplay, setAutoplay] = React.useState(initial.preferences?.playerAutoplay !== false)
+  const [autoplay, setAutoplay] = React.useState(initial.preferences?.playerAutoplay === true)
   const [autoSkip, setAutoSkip] = React.useState(initial.preferences?.playerAutoSkip !== false)
   const [autoNext, setAutoNext] = React.useState(initial.preferences?.playerAutoNext !== false)
   const [segments, setSegments] = React.useState<SkipSegments>(EMPTY_SEGMENTS)
@@ -218,11 +264,14 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
   const [layout, setLayout] = React.useState<"grid" | "list">(
     initial.preferences?.episodeViewMode === "list" ? "list" : "grid"
   )
-  const [metadata, setMetadata] = React.useState<Record<number, Metadata>>({})
+  const [metadata, setMetadata] = React.useState<Record<number, Metadata>>(() => cachedEpisodeMetadata(m.id, [Math.max(1, Math.ceil((watchEpisode || 1) / 100))]))
   const [metaError, setMetaError] = React.useState(false)
   const [metaRevision, setMetaRevision] = React.useState(0)
 
   const video = React.useRef<HTMLVideoElement>(null)
+  const manualPlaybackIntent = React.useRef<"play" | "pause" | null>(null)
+  const autoplayRef = React.useRef(autoplay)
+  autoplayRef.current = autoplay
   const playerWrapper = React.useRef<HTMLDivElement>(null)
   const surfaceClickTimer = React.useRef<number | undefined>(undefined)
   const lastSurfaceTap = React.useRef<{ at: number; x: number; y: number } | null>(null)
@@ -264,40 +313,39 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     setError("")
     setArc("all")
     setPage(1)
-    setMetadata({})
+    setMetadata(cachedEpisodeMetadata(m.id, [Math.max(1, Math.ceil((watchEpisode || 1) / 100))]))
+    manualPlaybackIntent.current = null
     setJump("")
     lastSaved.current = 0
   }, [entry.mediaId, watchEpisode])
 
-  // Fetch episode metadata
+  // Show cached titles immediately, fetch visible pages concurrently and preload neighboring pages.
   React.useEffect(() => {
     if (!m.id || !pages) return
     let live = true
     setMetaError(false)
-    const ids = pages.split(",").map(Number)
-    ;(async () => {
-      for (const p of ids) {
-        try {
-          const key = m.id + ":" + p
-          let items = metadataCache.get(key)
-          if (!items) {
-            const response = await fetch(
-              "/api/episode-metadata?anilist=" + m.id + "&id=" + (m.idMal || 0) + "&page=" + p
-            )
-            if (!response.ok) throw Error("Metadata unavailable")
-            items = ((await response.json()).episodes || []) as Metadata[]
-            metadataCache.set(key, items)
-          }
-          if (live) setMetadata(prev => ({ ...prev, ...Object.fromEntries(items.map(x => [x.number, x])) }))
-        } catch {
-          if (live) setMetaError(true)
-        }
-      }
-    })()
-    return () => {
-      live = false
+    const ids = pages.split(",").map(Number).filter(p => p > 0 && p <= 30)
+    const cached = cachedEpisodeMetadata(m.id, ids)
+    setMetadata(prev => ({ ...prev, ...cached }))
+    const merge = (items: Metadata[]) => {
+      if (live) setMetadata(prev => ({ ...prev, ...Object.fromEntries(items.map(x => [x.number, x])) }))
     }
-  }, [m.id, m.idMal, pages, metaRevision])
+    for (const p of ids) {
+      void loadEpisodePage(m.id, m.idMal || 0, p, watchMode, metaRevision > 0).then(merge).catch(() => {
+        if (live && !cachedEpisodePage(m.id, p)?.length) setMetaError(true)
+      })
+    }
+    return () => { live = false }
+  }, [m.id, m.idMal, pages, metaRevision, watchMode])
+
+  React.useEffect(() => {
+    if (!m.id || !pages) return
+    const ids = pages.split(",").map(Number).filter(p => p > 0 && p <= 30)
+    const next = Math.max(...ids) + 1
+    if (next > 30 || next > Math.ceil(total / 100)) return
+    const timer = window.setTimeout(() => { void loadEpisodePage(m.id, m.idMal || 0, next).catch(() => {}) }, 1000)
+    return () => window.clearTimeout(timer)
+  }, [m.id, m.idMal, pages, total])
 
   // Fetch live streams from built-in streaming APIs
   React.useEffect(() => {
@@ -437,7 +485,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
       if (pos > 0 && Number.isFinite(el.duration) && pos < el.duration && el.currentTime < 1) {
         el.currentTime = pos
       }
-      if (getStore().preferences?.playerAutoplay === false) {
+      if (manualPlaybackIntent.current === "pause" || (manualPlaybackIntent.current !== "play" && !autoplayRef.current)) {
         setBuffering(false)
         return
       }
@@ -837,7 +885,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
   }
 
   function setPlaybackPreference(key: "playerAutoplay" | "playerAutoSkip" | "playerAutoNext", enabled: boolean) {
-    if (key === "playerAutoplay") setAutoplay(enabled)
+    if (key === "playerAutoplay") { autoplayRef.current = enabled; setAutoplay(enabled) }
     if (key === "playerAutoSkip") setAutoSkip(enabled)
     if (key === "playerAutoNext") setAutoNext(enabled)
     const s = getStore()
@@ -857,6 +905,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     const el = video.current
     if (!el) return
     if (el.paused) {
+      manualPlaybackIntent.current = "play"
       setError("")
       void el.play().catch((reason: unknown) => {
         setBuffering(false)
@@ -864,7 +913,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
         if (reason instanceof DOMException && (reason.name === "NotAllowedError" || reason.name === "AbortError")) return
         setError("The browser rejected playback. Check that the media format is supported.")
       })
-    } else el.pause()
+    } else { manualPlaybackIntent.current = "pause"; el.pause() }
   }
 
   function seekRel(deltaSeconds: number) {
@@ -957,8 +1006,11 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     }
   }
 
+  const selectedEpisodeRow = rows.find(e => e.episodeNumber === selected)
+  const selectedEpisodeTitle = metadata[selected]?.title || selectedEpisodeRow?.episodeTitle || ""
   const currentEpThumb =
     metadata[selected]?.image ||
+    selectedEpisodeRow?.episodeMetadata?.image ||
     thumbnails.get(selected) ||
     m.bannerImage ||
     m.coverImage?.large ||
@@ -1200,7 +1252,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
               </p>
               <h3 className="text-lg sm:text-2xl font-bold">
                 {m.format === "MOVIE" ? "Movie" : "Episode " + selected}
-                {metadata[selected]?.title ? " — " + metadata[selected].title : ""}
+                {selectedEpisodeTitle && selectedEpisodeTitle !== "Episode " + selected ? " — " + selectedEpisodeTitle : ""}
               </h3>
             </div>
             <Button intent="gray-outline" aria-label="Back to anime details" onClick={closePlayer}>
@@ -1357,11 +1409,13 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
                   onError={() => setCaptionMessage("A subtitle track could not be read by the browser.")} />
               ))}
             </video>
-            <div className={`absolute top-3 right-3 sm:top-5 sm:right-5 z-10 pointer-events-none flex items-center gap-2 text-white drop-shadow-lg transition-opacity duration-200 ${controlsVisible || playerMenu ? "opacity-100" : "opacity-0"}`}>
-              <span className="hidden sm:inline text-[9px] tracking-[0.2em] uppercase text-white/75">Powered by</span>
-              <img src="/anidash-logo.png" alt="AniDash" className="size-6 sm:size-8 object-contain" />
-              <span className="text-xs sm:text-sm font-extrabold tracking-tight">AniDash</span>
-            </div>
+            {(controlsVisible || playerMenu) && (
+              <div className="absolute top-3 right-3 sm:top-5 sm:right-5 z-10 pointer-events-none flex items-center gap-2 text-white drop-shadow-lg" data-player-watermark>
+                <span className="hidden sm:inline text-[9px] tracking-[0.2em] uppercase text-white/75">Powered by</span>
+                <img src="/anidash-watermark.png" alt="" className="w-8 h-5 sm:w-10 sm:h-6 object-contain" />
+                <span className="text-xs sm:text-sm font-extrabold tracking-tight">AniDash</span>
+              </div>
+            )}
             {captionText && subtitlesEnabled && !pipActive && (
               <div aria-live="off" className={`absolute inset-x-3 z-20 pointer-events-none text-center flex justify-center transition-all ${controlsVisible || playerMenu ? "bottom-24 sm:bottom-28" : "bottom-6 sm:bottom-10"}`}>
                 <span className="max-w-[90%] whitespace-pre-line rounded px-2 py-1 font-semibold leading-snug text-white" style={{ fontSize: `clamp(${12 * captionSize}px, ${2.4 * captionSize}vw, ${27 * captionSize}px)`, background: captionBackground ? "rgba(0,0,0,.75)" : "transparent", textShadow: "0 1px 3px #000, 0 0 2px #000" }}>{captionText}</span>

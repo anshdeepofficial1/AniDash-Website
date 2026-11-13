@@ -17,8 +17,15 @@ export default async function handler(req,res){
  const mal=Number(req.query?.id),id=Number(req.query?.anilist),page=Number(req.query?.page||1);
  if((!positive(mal)&&!positive(id))||!Number.isSafeInteger(page)||page<1||page>30)return res.status(400).json({error:"Invalid anime ID or page"});
  const key="page:"+id+":"+mal+":"+page,old=cache.get(key);
- const send=data=>{res.setHeader("Cache-Control","public, s-maxage=1800, stale-while-revalidate=86400");return res.status(200).json({episodes:data})};
+ const send=data=>{res.setHeader("Cache-Control","public, max-age=300, s-maxage=1800, stale-while-revalidate=86400");return res.status(200).json({episodes:data})};
  if(old&&Date.now()-old.at<1800000)return send(old.data);
+ // Watch pages can return artwork and titles without waiting for the slower filler lookup.
+ if(String(req.query?.fast)==="1"){
+  try{
+   const items=normalizeAniZip(await zip(positive(id)?id:0,mal),page);
+   if(items.length){res.setHeader("Cache-Control","public, max-age=300, s-maxage=1800, stale-while-revalidate=86400");return res.status(200).json({episodes:items})}
+  }catch{}
+ }
  const [z,j]=await Promise.allSettled([zip(positive(id)?id:0,mal).then(data=>normalizeAniZip(data,page)),positive(mal)?json("https://api.jikan.moe/v4/anime/"+mal+"/episodes?page="+page).then(data=>{if(!Array.isArray(data.data))throw Error("Invalid data");return data.data.filter(e=>Number.isSafeInteger(e.mal_id)).map(e=>({number:e.mal_id,title:e.title||"",aired:e.aired||null,filler:e.filler===true,recap:e.recap===true}))}):Promise.resolve([])]);
  const rows=new Map();if(j.status==="fulfilled")for(const e of j.value)rows.set(e.number,e);if(z.status==="fulfilled")for(const e of z.value){const prior=rows.get(e.number)||{};rows.set(e.number,{...prior,...e,title:e.title||prior.title||"",aired:e.aired||prior.aired||null})}
  const data=[...rows.values()].sort((a,b)=>a.number-b.number);
