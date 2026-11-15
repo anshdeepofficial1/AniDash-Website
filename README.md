@@ -114,3 +114,7 @@ Run `python -m http.server 8080` in the repository root and open `http://localho
 - If AniList has no episode count and Ani-Zip has no episode mapping, AniDash cannot generate a reliable episode list for that title.
 - Local watchlists and playback positions remain in browser storage; wiping browser data can remove unsynced positions. Use Settings → Export JSON. AniList and MyAnimeList web login are available only after their corresponding OAuth application and Vercel environment variables have been configured and redeployed; real-provider sign-in needs testing with an authorized account. Streaming-provider account login is not supported.
 - **Security**: The browser stores the OAuth tokens in localStorage; signing out clears them. This is not equivalent to server-side HttpOnly session storage. Do not run unknown third-party scripts or extensions in the website; protect the production host from XSS. For a broader multi-user service, migrate to Authorization Code + server-side sessions.
+
+---
+
+**Developer profile:** This repository is part of the public project portfolio of [Anshdeep Singh](https://github.com/anshdeepofficial1). [Official portfolio](https://anshdeepofficial1.vercel.app/about) · [Public project directory](https://anshdeepofficial1.vercel.app/work).
