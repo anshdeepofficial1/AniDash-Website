@@ -177,8 +177,8 @@ const DEFAULT_SERVER = "onyx"
 const CONTROL_IDLE_MS = 3000
 const PLAYER_BUFFER_TARGET = 100
 const PREVIEW_STEP = 5
-const FULLSCREEN_DOUBLE_TAP_MS = 170
-const FULLSCREEN_DOUBLE_TAP_RADIUS = 24
+const FULLSCREEN_DOUBLE_TAP_MS = 300
+const FULLSCREEN_DOUBLE_TAP_RADIUS = 40
 type SkipInterval = { start: number; end: number }
 type SkipSegments = { intro: SkipInterval | null; outro: SkipInterval | null }
 const EMPTY_SEGMENTS: SkipSegments = { intro: null, outro: null }
@@ -316,6 +316,13 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
   const [hlsLevels, setHlsLevels] = React.useState<{ index: number; label: string }[]>([])
   const [qualityLevel, setQualityLevel] = React.useState(-1)
   const [controlsVisible, setControlsVisible] = React.useState(true)
+  const [inlineFullscreen, setInlineFullscreen] = React.useState(false)
+  React.useEffect(() => {
+    if (!inlineFullscreen) return
+    const oldOverflow = document.body.style.overflow
+    document.body.style.overflow = "hidden"
+    return () => { document.body.style.overflow = oldOverflow }
+  }, [inlineFullscreen])
   const [isLoadingStream, setIsLoadingStream] = React.useState(false)
   const [error, setError] = React.useState("")
   const [isPlaying, setIsPlaying] = React.useState(false)
@@ -1064,7 +1071,11 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     // Do not use the browser's slower, OS-dependent dblclick interval.
     if (pending && previous && closeEnough && now - previous.at <= FULLSCREEN_DOUBLE_TAP_MS) {
       cancelSurfaceTap()
-      toggleFullscreen()
+      const bounds = playerWrapper.current?.getBoundingClientRect()
+      const fraction = bounds && bounds.width > 0 ? (e.clientX - bounds.left) / bounds.width : 0.5
+      if (fraction < 0.35) seekRel(-10)
+      else if (fraction > 0.65) seekRel(10)
+      else toggleFullscreen()
       return
     }
     if (pending) {
@@ -1257,13 +1268,16 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     setPlayerMenu(null)
     wakeControls()
     focusPlayer()
-    if (document.fullscreenElement) {
+    if (inlineFullscreen) {
+      setInlineFullscreen(false)
+    } else if (document.fullscreenElement) {
       void document.exitFullscreen().catch(() => {})
     } else if (container.requestFullscreen) {
-      void container.requestFullscreen().catch(() => {})
+      void container.requestFullscreen().catch(() => setInlineFullscreen(true))
     } else {
-      const nativeVideo = video.current as (HTMLVideoElement & { webkitEnterFullscreen?: () => void }) | null
-      nativeVideo?.webkitEnterFullscreen?.()
+      // iPadOS Safari may only expose native video fullscreen. Keep the custom
+      // player and its gestures by filling the viewport instead.
+      setInlineFullscreen(true)
     }
   }
 
@@ -1285,6 +1299,11 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
       setPlayerMenu(null)
       focusPlayer()
       wakeControls()
+      return
+    }
+    if (e.code === "Escape" && inlineFullscreen) {
+      e.preventDefault()
+      setInlineFullscreen(false)
       return
     }
     const focusedControl = target?.closest('button,[role="button"],[role="switch"],a')
@@ -1369,6 +1388,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
         [data-anidash-watch-page][data-movie="true"] { grid-template-columns: minmax(0, 1fr); }
         [data-anidash-watch-page][data-movie="true"] aside { display: none; }
         [data-player-wrapper]:fullscreen, [data-player-wrapper]:-webkit-full-screen { width: 100%; height: 100%; max-width: none; max-height: none; aspect-ratio: auto; border: 0; border-radius: 0; }
+        [data-player-wrapper][data-inline-fullscreen="true"] { position: fixed !important; inset: 0 !important; z-index: 2147483647; width: 100vw !important; height: 100dvh !important; max-width: none !important; max-height: none !important; aspect-ratio: auto; border: 0; border-radius: 0; padding: env(safe-area-inset-top,0px) env(safe-area-inset-right,0px) env(safe-area-inset-bottom,0px) env(safe-area-inset-left,0px); }
         video::cue {
           background-color: rgba(0, 0, 0, 0.8) !important;
           color: #ffffff !important;
@@ -1601,6 +1621,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
           <div
             data-player-wrapper
             ref={playerWrapper}
+            data-inline-fullscreen={inlineFullscreen}
             tabIndex={0}
             role="region"
             aria-label="AniDash video player"
@@ -1656,6 +1677,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
             <video
               ref={video}
               playsInline
+              controls={false}
               preload="auto"
               className="absolute inset-0 w-full h-full object-contain bg-black"
               onClick={clickVideoSurface}

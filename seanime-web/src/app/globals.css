@@ -1247,3 +1247,13 @@ media-preview-chapter-display {
 @media(prefers-reduced-motion:reduce){.anidash-mobile-hero *{scroll-behavior:auto!important}}
 
 @media(max-width:1023px){[data-home-screen] [data-library-toolbar-top-padding]{height:0!important}[data-home-screen] [data-library-toolbar]{margin-top:0!important}.anidash-mobile-hero{touch-action:pan-y}}
+
+/* iPad landscape can exceed the desktop breakpoint while retaining a PWA status bar. */
+@media (display-mode: standalone) and (min-width:1024px) {
+  .anidash-main-content { padding-top: env(safe-area-inset-top,0px); padding-bottom: env(safe-area-inset-bottom,0px); }
+  [data-top-navbar] { flex-shrink: 0; }
+}
+@media (display-mode: standalone) and (max-width:1023px) {
+  [data-top-navbar] { flex-shrink: 0; box-sizing: border-box; }
+}
+[data-player-wrapper][data-inline-fullscreen="true"] > .absolute.bottom-0 { padding-bottom: max(16px,env(safe-area-inset-bottom,0px)); }
