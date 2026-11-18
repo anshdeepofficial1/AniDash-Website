@@ -1322,8 +1322,10 @@ media-preview-chapter-display {
             width: 48px;
             height: 36px;
             object-fit: contain;
-            content: url("/anidash-watermark.png");
+
         }
+        .UI-AppLayoutSidebar__root [data-anidash-original-logo] { display: none; }
+        .UI-AppLayoutSidebar__root [data-anidash-tablet-logo] { display: block; }
         /* Anchor the carousel to its own section, not the top of the viewport.
            Dots and title must never sit underneath the navigation. */
         [data-discover-page-header] {

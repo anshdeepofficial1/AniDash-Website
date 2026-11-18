@@ -412,7 +412,17 @@ function SidebarNavigation({ isCollapsed, containerRef }: { isCollapsed: boolean
                 <img
                     src="/seanime-logo.png"
                     alt="AniDash"
+                    data-anidash-original-logo
                     className="w-10 h-10 object-contain transition-all duration-300"
+                />
+                {/* The cropped asset is produced by package-browser after Rsbuild.
+                    Use a runtime img URL rather than a CSS loader import. */}
+                <img
+                    src="/anidash-watermark.png"
+                    alt="AniDash"
+                    data-anidash-tablet-logo
+                    className="hidden w-12 h-9 object-contain"
+                    loading="lazy"
                 />
             </div>
             <VerticalMenu
