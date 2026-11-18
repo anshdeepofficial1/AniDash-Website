@@ -1247,3 +1247,70 @@ media-preview-chapter-display {
 @media(prefers-reduced-motion:reduce){.anidash-mobile-hero *{scroll-behavior:auto!important}}
 
 @media(max-width:1023px){[data-home-screen] [data-library-toolbar-top-padding]{height:0!important}[data-home-screen] [data-library-toolbar]{margin-top:0!important}.anidash-mobile-hero{touch-action:pan-y}}
+
+
+/* iPad Safari / installed PWA: keep the actual navigation outside the system
+   status bar, even when the tablet uses the >=1024px desktop layout. */
+@supports (-webkit-touch-callout: none) {
+    @media (min-width: 768px) {
+        [data-top-navbar] {
+            z-index: 40;
+            isolation: isolate;
+            background: #101014;
+            color: #fff;
+            -webkit-backdrop-filter: none;
+            backdrop-filter: none;
+        }
+        [data-top-navbar-content-container] {
+            padding-left: max(16px, env(safe-area-inset-left, 0px));
+            padding-right: max(16px, env(safe-area-inset-right, 0px));
+            align-items: center;
+        }
+        [data-top-navbar] [data-layout-header-background],
+        [data-top-navbar] [data-layout-header-background-gradient] {
+            display: none;
+        }
+        [data-top-navbar] .UI-NavigationMenu__item {
+            color: #dedee5;
+            white-space: nowrap;
+            min-height: 44px;
+        }
+        [data-top-navbar] .UI-NavigationMenu__item[data-current="true"] {
+            color: #fff;
+        }
+    }
+
+    @media (min-width: 768px) and (display-mode: standalone),
+           (min-width: 768px) and (display-mode: fullscreen) {
+        :root {
+            --anidash-tablet-safe-top: max(32px, env(safe-area-inset-top, 0px));
+        }
+        .UI-AppLayout__root.with-sidebar {
+            padding-top: var(--anidash-tablet-safe-top);
+        }
+        .UI-AppLayoutSidebar__root {
+            top: var(--anidash-tablet-safe-top);
+        }
+        [data-top-navbar] {
+            padding-top: 0;
+        }
+        /* The phone rule already adds the inset to the navbar height.
+           The shell now owns that inset, so do not count it twice. */
+        @media (max-width: 1023px) {
+            [data-top-navbar] {
+                height: 56px !important;
+            }
+        }
+        /* Prevent the artwork from bleeding through the translucent iPadOS
+           system status bar, including when the page has scrolled. */
+        #root::before {
+            content: "";
+            position: fixed;
+            inset: 0 0 auto;
+            height: var(--anidash-tablet-safe-top);
+            background: #101014;
+            z-index: 110;
+            pointer-events: none;
+        }
+    }
+}
