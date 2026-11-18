@@ -1249,15 +1249,18 @@ media-preview-chapter-display {
 @media(max-width:1023px){[data-home-screen] [data-library-toolbar-top-padding]{height:0!important}[data-home-screen] [data-library-toolbar]{margin-top:0!important}.anidash-mobile-hero{touch-action:pan-y}}
 
 
-/* iPad Safari / installed PWA: keep the actual navigation outside the system
-   status bar, even when the tablet uses the >=1024px desktop layout. */
+/* iPadOS: compact, integrated header instead of a second opaque status bar.
+   Keep landscape's sidebar and desktop menu, but reserve the system chrome. */
 @supports (-webkit-touch-callout: none) {
     @media (min-width: 768px) {
         [data-top-navbar] {
+            position: relative;
             z-index: 40;
             isolation: isolate;
-            background: #101014;
+            height: 60px !important;
+            padding-top: 0;
             color: #fff;
+            background: linear-gradient(180deg, var(--background, #070707), rgba(7, 7, 7, .62) 72%, transparent);
             -webkit-backdrop-filter: none;
             backdrop-filter: none;
         }
@@ -1271,9 +1274,12 @@ media-preview-chapter-display {
             display: none;
         }
         [data-top-navbar] .UI-NavigationMenu__item {
-            color: #dedee5;
+            color: rgba(255,255,255,.78);
             white-space: nowrap;
             min-height: 44px;
+            padding-inline: 10px;
+            font-size: 1rem !important;
+            text-shadow: 0 1px 4px rgba(0,0,0,.65);
         }
         [data-top-navbar] .UI-NavigationMenu__item[data-current="true"] {
             color: #fff;
@@ -1283,7 +1289,7 @@ media-preview-chapter-display {
     @media (min-width: 768px) and (display-mode: standalone),
            (min-width: 768px) and (display-mode: fullscreen) {
         :root {
-            --anidash-tablet-safe-top: max(32px, env(safe-area-inset-top, 0px));
+            --anidash-tablet-safe-top: max(44px, env(safe-area-inset-top, 0px));
         }
         .UI-AppLayout__root.with-sidebar {
             padding-top: var(--anidash-tablet-safe-top);
@@ -1291,26 +1297,47 @@ media-preview-chapter-display {
         .UI-AppLayoutSidebar__root {
             top: var(--anidash-tablet-safe-top);
         }
-        [data-top-navbar] {
-            padding-top: 0;
-        }
-        /* The phone rule already adds the inset to the navbar height.
-           The shell now owns that inset, so do not count it twice. */
-        @media (max-width: 1023px) {
-            [data-top-navbar] {
-                height: 56px !important;
-            }
-        }
-        /* Prevent the artwork from bleeding through the translucent iPadOS
-           system status bar, including when the page has scrolled. */
-        #root::before {
+        /* The shell owns the inset. No second fixed mask over the app. */
+        .UI-AppLayout__root.with-sidebar::before {
             content: "";
             position: fixed;
             inset: 0 0 auto;
             height: var(--anidash-tablet-safe-top);
-            background: #101014;
-            z-index: 110;
+            background: var(--background, #070707);
+            z-index: 49;
             pointer-events: none;
+        }
+    }
+
+    @media (min-width: 1024px) {
+        /* Align the logo with the header links, clear of the system blur. */
+        .UI-AppLayoutSidebar__root .UI-AppSidebar__sidebar div:has(> img[alt="AniDash"]) {
+            height: 60px;
+            padding: 0 12px;
+            margin: 0 0 8px;
+            align-items: center;
+            flex-shrink: 0;
+        }
+        .UI-AppLayoutSidebar__root img[alt="AniDash"] {
+            width: 48px;
+            height: 36px;
+            object-fit: contain;
+            content: url("/anidash-watermark.png");
+        }
+        /* Anchor the carousel to its own section, not the top of the viewport.
+           Dots and title must never sit underneath the navigation. */
+        [data-discover-page-header] {
+            position: relative;
+        }
+        [data-discover-page-header] > [data-discover-page-header-banner-image] {
+            width: 100%;
+            left: 0;
+            height: 100%;
+        }
+        [data-discover-page-header] > [data-media-id] {
+            top: 16px;
+            left: 16px;
+            max-width: calc(100% - 32px);
         }
     }
 }
