@@ -1542,14 +1542,20 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
 
       {/* Episode list view when not watching */}
       {!watchMode && m.format === "MOVIE" && total > 0 && (
-        <div className="rounded-xl border p-4 flex flex-wrap gap-3 items-center justify-between">
-          <div>
-            <h2>Watch movie</h2>
-            <p className="text-sm text-[--muted]">Open the full-page video player.</p>
+        <div className="relative overflow-hidden rounded-2xl border border-neutral-800 bg-[#0d0d0d]">
+          {m.bannerImage && <img src={m.bannerImage} alt="" className="absolute inset-0 h-full w-full object-cover opacity-25" />}
+          <div className="absolute inset-0 bg-gradient-to-t from-[#0d0d0d] via-[#0d0d0d]/70 to-transparent" />
+          <div className="relative flex flex-col sm:flex-row items-start sm:items-end gap-5 p-5 sm:p-7">
+            <img src={m.coverImage?.large || m.coverImage?.medium || ""} alt="" className="w-28 sm:w-40 aspect-[2/3] shrink-0 rounded-xl object-cover shadow-xl" />
+            <div className="min-w-0 flex-1 space-y-3">
+              <span className="inline-block rounded-md bg-white/10 px-2 py-1 text-xs font-medium">Movie</span>
+              <h2 className="text-xl sm:text-3xl font-bold leading-tight">{animeTitle}</h2>
+              <p className="text-sm text-neutral-300">{[m.seasonYear, (m as any).duration ? (m as any).duration + " min" : null, m.status ? String(m.status).replace(/_/g, " ") : null].filter(Boolean).join(" · ")}</p>
+              <Button intent="white" size="lg" onClick={() => openEpisode(1)}>
+                <LuPlay /> Watch movie
+              </Button>
+            </div>
           </div>
-          <Button intent="white" onClick={() => openEpisode(1)}>
-            <LuPlay /> Watch movie
-          </Button>
         </div>
       )}
 
@@ -2198,7 +2204,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
                   }} />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <h2 className="text-base font-bold">Episode details</h2>
+                  <h2 className="text-base font-bold">{m.format === "MOVIE" ? "Movie details" : "Episode details"}</h2>
                   <p className="text-sm text-neutral-400 mt-1">{animeTitle}</p>
                   {selectedEpisodeTitle && <p className="text-sm text-neutral-300 mt-1 leading-snug">{selectedEpisodeTitle}</p>}
                 </div>
@@ -2209,7 +2215,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
             </div>
             <div className="border-t border-neutral-800 p-4 sm:p-5 space-y-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <h3 className="text-sm font-semibold">About the series</h3>
+                <h3 className="text-sm font-semibold">{m.format === "MOVIE" ? "About the movie" : "About the series"}</h3>
                 <button type="button" onClick={closePlayer} className="text-xs font-medium text-neutral-300 hover:text-white underline underline-offset-4">View anime details</button>
               </div>
               <div className="flex flex-wrap gap-1.5">
@@ -2217,7 +2223,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
                 {m.format && <span className="rounded-md bg-white/10 px-2 py-1 text-xs">{m.format.replace(/_/g, " ")}</span>}
                 {Array.isArray(mediaDetails.genres) && mediaDetails.genres.slice(0, 6).map((genre: string) => <span key={genre} className="rounded-md border border-neutral-800 px-2 py-1 text-xs text-neutral-300">{genre}</span>)}
               </div>
-              {synopsis && <details className="text-sm leading-relaxed text-neutral-300"><summary className="cursor-pointer text-white text-sm font-medium">Series synopsis</summary><p className="mt-2">{synopsis}</p></details>}
+              {synopsis && <details className="text-sm leading-relaxed text-neutral-300"><summary className="cursor-pointer text-white text-sm font-medium">{m.format === "MOVIE" ? "Synopsis" : "Series synopsis"}</summary><p className="mt-2">{synopsis}</p></details>}
             </div>
           </section>
           </main>
