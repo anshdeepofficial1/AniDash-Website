@@ -333,6 +333,25 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
   // iPad/iPhone home-screen apps often cannot use the Fullscreen API on an element and fall back to
   // Safari's own native player. This CSS "pseudo fullscreen" keeps AniDash's player on screen instead.
   const [pseudoFullscreen, setPseudoFullscreen] = React.useState(false)
+  const forcedEmbed = React.useRef<StreamSource | null>(null)
+  // Built-in servers that failed to play are hidden for 6 hours so only working sources are listed.
+  const DEAD_KEY = "anidash:deadServers"
+  const [deadServers, setDeadServers] = React.useState<string[]>(() => {
+    try {
+      const raw = JSON.parse(localStorage.getItem(DEAD_KEY) || "{}") as Record<string, number>
+      return Object.keys(raw).filter(k => Date.now() - raw[k] < 6 * 3600 * 1000)
+    } catch { return [] }
+  })
+  const markServerDead = React.useCallback((name?: string) => {
+    const key = (name || "").toLowerCase()
+    if (!key) return
+    setDeadServers(prev => (prev.includes(key) ? prev : [...prev, key]))
+    try {
+      const raw = JSON.parse(localStorage.getItem("anidash:deadServers") || "{}") as Record<string, number>
+      raw[key] = Date.now()
+      localStorage.setItem("anidash:deadServers", JSON.stringify(raw))
+    } catch {}
+  }, [])
   const failedStreams = React.useRef<Set<string>>(new Set())
   const streamsRef = React.useRef<StreamSource[]>([])
   const stillResolving = React.useRef(false)
@@ -340,6 +359,8 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
   streamsRef.current = streams
   const advanceStream = React.useCallback((failedUrl: string): boolean => {
     failedStreams.current.add(failedUrl)
+    const failed = streamsRef.current.find(s => s.url === failedUrl)
+    if (failed && failed.type !== "embed") markServerDead(failed.server)
     const next = streamsRef.current.find(s => !failedStreams.current.has(s.url))
     if (next) {
       waitingForMoreSources.current = false
@@ -351,7 +372,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     // Other providers may still be loading; resume automatically when they arrive.
     waitingForMoreSources.current = stillResolving.current
     return false
-  }, [])
+  }, [markServerDead])
   const [volume, setVolume] = React.useState(1)
   const [playbackRate, setPlaybackRate] = React.useState(1)
   const [autoplay, setAutoplay] = React.useState(initial.preferences?.playerAutoplay !== false)
@@ -554,6 +575,16 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
       const mal = m.idMal || ""
       let activated = false
       let gotMeta = false
+      const forced = forcedEmbed.current
+      forcedEmbed.current = null
+      if (forced) {
+        // The viewer picked an embed player from the other language row.
+        activated = true
+        setStreams([forced])
+        streamsRef.current = [forced]
+        setActiveStream(forced)
+        setIsLoadingStream(false)
+      }
 
       const add = (data: any) => {
         if (!live || !data) return
@@ -706,7 +737,12 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     if (isHls && Hls.isSupported()) {
       hls = new Hls({
         enableWorker: true,
-        lowLatencyMode: true
+        lowLatencyMode: false,
+        manifestLoadingMaxRetry: 1,
+        levelLoadingMaxRetry: 1,
+        fragLoadingMaxRetry: 2,
+        manifestLoadingTimeOut: 8000,
+        fragLoadingTimeOut: 12000
       })
       hlsInstance.current = hls
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
@@ -1233,6 +1269,38 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     router.push(`/entry?id=${entry.mediaId}`)
   }
 
+  // MegaPlay / Megavid / AniXo live in the SUB and DUB rows next to the built-in servers, one set per language.
+  function embedButtons(lang: "sub" | "dub") {
+    const ep = selected || 1
+    const mal = m.idMal
+    const list: StreamSource[] = [
+      { server: "MegaPlay", serverId: "megaplay", url: mal ? `https://megaplay.buzz/stream/mal/${mal}/${ep}/${lang}` : `https://megaplay.buzz/stream/ani/${m.id}/${ep}/${lang}` },
+      { server: "Megavid", serverId: "megavid", url: mal ? `https://megavid.buzz/mal/${mal}/${ep}/${lang}?color=%23e63946&autoplay=true` : `https://megavid.buzz/ani/${m.id}/${ep}/${lang}?color=%23e63946&autoplay=true` },
+      { server: "AniXo", serverId: "anixo", url: `https://anixo.buzz/embed/ani/${m.id}/${ep}/${lang}?color=%23e63946` }
+    ].map(e => ({ ...e, type: "embed", isDub: lang === "dub" }))
+    return list.map(e => {
+      const active = audio === lang && activeStream?.url === e.url
+      return (
+        <button
+          key={e.serverId}
+          type="button"
+          onClick={() => {
+            setError(""); setAccessDenied(false); setPlayerNotice("")
+            if (audio === lang) {
+              setStreams(prev => prev.some(x => x.url === e.url) ? prev : [...prev, e])
+              setActiveStream(e)
+            } else {
+              forcedEmbed.current = e
+              pickServer(selectedServer, lang)
+            }
+          }}
+          className={`rounded-lg px-3.5 py-1.5 text-xs font-medium transition ${active ? "bg-white text-black font-semibold shadow-md" : "bg-[#1e1e1e] text-neutral-300 hover:bg-[#2a2a2a] hover:text-white"}`}
+        >
+          {e.server}
+        </button>
+      )
+    })
+  }
   function changeAudio(a: "dub" | "sub") {
     if (watchMode) record(true)
     setAudio(a)
@@ -1312,7 +1380,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     }
     // Real fullscreen hides the system status bar where the browser allows it. Never hand the video to
     // Safari's native player (webkitEnterFullscreen); fall back to the in-page fullscreen layout instead.
-    const request = container.requestFullscreen ? container.requestFullscreen.bind(container) : container.webkitRequestFullscreen?.bind(container)
+    const request = container.requestFullscreen ? (() => container.requestFullscreen({ navigationUI: "hide" })) as () => Promise<void> : container.webkitRequestFullscreen?.bind(container)
     if (!request) {
       setPseudoFullscreen(true)
       return
@@ -2008,7 +2076,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
                   <span>SUB</span>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  {JUSTANIME_SERVERS.map(key => {
+                  {JUSTANIME_SERVERS.filter(k => !deadServers.includes(k)).map(key => {
                     const isSelected = audio === "sub" && selectedServer === key
                     const isHsub = key === "onyx"
                     const isDisabled = serverMap[key] && serverMap[key].sub === false
@@ -2035,6 +2103,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
                       </button>
                     )
                   })}
+                  {embedButtons("sub")}
                 </div>
               </div>
 
@@ -2054,7 +2123,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
                   <span>DUB</span>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  {JUSTANIME_SERVERS.map(key => {
+                  {JUSTANIME_SERVERS.filter(k => !deadServers.includes(k)).map(key => {
                     const isSelected = audio === "dub" && selectedServer === key
                     const isCalmDubDisabled = key === "calm"
                     const isExplicitlyDisabled = serverMap[key] && serverMap[key].dub === false
@@ -2077,31 +2146,14 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
                       </button>
                     )
                   })}
+                  {embedButtons("dub")}
+                  {deadServers.length > 0 && (
+                    <button type="button" className="text-[11px] text-neutral-500 underline" onClick={() => { try { localStorage.removeItem("anidash:deadServers") } catch {} setDeadServers([]) }}>
+                      Show hidden servers
+                    </button>
+                  )}
                 </div>
               </div>
-
-              {/* Embedded partner players (MegaPlay etc.), used automatically when direct sources fail. */}
-              {streams.some(s => s.type === "embed") && (
-                <div className="flex items-center gap-3">
-                  <div className="flex items-center gap-1.5 text-xs font-bold text-neutral-300 w-14 shrink-0">
-                    <span>EMBED</span>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    {streams.filter(s => s.type === "embed").map(s => (
-                      <button
-                        key={s.url}
-                        type="button"
-                        onClick={() => { setError(""); setAccessDenied(false); setPlayerNotice(""); setActiveStream(s) }}
-                        className={`rounded-lg px-3.5 py-1.5 text-xs font-medium transition ${
-                          activeStream?.url === s.url ? "bg-white text-black font-semibold shadow-md" : "bg-[#1e1e1e] text-neutral-300 hover:bg-[#2a2a2a] hover:text-white"
-                        }`}
-                      >
-                        {s.server}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
             </div>
           </section>
 
