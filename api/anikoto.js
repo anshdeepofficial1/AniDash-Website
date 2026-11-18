@@ -376,7 +376,9 @@ function buildDirectAniKotoEmbeds(anilistId, malId, episode, category) {
     url,
     type: "embed",
     isEmbed: true,
-    iframeReady: true,
+    // A constructed URL does not prove that the provider has a playable episode.
+    iframeReady: false,
+    availability: "unverified",
     isDub: lang === "dub"
   });
 
