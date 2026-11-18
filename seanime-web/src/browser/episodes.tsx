@@ -357,10 +357,10 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
   const stillResolving = React.useRef(false)
   const waitingForMoreSources = React.useRef(false)
   streamsRef.current = streams
-  const advanceStream = React.useCallback((failedUrl: string): boolean => {
+  const advanceStream = React.useCallback((failedUrl: string, hideServer = true): boolean => {
     failedStreams.current.add(failedUrl)
     const failed = streamsRef.current.find(s => s.url === failedUrl)
-    if (failed && failed.type !== "embed") markServerDead(failed.server)
+    if (hideServer && failed && failed.type !== "embed") markServerDead(failed.server)
     const next = streamsRef.current.find(s => !failedStreams.current.has(s.url))
     if (next) {
       waitingForMoreSources.current = false
@@ -670,6 +670,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     let hls: Hls | undefined
     let live = true
     let mediaRecoveryAttempted = false
+    let networkRetries = 0
     let nativeErrorCleanup: (() => void) | null = null
 
     playbackStarted.current = false
@@ -737,11 +738,12 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
       hls = new Hls({
         enableWorker: true,
         lowLatencyMode: false,
-        manifestLoadingMaxRetry: 1,
-        levelLoadingMaxRetry: 1,
-        fragLoadingMaxRetry: 2,
-        manifestLoadingTimeOut: 8000,
-        fragLoadingTimeOut: 12000
+        manifestLoadingMaxRetry: 3,
+        levelLoadingMaxRetry: 3,
+        fragLoadingMaxRetry: 6,
+        fragLoadingRetryDelay: 800,
+        manifestLoadingTimeOut: 15000,
+        fragLoadingTimeOut: 30000
       })
       hlsInstance.current = hls
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
@@ -784,7 +786,13 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
           hls?.recoverMediaError()
           return
         }
-        if (advanceStream(activeStream.url)) return
+        // Segment downloads can fail briefly through the relay: restart loading a few times before giving up.
+        if (data.type === Hls.ErrorTypes.NETWORK_ERROR && networkRetries < 4) {
+          networkRetries += 1
+          window.setTimeout(() => { if (live) hls?.startLoad(Math.max(0, el.currentTime)) }, 1200 * networkRetries)
+          return
+        }
+        if (advanceStream(activeStream.url, data.type !== Hls.ErrorTypes.NETWORK_ERROR)) return
         setBuffering(false)
         setIsPlaying(false)
         const safeDetail = detail.replace(/[^a-zA-Z0-9_ -]/g, "").slice(0, 80)
