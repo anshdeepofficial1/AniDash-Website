@@ -328,6 +328,30 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
   const [storyboard, setStoryboard] = React.useState<SeekImage[]>([])
   const [buffering, setBuffering] = React.useState(false)
   const [playbackRevision, setPlaybackRevision] = React.useState(0)
+  // Automatic failover: remember sources that failed and move to the next candidate
+  // (other servers, other providers, then embedded partner players) instead of stopping.
+  // iPad/iPhone home-screen apps often cannot use the Fullscreen API on an element and fall back to
+  // Safari's own native player. This CSS "pseudo fullscreen" keeps AniDash's player on screen instead.
+  const [pseudoFullscreen, setPseudoFullscreen] = React.useState(false)
+  const failedStreams = React.useRef<Set<string>>(new Set())
+  const streamsRef = React.useRef<StreamSource[]>([])
+  const stillResolving = React.useRef(false)
+  const waitingForMoreSources = React.useRef(false)
+  streamsRef.current = streams
+  const advanceStream = React.useCallback((failedUrl: string): boolean => {
+    failedStreams.current.add(failedUrl)
+    const next = streamsRef.current.find(s => !failedStreams.current.has(s.url))
+    if (next) {
+      waitingForMoreSources.current = false
+      setError("")
+      setPlayerNotice("That source failed. Switching to " + (next.server || "the next source") + "…")
+      setActiveStream(next)
+      return true
+    }
+    // Other providers may still be loading; resume automatically when they arrive.
+    waitingForMoreSources.current = stillResolving.current
+    return false
+  }, [])
   const [volume, setVolume] = React.useState(1)
   const [playbackRate, setPlaybackRate] = React.useState(1)
   const [autoplay, setAutoplay] = React.useState(initial.preferences?.playerAutoplay !== false)
@@ -512,92 +536,89 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
       })
       .catch(() => {})
 
+    async function getJson(url: string): Promise<any | null> {
+      try {
+        const res = await fetch(url, { signal: AbortSignal.timeout(20000) })
+        return res.ok ? await res.json() : null
+      } catch (_) {
+        return null
+      }
+    }
+
+    // Collect every candidate source (all JustAnime servers, HiAnime, AniKoto direct
+    // sources and the MegaPlay/Megavid/AniXo embeds). The first provider in priority
+    // order that answers starts playback; the rest are appended as they arrive so the
+    // player can fail over automatically.
     async function resolveStreams() {
       const serverParam = selectedServer || DEFAULT_SERVER
+      const mal = m.idMal || ""
+      let activated = false
+      let gotMeta = false
 
-      // 1. Try JustAnime with selected server
-      try {
-        const res = await fetch(
-          `/api/justanime?action=streams&id=${entry.mediaId}&episode=${selected}&category=${audio}&server=${serverParam}`
-        )
-        if (res.ok) {
-          const data = await res.json()
-          if (live && Array.isArray(data.sources) && data.sources.length > 0) {
-            setStreams(data.sources)
-            setActiveStream(data.sources[0])
-            setTracks(Array.isArray(data.tracks) ? data.tracks : [])
-            setSegments({ intro: parseSkipInterval(data.intro), outro: parseSkipInterval(data.outro) })
-            setIsLoadingStream(false)
-            return
+      const add = (data: any) => {
+        if (!live || !data) return
+        const incoming: StreamSource[] = []
+        for (const src of Array.isArray(data.sources) ? data.sources : []) if (src?.url) incoming.push(src)
+        for (const e of Array.isArray(data.embeds) ? data.embeds : [])
+          if (e?.url) incoming.push({ url: e.url, type: "embed", server: e.name || e.id || "Embed", serverId: e.id, isDub: e.isDub })
+        if (!incoming.length) return
+        if (!gotMeta && Array.isArray(data.sources) && data.sources.length) {
+          gotMeta = true
+          setTracks(Array.isArray(data.tracks) ? data.tracks : [])
+          setSegments({ intro: parseSkipInterval(data.intro), outro: parseSkipInterval(data.outro) })
+        }
+        setStreams(prev => {
+          const known = new Set(prev.map(x => x.url))
+          return [...prev, ...incoming.filter(x => !known.has(x.url))]
+        })
+        streamsRef.current = [...streamsRef.current, ...incoming.filter(x => !streamsRef.current.some(k => k.url === x.url))]
+        if (!activated) {
+          activated = true
+          setActiveStream(incoming[0])
+          setIsLoadingStream(false)
+        } else if (waitingForMoreSources.current) {
+          const next = incoming.find(x => !failedStreams.current.has(x.url))
+          if (next) {
+            waitingForMoreSources.current = false
+            setError("")
+            setActiveStream(next)
           }
         }
-      } catch (_) {}
+      }
 
-      // 2. Try JustAnime auto
-      try {
-        const res = await fetch(
-          `/api/justanime?action=streams&id=${entry.mediaId}&episode=${selected}&category=${audio}&server=auto`
-        )
-        if (res.ok) {
-          const data = await res.json()
-          if (live && Array.isArray(data.sources) && data.sources.length > 0) {
-            setStreams(data.sources)
-            setActiveStream(data.sources[0])
-            setTracks(Array.isArray(data.tracks) ? data.tracks : [])
-            setSegments({ intro: parseSkipInterval(data.intro), outro: parseSkipInterval(data.outro) })
-            setIsLoadingStream(false)
-            return
-          }
-        }
-      } catch (_) {}
+      const base = `id=${entry.mediaId}&episode=${selected}&category=${audio}`
+      const jobs = [
+        getJson(`/api/justanime?action=streams&${base}&server=${serverParam}`),
+        getJson(`/api/justanime?action=streams&${base}&server=auto`),
+        getJson(`/api/hianime?action=streams&${base}`),
+        // AniKoto/MegaPlay expects anilistId / malId (not id) and returns iframe embeds.
+        getJson(`/api/anikoto?action=streams&anilistId=${entry.mediaId}&malId=${mal}&episode=${selected}&category=${audio}`)
+      ]
+      for (const job of jobs) add(await job)
 
-      // 3. Fallback to HiAnime
-      try {
-        const res = await fetch(
-          `/api/hianime?action=streams&id=${entry.mediaId}&episode=${selected}&category=${audio}`
-        )
-        if (res.ok) {
-          const data = await res.json()
-          if (live && Array.isArray(data.sources) && data.sources.length > 0) {
-            setStreams(data.sources)
-            setActiveStream(data.sources[0])
-            setTracks(Array.isArray(data.tracks) ? data.tracks : [])
-            setSegments({ intro: parseSkipInterval(data.intro), outro: parseSkipInterval(data.outro) })
-            setIsLoadingStream(false)
-            return
-          }
-        }
-      } catch (_) {}
-
-      // 4. Fallback to AniKoto
-      try {
-        const res = await fetch(
-          `/api/anikoto?action=streams&id=${entry.mediaId}&episode=${selected}&category=${audio}`
-        )
-        if (res.ok) {
-          const data = await res.json()
-          if (live && Array.isArray(data.sources) && data.sources.length > 0) {
-            setStreams(data.sources)
-            setActiveStream(data.sources[0])
-            setTracks(Array.isArray(data.tracks) ? data.tracks : [])
-            setSegments({ intro: parseSkipInterval(data.intro), outro: parseSkipInterval(data.outro) })
-            setIsLoadingStream(false)
-            return
-          }
-        }
-      } catch (_) {}
-
-      if (live) {
+      stillResolving.current = false
+      if (!live) return
+      if (!activated) {
         setIsLoadingStream(false)
         setError(
           `No playable ${audio.toUpperCase()} streams found for Episode ${selected}. Please try another server below.`
         )
+      } else if (waitingForMoreSources.current) {
+        waitingForMoreSources.current = false
+        setError("All available sources failed for this episode. Try SUB/DUB or another server.")
       }
     }
 
+    failedStreams.current.clear()
+    streamsRef.current = []
+    stillResolving.current = true
+    waitingForMoreSources.current = false
+    setStreams([])
+    setActiveStream(null)
     resolveStreams()
     return () => {
       live = false
+      stillResolving.current = false
     }
   }, [entry.mediaId, selected, audio, selectedServer, watchMode])
 
@@ -606,11 +627,20 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     setError("")
     const el = video.current
     if (!el || !activeStream?.url || !selected) return
+    if (activeStream.type === "embed") {
+      // Partner iframe players handle their own playback.
+      mountedMediaEpisode.current = selected
+      setBuffering(false)
+      setIsPlaying(false)
+      setIsLoadingStream(false)
+      return
+    }
     mountedMediaEpisode.current = selected
 
     let hls: Hls | undefined
     let live = true
     let mediaRecoveryAttempted = false
+    let nativeErrorCleanup: (() => void) | null = null
 
     playbackStarted.current = false
     mediaAccessDenied.current = false
@@ -701,6 +731,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
         // A rejected video/audio/manifest request is not a bandwidth problem.
         // Stop loading on access denial; do not retry or substitute media endpoints.
         if (status === 401 || status === 403) {
+          if (advanceStream(activeStream.url)) return
           mediaAccessDenied.current = true
           setAccessDenied(true)
           setBuffering(false)
@@ -718,6 +749,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
           hls?.recoverMediaError()
           return
         }
+        if (advanceStream(activeStream.url)) return
         setBuffering(false)
         setIsPlaying(false)
         const safeDetail = detail.replace(/[^a-zA-Z0-9_ -]/g, "").slice(0, 80)
@@ -729,19 +761,28 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
       })
     } else {
       el.src = streamUrl
+      const onNativeError = () => {
+        if (!live || advanceStream(streamUrl)) return
+        setBuffering(false)
+        setIsPlaying(false)
+        setError("This source could not be played. Try another server.")
+      }
+      el.addEventListener("error", onNativeError, { once: true })
+      nativeErrorCleanup = () => el.removeEventListener("error", onNativeError)
     }
 
     return () => {
       live = false
       if (mountedMediaEpisode.current === selected) mountedMediaEpisode.current = null
       el.removeEventListener("loadedmetadata", onLoadedMetadata)
+      nativeErrorCleanup?.()
       if (hlsInstance.current === hls) hlsInstance.current = null
       hls?.destroy()
       el.pause()
       el.removeAttribute("src")
       el.load()
     }
-  }, [activeStream?.url, selected, playbackRevision])
+  }, [activeStream?.url, selected, playbackRevision, advanceStream])
 
   // Surface media stalls rather than displaying an endless loading indicator.
   React.useEffect(() => {
@@ -758,6 +799,8 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
       previousEnd = end
       previousTime = el.currentTime
       if (performance.now() - lastProgress < 30000) return
+      window.clearInterval(timer)
+      if (advanceStream(activeStream.url)) return
       setBuffering(false)
       setIsPlaying(false)
       const state = el.readyState < 2 ? "No decoded video frames are available." : "Playback has not advanced."
@@ -765,7 +808,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
       window.clearInterval(timer)
     }, 1000)
     return () => window.clearInterval(timer)
-  }, [buffering, activeStream?.url, isLoadingStream, error, playbackRevision])
+  }, [buffering, activeStream?.url, isLoadingStream, error, playbackRevision, advanceStream])
 
   // External subtitles use ordinary browser CORS, converted to local WebVTT.
   // No media-source settings, credentials or access restrictions are changed.
@@ -1252,20 +1295,60 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
   }
 
   function toggleFullscreen() {
-    const container = playerWrapper.current || video.current
+    const container = (playerWrapper.current || video.current) as (HTMLElement & { webkitRequestFullscreen?: () => Promise<void> | void }) | null
     if (!container) return
     setPlayerMenu(null)
     wakeControls()
     focusPlayer()
-    if (document.fullscreenElement) {
-      void document.exitFullscreen().catch(() => {})
-    } else if (container.requestFullscreen) {
-      void container.requestFullscreen().catch(() => {})
-    } else {
-      const nativeVideo = video.current as (HTMLVideoElement & { webkitEnterFullscreen?: () => void }) | null
-      nativeVideo?.webkitEnterFullscreen?.()
+    const doc = document as Document & { webkitFullscreenElement?: Element | null; webkitExitFullscreen?: () => void }
+    if (pseudoFullscreen) {
+      setPseudoFullscreen(false)
+      return
+    }
+    if (document.fullscreenElement || doc.webkitFullscreenElement) {
+      if (document.exitFullscreen) void document.exitFullscreen().catch(() => {})
+      else doc.webkitExitFullscreen?.()
+      return
+    }
+    // Real fullscreen hides the system status bar where the browser allows it. Never hand the video to
+    // Safari's native player (webkitEnterFullscreen); fall back to the in-page fullscreen layout instead.
+    const request = container.requestFullscreen ? container.requestFullscreen.bind(container) : container.webkitRequestFullscreen?.bind(container)
+    if (!request) {
+      setPseudoFullscreen(true)
+      return
+    }
+    try {
+      const result = request()
+      if (result && typeof (result as Promise<void>).catch === "function") (result as Promise<void>).catch(() => setPseudoFullscreen(true))
+    } catch {
+      setPseudoFullscreen(true)
     }
   }
+
+  // Leave the in-page fullscreen layout with Escape, and stop the page behind it from scrolling.
+  React.useEffect(() => {
+    if (!pseudoFullscreen) return
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setPseudoFullscreen(false) }
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = "hidden"
+    window.addEventListener("keydown", onKey)
+    return () => {
+      window.removeEventListener("keydown", onKey)
+      document.body.style.overflow = previousOverflow
+    }
+  }, [pseudoFullscreen])
+
+  // If Safari ever opens its own full-screen player anyway, close it and stay in AniDash's player.
+  React.useEffect(() => {
+    const el = video.current as (HTMLVideoElement & { webkitExitFullscreen?: () => void }) | null
+    if (!el) return
+    const onNativeFullscreen = () => {
+      el.webkitExitFullscreen?.()
+      setPseudoFullscreen(true)
+    }
+    el.addEventListener("webkitbeginfullscreen", onNativeFullscreen)
+    return () => el.removeEventListener("webkitbeginfullscreen", onNativeFullscreen)
+  }, [watchMode])
 
   function toggleSubtitles() {
     updateCaptionEnabled(!subtitlesEnabled)
@@ -1368,6 +1451,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
         }
         [data-anidash-watch-page][data-movie="true"] { grid-template-columns: minmax(0, 1fr); }
         [data-anidash-watch-page][data-movie="true"] aside { display: none; }
+        [data-player-wrapper][data-pseudo-fullscreen="true"] { position: fixed; inset: 0; margin: 0 !important; z-index: 2147483000; width: 100vw; height: 100dvh; max-width: none; max-height: none; aspect-ratio: auto; border: 0; border-radius: 0; }
         [data-player-wrapper]:fullscreen, [data-player-wrapper]:-webkit-full-screen { width: 100%; height: 100%; max-width: none; max-height: none; aspect-ratio: auto; border: 0; border-radius: 0; }
         video::cue {
           background-color: rgba(0, 0, 0, 0.8) !important;
@@ -1600,6 +1684,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
            {/* Video Player Wrapper */}
           <div
             data-player-wrapper
+            data-pseudo-fullscreen={pseudoFullscreen ? "true" : "false"}
             ref={playerWrapper}
             tabIndex={0}
             role="region"
@@ -1628,8 +1713,9 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
             {error && !isLoadingStream && (
               <div className="absolute inset-0 z-20 bg-black/85 flex flex-col items-center justify-center gap-3 p-6 text-center">
                 <p className="text-sm text-red-400 max-w-md">{error}</p>
-                {accessDenied ? <p className="text-xs text-neutral-400 max-w-md">This is an access error, not a buffering or video-quality issue. Contact the media provider for authorized playback.</p> : <div className="flex flex-wrap justify-center gap-2">
-                  {activeStream?.url && <Button size="sm" intent="gray-outline" onClick={() => { setError(""); setPlaybackRevision(n => n + 1) }}>Retry playback</Button>}
+                {accessDenied && <p className="text-xs text-neutral-400 max-w-md">This source refused the request. Other sources were tried automatically; you can pick another server or an embed player below.</p>}
+                <div className="flex flex-wrap justify-center gap-2">
+                  {activeStream?.url && <Button size="sm" intent="gray-outline" onClick={() => { failedStreams.current.clear(); mediaAccessDenied.current = false; setAccessDenied(false); setError(""); setPlaybackRevision(n => n + 1) }}>Retry playback</Button>}
                   <Button
                     size="sm"
                     intent="white"
@@ -1648,14 +1734,28 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
                   >
                     Switch to {audio === "dub" ? "SUB" : "DUB"}
                   </Button>
-                </div>}
+                </div>
               </div>
+            )}
+
+            {/* Embedded partner player (MegaPlay, Megavid, AniXo). Covers the custom controls, which only drive the native video element. */}
+            {activeStream?.type === "embed" && !isLoadingStream && (
+              <iframe
+                key={activeStream.url}
+                src={activeStream.url}
+                title={"AniDash " + (activeStream.server || "embed") + " player"}
+                allow="autoplay; fullscreen; picture-in-picture; encrypted-media"
+                allowFullScreen
+                className="absolute inset-0 z-[25] h-full w-full border-0 bg-black"
+              />
             )}
 
             {/* Video Element */}
             <video
               ref={video}
               playsInline
+              webkit-playsinline=""
+              x-webkit-airplay="allow"
               preload="auto"
               className="absolute inset-0 w-full h-full object-contain bg-black"
               onClick={clickVideoSurface}
@@ -1979,6 +2079,29 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
                   })}
                 </div>
               </div>
+
+              {/* Embedded partner players (MegaPlay etc.), used automatically when direct sources fail. */}
+              {streams.some(s => s.type === "embed") && (
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-1.5 text-xs font-bold text-neutral-300 w-14 shrink-0">
+                    <span>EMBED</span>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {streams.filter(s => s.type === "embed").map(s => (
+                      <button
+                        key={s.url}
+                        type="button"
+                        onClick={() => { setError(""); setAccessDenied(false); setPlayerNotice(""); setActiveStream(s) }}
+                        className={`rounded-lg px-3.5 py-1.5 text-xs font-medium transition ${
+                          activeStream?.url === s.url ? "bg-white text-black font-semibold shadow-md" : "bg-[#1e1e1e] text-neutral-300 hover:bg-[#2a2a2a] hover:text-white"
+                        }`}
+                      >
+                        {s.server}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </section>
 

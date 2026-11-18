@@ -1289,7 +1289,7 @@ media-preview-chapter-display {
     @media (min-width: 768px) and (display-mode: standalone),
            (min-width: 768px) and (display-mode: fullscreen) {
         :root {
-            --anidash-tablet-safe-top: max(44px, env(safe-area-inset-top, 0px));
+            --anidash-tablet-safe-top: max(24px, env(safe-area-inset-top, 0px));
         }
         .UI-AppLayout__root.with-sidebar {
             padding-top: var(--anidash-tablet-safe-top);
