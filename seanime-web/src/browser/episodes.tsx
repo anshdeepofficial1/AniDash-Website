@@ -590,8 +590,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
         if (!live || !data) return
         const incoming: StreamSource[] = []
         for (const src of Array.isArray(data.sources) ? data.sources : []) if (src?.url) incoming.push(src)
-        for (const e of Array.isArray(data.embeds) ? data.embeds : [])
-          if (e?.url) incoming.push({ url: e.url, type: "embed", server: e.name || e.id || "Embed", serverId: e.id, isDub: e.isDub })
+        // External iframe players are never selected automatically: AniDash's own player always comes first.
         if (!incoming.length) return
         if (!gotMeta && Array.isArray(data.sources) && data.sources.length) {
           gotMeta = true
