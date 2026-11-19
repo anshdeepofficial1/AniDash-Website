@@ -173,7 +173,10 @@ function NextIcon() {
 const PAGE_SIZE = 24
 const storageKey = "anidash.watch.web.v1"
 const JUSTANIME_SERVERS = ["momo", "onyx", "gigi", "nami", "calm", "revo"] as const
-const DEFAULT_SERVER = "onyx"
+const DEFAULT_SERVER = "momo"
+// The external-player notice is shown once per page load (refreshing the site shows it again).
+let externalNoticeShown = false
+const LANG_NAMES: Record<string, string> = { hi: "Hindi", ta: "Tamil", te: "Telugu", ml: "Malayalam", kn: "Kannada", bn: "Bengali", mr: "Marathi", pa: "Punjabi", gu: "Gujarati", ur: "Urdu", en: "English" }
 const CONTROL_IDLE_MS = 3000
 const PLAYER_BUFFER_TARGET = 100
 const PREVIEW_STEP = 5
@@ -313,6 +316,13 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
   const [pipSupported, setPipSupported] = React.useState(false)
   const [pipActive, setPipActive] = React.useState(false)
   const [playerNotice, setPlayerNotice] = React.useState("")
+  const [toast, setToast] = React.useState("")
+  const [resolveNonce, setResolveNonce] = React.useState(0)
+  React.useEffect(() => {
+    if (!toast) return
+    const t = window.setTimeout(() => setToast(""), 3000)
+    return () => window.clearTimeout(t)
+  }, [toast])
   const [hlsLevels, setHlsLevels] = React.useState<{ index: number; label: string }[]>([])
   const [qualityLevel, setQualityLevel] = React.useState(-1)
   const [controlsVisible, setControlsVisible] = React.useState(true)
@@ -651,7 +661,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
       live = false
       stillResolving.current = false
     }
-  }, [entry.mediaId, selected, audio, selectedServer, watchMode])
+  }, [entry.mediaId, selected, audio, selectedServer, watchMode, resolveNonce])
 
   // Playback & HLS setup
   React.useEffect(() => {
@@ -716,7 +726,16 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
         setBuffering(false)
         setIsPlaying(false)
         if (reason instanceof DOMException && reason.name === "NotAllowedError") {
-          setPlayerNotice("Your browser blocked automatic playback with sound. Press Play to continue.")
+          // Start muted (always allowed), then unmute on the viewer's first tap or key press.
+          el.muted = true
+          void el.play().then(() => {
+            if (!live) return
+            setIsPlaying(true)
+            setToast("Playing muted. Tap anywhere to turn the sound on.")
+            const unmute = () => { el.muted = false; setToast("") }
+            window.addEventListener("pointerdown", unmute, { once: true })
+            window.addEventListener("keydown", unmute, { once: true })
+          }).catch(() => { if (live) setPlayerNotice("Press Play to start.") })
           return
         }
         if (reason instanceof DOMException && reason.name === "AbortError") return
@@ -827,6 +846,12 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
       el.load()
     }
   }, [activeStream?.url, selected, playbackRevision, advanceStream])
+
+  React.useEffect(() => {
+    if (activeStream?.type !== "embed" || externalNoticeShown) return
+    externalNoticeShown = true
+    setToast("This is the provider's own player, so AniDash controls are not available here.")
+  }, [activeStream?.url, activeStream?.type])
 
   // A source that never begins playing must not leave the viewer on a frozen first frame.
   React.useEffect(() => {
@@ -1291,47 +1316,47 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     router.push(`/entry?id=${entry.mediaId}`)
   }
 
-  // MegaPlay / Megavid / AniXo are no longer offered. The DUB row lists Hindi dub players (animehindi.fun) when found.
-  const [hindiEmbeds, setHindiEmbeds] = React.useState<StreamSource[]>([])
+  // Language players (animehindi.fun and similar) are loaded per episode and shown in their own section.
+  const [langEmbeds, setLangEmbeds] = React.useState<StreamSource[]>([])
   React.useEffect(() => {
     let live = true
-    setHindiEmbeds([])
+    setLangEmbeds([])
     const t = m.title?.english || m.title?.romaji || ""
     if (!t || !selected) return
     const qs = "kind=" + (m.format === "MOVIE" ? "movie" : "tv") + "&episode=" + selected + "&title=" + encodeURIComponent(t) + "&alt=" + encodeURIComponent(m.title?.romaji || "")
     fetch("/api/justanime?action=hindi&" + qs, { signal: AbortSignal.timeout(20000) })
-      .then(r => (r.ok ? (r.json() as Promise<{ embeds?: Array<{ url: string; name?: string; id?: string }> }>) : null))
+      .then(r => (r.ok ? (r.json() as Promise<{ embeds?: Array<{ url: string; name?: string; id?: string; lang?: string }> }>) : null))
       .then(d => {
         if (!live || !d?.embeds?.length) return
-        setHindiEmbeds(d.embeds.map(e => ({ url: e.url, type: "embed", server: e.name || "Hindi", serverId: e.id, isDub: true }) as StreamSource))
+        setLangEmbeds(d.embeds.map(e => ({ url: e.url, type: "embed", server: e.name || "Player", serverId: e.id, lang: e.lang || "hi" }) as unknown as StreamSource))
       })
       .catch(() => {})
     return () => { live = false }
   }, [m.id, selected])
-  function embedButtons(lang: "sub" | "dub") {
-    const list: StreamSource[] = lang === "dub" ? hindiEmbeds : []
-    return list.map(e => {
-      const active = audio === lang && activeStream?.url === e.url
-      return (
-        <button
-          key={e.serverId}
-          type="button"
-          onClick={() => {
-            setError(""); setAccessDenied(false); setPlayerNotice("")
-            if (audio === lang) {
-              setStreams(prev => prev.some(x => x.url === e.url) ? prev : [...prev, e])
-              setActiveStream(e)
-            } else {
-              forcedEmbed.current = e
-              pickServer(selectedServer, lang)
-            }
-          }}
-          className={`rounded-lg px-3.5 py-1.5 text-xs font-medium transition ${active ? "bg-white text-black font-semibold shadow-md" : "bg-[#1e1e1e] text-neutral-300 hover:bg-[#2a2a2a] hover:text-white"}`}
-        >
-          {e.server}
-        </button>
-      )
-    })
+  function externalGroups() {
+    const ep = selected || 1
+    const mal = m.idMal
+    const english = (lang: "sub" | "dub"): StreamSource[] => [
+      { server: "MegaPlay", serverId: "megaplay-" + lang, url: mal ? `https://megaplay.buzz/stream/mal/${mal}/${ep}/${lang}` : `https://megaplay.buzz/stream/ani/${m.id}/${ep}/${lang}` },
+      { server: "Megavid", serverId: "megavid-" + lang, url: mal ? `https://megavid.buzz/mal/${mal}/${ep}/${lang}?color=%23e63946&autoplay=true` : `https://megavid.buzz/ani/${m.id}/${ep}/${lang}?color=%23e63946&autoplay=true` },
+      { server: "AniXo", serverId: "anixo-" + lang, url: `https://anixo.buzz/embed/ani/${m.id}/${ep}/${lang}?color=%23e63946` }
+    ].map(e => ({ ...e, type: "embed", isDub: lang === "dub" }) as StreamSource)
+    const groups: Array<{ key: string; label: string; tone: "sky" | "amber"; items: StreamSource[] }> = [
+      { key: "en-sub", label: "English SUB", tone: "sky", items: english("sub") },
+      { key: "en-dub", label: "English DUB", tone: "sky", items: english("dub") }
+    ]
+    const byLang = new Map<string, StreamSource[]>()
+    for (const e of langEmbeds) {
+      const code = String((e as any).lang || "hi")
+      byLang.set(code, [...(byLang.get(code) || []), e])
+    }
+    for (const [code, items] of byLang) groups.push({ key: "lang-" + code, label: LANG_NAMES[code] || code.toUpperCase(), tone: "amber", items })
+    return groups
+  }
+  function openExternal(e: StreamSource) {
+    setError(""); setAccessDenied(false); setPlayerNotice("")
+    setStreams(prev => (prev.some(x => x.url === e.url) ? prev : [...prev, e]))
+    setActiveStream(e)
   }
   function changeAudio(a: "dub" | "sub") {
     if (watchMode) record(true)
@@ -1344,6 +1369,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     if (watchMode) record(true)
     setAudio(channel)
     setSelectedServer(serverKey)
+    if (activeStream?.type === "embed") setResolveNonce(n => n + 1)
     const s = getStore()
     saveStore({ ...s, preferences: { ...s.preferences, preferredAudio: channel } })
   }
@@ -1867,13 +1893,15 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
               </div>
             )}
 
-            {activeStream?.type === "embed" && (
-              <div data-embed-bar className="absolute left-0 right-0 top-0 z-[40] flex items-center justify-between gap-2 bg-black/70 px-3 py-1.5 text-xs text-white">
-                <span className="truncate">External player: {activeStream.server}</span>
-                <button type="button" className="rounded bg-white px-2 py-1 font-semibold text-black" onClick={() => { failedStreams.current.clear(); const native = streamsRef.current.find(x => x.type !== "embed"); if (native) setActiveStream(native); else setPlaybackRevision(n => n + 1) }}>
-                  Back to AniDash player
-                </button>
+            {toast && (
+              <div data-embed-bar role="status" className="pointer-events-none absolute left-1/2 top-3 z-[50] max-w-[90%] -translate-x-1/2 rounded-full bg-black/85 px-4 py-2 text-center text-xs text-white shadow-lg">
+                {toast}
               </div>
+            )}
+            {activeStream?.type === "embed" && (
+              <button data-embed-bar type="button" className="absolute left-2 top-2 z-[45] rounded-full bg-black/60 px-2.5 py-1 text-[11px] font-medium text-white/90 hover:bg-black/80" onClick={() => { failedStreams.current.clear(); const native = streamsRef.current.find(x => x.type !== "embed"); if (native) setActiveStream(native); else setResolveNonce(n => n + 1) }}>
+                ← AniDash player
+              </button>
             )}
 
             {/* Embedded partner player (MegaPlay, Megavid, AniXo). Covers the custom controls, which only drive the native video element. */}
@@ -2173,7 +2201,6 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
                       </button>
                     )
                   })}
-                  {embedButtons("sub")}
                 </div>
               </div>
 
@@ -2216,7 +2243,6 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
                       </button>
                     )
                   })}
-                  {embedButtons("dub")}
                   {deadServers.length > 0 && (
                     <button type="button" className="text-[11px] text-neutral-500 underline" onClick={() => { try { localStorage.removeItem("anidash:deadServers") } catch {} setDeadServers([]) }}>
                       Show hidden servers
@@ -2225,6 +2251,31 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
                 </div>
               </div>
             </div>
+          </section>
+
+          {/* External and language players: separate from the built-in AniDash servers. */}
+          <section aria-label="Languages and external players" className="rounded-xl border border-neutral-800 bg-[#0d0d0d] p-4 sm:p-5 space-y-3">
+            <div>
+              <h2 className="text-base font-bold">Languages &amp; external players</h2>
+              <p className="text-xs text-neutral-400 mt-1">These open the provider's own player, not the AniDash player.</p>
+            </div>
+            {externalGroups().map(g => (
+              <div key={g.key} className="flex items-start gap-3">
+                <span className={`mt-1 w-24 shrink-0 rounded-md px-2 py-1 text-center text-[11px] font-bold ${g.tone === "amber" ? "bg-amber-500/15 text-amber-300" : "bg-sky-500/15 text-sky-300"}`}>{g.label}</span>
+                <div className="flex flex-wrap gap-2">
+                  {g.items.map(e => (
+                    <button
+                      key={e.serverId || e.url}
+                      type="button"
+                      onClick={() => openExternal(e)}
+                      className={`rounded-lg px-3.5 py-1.5 text-xs font-medium transition ${activeStream?.url === e.url ? "bg-white text-black font-semibold shadow-md" : g.tone === "amber" ? "bg-amber-500/10 text-amber-200 hover:bg-amber-500/20" : "bg-sky-500/10 text-sky-200 hover:bg-sky-500/20"}`}
+                    >
+                      {e.server}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
           </section>
 
           {/* Estimated Next Episode Airing Banner */}

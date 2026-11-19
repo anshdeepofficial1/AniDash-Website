@@ -23,6 +23,8 @@ export const episodeLinks = html => {
   return out;
 };
 
+export const hostLabel = url => { try { const p = new URL(url).hostname.replace(/^www\./, "").split("."); const n = p.length > 2 && p[0] === "cloudy" ? p[0] : p[0]; return n.charAt(0).toUpperCase() + n.slice(1); } catch { return "Player"; } };
+
 export const embedLinks = html => {
   const out = [];
   for (const m of String(html || "").matchAll(/https?:\/\/[^\s"'<>)\\]+/gi)) {
@@ -72,7 +74,14 @@ export async function hindiHandler(req, res) {
       if (!epUrl) return res.status(200).json(none);
       epHtml = await page(epUrl);
     }
-    const embeds = embedLinks(epHtml).slice(0, 4).map((url, i) => ({ id: "hindi-" + (i + 1), name: "Hindi " + (i + 1), url, type: "embed", isEmbed: true, isDub: true, lang: "hi" }));
+    const links = embedLinks(epHtml).slice(0, 4);
+    const seen = {};
+    const embeds = links.map(url => {
+      const base = hostLabel(url);
+      seen[base] = (seen[base] || 0) + 1;
+      const name = seen[base] > 1 ? base + " " + seen[base] : base;
+      return { id: "hi-" + name.toLowerCase().replace(/\s+/g, "-"), name, url, type: "embed", isEmbed: true, lang: "hi", langName: "Hindi" };
+    });
     return res.status(200).json({ sources: [], embeds, available: embeds.length > 0 });
   } catch {
     return res.status(200).json(none);
