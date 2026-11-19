@@ -36,31 +36,84 @@ export const embedLinks = html => {
   return out;
 };
 
-async function findSeries(titles, movie) {
-  const slugs = [...new Set(titles.map(slugify).filter(Boolean))];
-  const tries = [];
-  for (const s of slugs) {
-    if (movie) tries.push(`${SITE}/movies/${s}`, `${SITE}/movies/${s}-hindi-dub`);
-    tries.push(`${SITE}/series/${s}`, `${SITE}/series/${s}-hindi-dub`);
+const WORD_SEASONS = { second: 2, third: 3, fourth: 4, fifth: 5, sixth: 6 };
+
+// "Season 2", "2nd Season", "Third Season", "S2" anywhere in the titles.
+export function seasonFromTitles(titles) {
+  for (const t of titles) {
+    const s = String(t || "");
+    let m = s.match(/season\s*(\d{1,2})/i) || s.match(/(\d{1,2})(?:st|nd|rd|th)\s+season/i) || s.match(/\bs(\d{1,2})\b/i);
+    if (m) return +m[1];
+    m = s.match(/\b(second|third|fourth|fifth|sixth)\s+season/i);
+    if (m) return WORD_SEASONS[m[1].toLowerCase()];
   }
-  for (const url of tries.slice(0, 10)) {
-    const html = await page(url);
-    if (html && (episodeLinks(html).length || embedLinks(html).length)) return { url, html };
+  return 0;
+}
+
+// Series name without the season or subtitle: "Dr. Stone: Stone Wars" -> "Dr. Stone".
+export const baseTitle = t => String(t || "")
+  .replace(/\((?:tv|\d{4})\)/gi, " ")
+  .replace(/\b(?:the\s+)?final\s+season\b/gi, " ")
+  .replace(/\b\d{1,2}(?:st|nd|rd|th)\s+season\b/gi, " ")
+  .replace(/\bseason\s*\d{1,2}\b/gi, " ")
+  .replace(/\bpart\s*\d{1,2}\b/gi, " ")
+  .split(/\s*[:\u2013\u2014]\s+|\s+-\s+/)[0]
+  .trim();
+
+export function candidateUrls(titles, movie) {
+  const slugs = [];
+  for (const t of titles) for (const s of [slugify(t), slugify(baseTitle(t))]) if (s && !slugs.includes(s)) slugs.push(s);
+  const urls = [];
+  for (const s of slugs) {
+    if (movie) urls.push(`${SITE}/movies/${s}`, `${SITE}/movies/${s}-hindi-dub`);
+    urls.push(`${SITE}/series/${s}`, `${SITE}/series/${s}-hindi-dub`);
+  }
+  return urls.slice(0, 14);
+}
+
+async function findSeries(titles, movie) {
+  const urls = candidateUrls(titles, movie);
+  const pages = await Promise.all(urls.map(page));
+  for (let i = 0; i < urls.length; i++) {
+    const html = pages[i];
+    if (html && (episodeLinks(html).length || embedLinks(html).length)) return { url: urls[i], html };
   }
   return null;
 }
 
-async function resolveEpisodeUrl(series, episode) {
+// Pick which site season an AniList entry corresponds to. Returns the episode page URL or null.
+export function pickEpisode(lists, { explicit = 0, total = 0, episode = 1, baseTitleHasSubtitle = false }) {
+  const seasons = [...lists.keys()].sort((a, b) => a - b);
+  if (!seasons.length) return null;
+  const at = s => lists.get(s)?.[episode - 1] || null;
+  if (seasons.length === 1) return at(seasons[0]);
+  if (explicit && lists.has(explicit)) return at(explicit);
+  const all = seasons.flatMap(s => lists.get(s));
+  const biggest = Math.max(...seasons.map(s => lists.get(s).length));
+  if (!total || total > biggest) return all.filter((u, i, a) => a.indexOf(u) === i)[episode - 1] || null; // long runner, absolute numbering
+  const matches = seasons.filter(s => lists.get(s).length === total);
+  if (matches.length === 1) return at(matches[0]);
+  if (!matches.length && !baseTitleHasSubtitle && total <= lists.get(seasons[0]).length) return at(seasons[0]);
+  if (matches.length > 1 && !baseTitleHasSubtitle) return at(matches[0]);
+  return null; // ambiguous: better no Hindi button than the wrong season
+}
+
+async function resolveEpisodeUrl(series, opts) {
   const seasons = [...new Set([...series.html.matchAll(/[?&]season=(\d{1,2})/g)].map(m => +m[1]))].sort((a, b) => a - b);
-  if (seasons.length <= 1) return episodeLinks(series.html)[episode - 1] || null;
-  const lists = await Promise.all(seasons.slice(0, 25).map(async s => episodeLinks(await page(`${series.url}?season=${s}`))));
-  return lists.flat().filter((u, i, a) => a.indexOf(u) === i)[episode - 1] || null;
+  const lists = new Map();
+  if (seasons.length <= 1) lists.set(seasons[0] || 1, episodeLinks(series.html));
+  else {
+    const pagesBySeason = await Promise.all(seasons.slice(0, 25).map(async s => [s, episodeLinks(await page(`${series.url}?season=${s}`))]));
+    for (const [s, l] of pagesBySeason) if (l.length) lists.set(s, l);
+  }
+  return pickEpisode(lists, opts);
 }
 
 export async function hindiHandler(req, res) {
   res.setHeader("Cache-Control", "public, s-maxage=3600, stale-while-revalidate=86400");
   if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
   const titles = [req.query.title, req.query.alt].map(x => String(x || "").slice(0, 150)).filter(Boolean);
+  const total = Math.max(0, Math.min(5000, parseInt(req.query.total, 10) || 0));
   const episode = Math.max(1, Math.min(5000, parseInt(req.query.episode, 10) || 1));
   const movie = req.query.kind === "movie";
   const none = { sources: [], embeds: [], available: false };
@@ -70,7 +123,7 @@ export async function hindiHandler(req, res) {
     if (!series) return res.status(200).json(none);
     let epHtml = series.html;
     if (!movie || episodeLinks(series.html).length) {
-      const epUrl = await resolveEpisodeUrl(series, episode);
+      const epUrl = await resolveEpisodeUrl(series, { explicit: seasonFromTitles(titles), total, episode, baseTitleHasSubtitle: titles.some(t => baseTitle(t) !== String(t).trim()) });
       if (!epUrl) return res.status(200).json(none);
       epHtml = await page(epUrl);
     }

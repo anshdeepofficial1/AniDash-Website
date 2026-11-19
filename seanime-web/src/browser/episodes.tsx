@@ -354,7 +354,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
   })
   const markServerDead = React.useCallback((name?: string) => {
     const key = (name || "").toLowerCase()
-    if (!key) return
+    if (!key || key === "momo") return
     setDeadServers(prev => (prev.includes(key) ? prev : [...prev, key]))
     try {
       const raw = JSON.parse(localStorage.getItem("anidash:deadServers") || "{}") as Record<string, number>
@@ -1323,7 +1323,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     setLangEmbeds([])
     const t = m.title?.english || m.title?.romaji || ""
     if (!t || !selected) return
-    const qs = "kind=" + (m.format === "MOVIE" ? "movie" : "tv") + "&episode=" + selected + "&title=" + encodeURIComponent(t) + "&alt=" + encodeURIComponent(m.title?.romaji || "")
+    const qs = "kind=" + (m.format === "MOVIE" ? "movie" : "tv") + "&episode=" + selected + "&title=" + encodeURIComponent(t) + "&alt=" + encodeURIComponent(m.title?.romaji || "") + "&total=" + (m.episodes || 0)
     fetch("/api/justanime?action=hindi&" + qs, { signal: AbortSignal.timeout(20000) })
       .then(r => (r.ok ? (r.json() as Promise<{ embeds?: Array<{ url: string; name?: string; id?: string; lang?: string }> }>) : null))
       .then(d => {
@@ -1341,9 +1341,9 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
       { server: "Megavid", serverId: "megavid-" + lang, url: mal ? `https://megavid.buzz/mal/${mal}/${ep}/${lang}?color=%23e63946&autoplay=true` : `https://megavid.buzz/ani/${m.id}/${ep}/${lang}?color=%23e63946&autoplay=true` },
       { server: "AniXo", serverId: "anixo-" + lang, url: `https://anixo.buzz/embed/ani/${m.id}/${ep}/${lang}?color=%23e63946` }
     ].map(e => ({ ...e, type: "embed", isDub: lang === "dub" }) as StreamSource)
-    const groups: Array<{ key: string; label: string; tone: "sky" | "amber"; items: StreamSource[] }> = [
-      { key: "en-sub", label: "English SUB", tone: "sky", items: english("sub") },
-      { key: "en-dub", label: "English DUB", tone: "sky", items: english("dub") }
+    const groups: Array<{ key: string; label: string; note?: string; tone: "sky" | "amber"; items: StreamSource[] }> = [
+      { key: "en-sub", label: "SUB", note: "Japanese", tone: "sky", items: english("sub") },
+      { key: "en-dub", label: "DUB", note: "English", tone: "sky", items: english("dub") }
     ]
     const byLang = new Map<string, StreamSource[]>()
     for (const e of langEmbeds) {
@@ -2174,7 +2174,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
                   <span>SUB</span>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  {JUSTANIME_SERVERS.filter(k => !deadServers.includes(k)).map(key => {
+                  {JUSTANIME_SERVERS.filter(k => k === "momo" || !deadServers.includes(k)).map(key => {
                     const isSelected = audio === "sub" && selectedServer === key
                     const isHsub = key === "onyx"
                     const isDisabled = serverMap[key] && serverMap[key].sub === false
@@ -2220,7 +2220,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
                   <span>DUB</span>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  {JUSTANIME_SERVERS.filter(k => !deadServers.includes(k)).map(key => {
+                  {JUSTANIME_SERVERS.filter(k => k === "momo" || !deadServers.includes(k)).map(key => {
                     const isSelected = audio === "dub" && selectedServer === key
                     const isCalmDubDisabled = key === "calm"
                     const isExplicitlyDisabled = serverMap[key] && serverMap[key].dub === false
@@ -2261,7 +2261,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
             </div>
             {externalGroups().map(g => (
               <div key={g.key} className="flex items-start gap-3">
-                <span className={`mt-1 w-24 shrink-0 rounded-md px-2 py-1 text-center text-[11px] font-bold ${g.tone === "amber" ? "bg-amber-500/15 text-amber-300" : "bg-sky-500/15 text-sky-300"}`}>{g.label}</span>
+                <span className={`mt-1 w-24 shrink-0 rounded-md px-2 py-1 text-center text-[11px] font-bold ${g.tone === "amber" ? "bg-amber-500/15 text-amber-300" : "bg-sky-500/15 text-sky-300"}`}>{g.label}{g.note && <span className="block text-[9px] font-medium opacity-70">{g.note}</span>}</span>
                 <div className="flex flex-wrap gap-2">
                   {g.items.map(e => (
                     <button
