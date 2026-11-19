@@ -352,6 +352,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
       localStorage.setItem("anidash:deadServers", JSON.stringify(raw))
     } catch {}
   }, [])
+  const [titleLogo, setTitleLogo] = React.useState<string | null>(null)
   const failedStreams = React.useRef<Set<string>>(new Set())
   const streamsRef = React.useRef<StreamSource[]>([])
   const stillResolving = React.useRef(false)
@@ -559,7 +560,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
 
     async function getJson(url: string): Promise<any | null> {
       try {
-        const res = await fetch(url, { signal: AbortSignal.timeout(20000) })
+        const res = await fetch(url, { signal: AbortSignal.timeout(12000) })
         return res.ok ? await res.json() : null
       } catch (_) {
         return null
@@ -826,6 +827,20 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
       el.load()
     }
   }, [activeStream?.url, selected, playbackRevision, advanceStream])
+
+  // A source that never begins playing must not leave the viewer on a frozen first frame.
+  React.useEffect(() => {
+    if (!activeStream?.url || activeStream.type === "embed" || isLoadingStream || error) return
+    const el = video.current
+    if (!el) return
+    const url = activeStream.url
+    const timer = window.setTimeout(() => {
+      if (el.currentTime > 0.2 || el.readyState >= 3) return
+      if (manualPlaybackIntent.current === "pause") return
+      advanceStream(url)
+    }, 18000)
+    return () => window.clearTimeout(timer)
+  }, [activeStream?.url, activeStream?.type, isLoadingStream, error, playbackRevision, advanceStream])
 
   // Surface media stalls rather than displaying an endless loading indicator.
   React.useEffect(() => {
@@ -1498,6 +1513,17 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
 
   const currentArc = arcs.find(item => selected >= item.start && selected <= item.end)
   const animeTitle = m.title?.userPreferred || m.title?.english || m.title?.romaji || "Anime"
+  React.useEffect(() => {
+    let live = true
+    setTitleLogo(null)
+    const name = m.title?.english || m.title?.romaji || ""
+    if (!name) return
+    fetch("/api/title-logo?kind=" + (m.format === "MOVIE" ? "movie" : "tv") + "&title=" + encodeURIComponent(name), { signal: AbortSignal.timeout(8000) })
+      .then(r => (r.ok ? (r.json() as Promise<{ logo?: string | null }>) : null))
+      .then(d => { if (live && d?.logo) setTitleLogo(d.logo) })
+      .catch(() => {})
+    return () => { live = false }
+  }, [m.id])
   const mediaDetails = m as any
   const synopsis = typeof mediaDetails.description === "string" ? mediaDetails.description.replace(/<br\s*\/?\s*>/gi, " ").replace(/<[^>]*>/g, "").replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'").replace(/&nbsp;/g, " ").trim() : ""
   const episodeDateRaw = metadata[selected]?.aired
@@ -1526,6 +1552,11 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
         }
         [data-anidash-watch-page][data-movie="true"] { grid-template-columns: minmax(0, 1fr); }
         [data-anidash-watch-page][data-movie="true"] aside { display: none; }
+        @keyframes anidashLogoPulse { 0%,100% { opacity: .55; transform: scale(.97); filter: drop-shadow(0 0 0 rgba(255,255,255,0)); } 50% { opacity: 1; transform: scale(1); filter: drop-shadow(0 0 18px rgba(255,255,255,.45)); } }
+        @keyframes anidashLogoBar { from { transform: translateX(-120%); } to { transform: translateX(320%); } }
+        .anidash-logo-pulse { animation: anidashLogoPulse 2.2s ease-in-out infinite; }
+        .anidash-logo-bar { animation: anidashLogoBar 1.4s ease-in-out infinite; }
+        [data-player-wrapper][data-embed="true"] > *:not(iframe):not([data-embed-bar]) { display: none !important; }
         [data-player-wrapper][data-pseudo-fullscreen="true"] { position: fixed; inset: 0; margin: 0 !important; z-index: 2147483000; width: 100vw; height: 100dvh; max-width: none; max-height: none; aspect-ratio: auto; border: 0; border-radius: 0; }
         [data-player-wrapper]:fullscreen, [data-player-wrapper]:-webkit-full-screen { width: 100%; height: 100%; max-width: none; max-height: none; aspect-ratio: auto; border: 0; border-radius: 0; }
         video::cue {
@@ -1766,6 +1797,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
           <div
             data-player-wrapper
             data-pseudo-fullscreen={pseudoFullscreen ? "true" : "false"}
+            data-embed={activeStream?.type === "embed" ? "true" : "false"}
             ref={playerWrapper}
             tabIndex={0}
             role="region"
@@ -1778,9 +1810,15 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
           >
             {/* Loading Indicator */}
             {isLoadingStream && (
-              <div className="absolute inset-0 z-20 bg-black/80 backdrop-blur-sm flex flex-col items-center justify-center gap-3 text-white">
-                <div className="w-8 h-8 border-3 border-white/20 border-t-white rounded-full animate-spin" />
-                <p className="text-sm font-medium">Connecting to {selectedServer.toUpperCase()} server…</p>
+              <div className="absolute inset-0 z-20 bg-black flex flex-col items-center justify-center gap-4 px-6 text-center text-white">
+                {m.bannerImage && <img src={m.bannerImage} alt="" className="absolute inset-0 h-full w-full object-cover opacity-20 blur-sm" />}
+                <div className="relative anidash-logo-pulse max-w-[70%]">
+                  {titleLogo
+                    ? <img src={titleLogo} alt={animeTitle} className="max-h-24 sm:max-h-36 w-auto max-w-full object-contain" onError={() => setTitleLogo(null)} />
+                    : <p className="text-2xl sm:text-5xl font-extrabold tracking-wide uppercase leading-tight drop-shadow-[0_2px_12px_rgba(255,255,255,0.35)]">{animeTitle}</p>}
+                </div>
+                <div className="relative h-1 w-40 overflow-hidden rounded-full bg-white/15"><div className="anidash-logo-bar h-full w-1/3 rounded-full bg-white" /></div>
+                <p className="relative text-xs text-neutral-300">{m.format === "MOVIE" ? "Movie" : "Episode " + selected} · {selectedServer.toUpperCase()}</p>
               </div>
             )}
 
@@ -1816,6 +1854,15 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
                     Switch to {audio === "dub" ? "SUB" : "DUB"}
                   </Button>
                 </div>
+              </div>
+            )}
+
+            {activeStream?.type === "embed" && (
+              <div data-embed-bar className="absolute left-0 right-0 top-0 z-[40] flex items-center justify-between gap-2 bg-black/70 px-3 py-1.5 text-xs text-white">
+                <span className="truncate">External player: {activeStream.server}</span>
+                <button type="button" className="rounded bg-white px-2 py-1 font-semibold text-black" onClick={() => { failedStreams.current.clear(); const native = streamsRef.current.find(x => x.type !== "embed"); if (native) setActiveStream(native); else setPlaybackRevision(n => n + 1) }}>
+                  Back to AniDash player
+                </button>
               </div>
             )}
 
