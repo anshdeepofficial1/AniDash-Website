@@ -1291,15 +1291,25 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     router.push(`/entry?id=${entry.mediaId}`)
   }
 
-  // MegaPlay / Megavid / AniXo live in the SUB and DUB rows next to the built-in servers, one set per language.
+  // MegaPlay / Megavid / AniXo are no longer offered. The DUB row lists Hindi dub players (animehindi.fun) when found.
+  const [hindiEmbeds, setHindiEmbeds] = React.useState<StreamSource[]>([])
+  React.useEffect(() => {
+    let live = true
+    setHindiEmbeds([])
+    const t = m.title?.english || m.title?.romaji || ""
+    if (!t || !selected) return
+    const qs = "kind=" + (m.format === "MOVIE" ? "movie" : "tv") + "&episode=" + selected + "&title=" + encodeURIComponent(t) + "&alt=" + encodeURIComponent(m.title?.romaji || "")
+    fetch("/api/hindi?" + qs, { signal: AbortSignal.timeout(20000) })
+      .then(r => (r.ok ? (r.json() as Promise<{ embeds?: Array<{ url: string; name?: string; id?: string }> }>) : null))
+      .then(d => {
+        if (!live || !d?.embeds?.length) return
+        setHindiEmbeds(d.embeds.map(e => ({ url: e.url, type: "embed", server: e.name || "Hindi", serverId: e.id, isDub: true }) as StreamSource))
+      })
+      .catch(() => {})
+    return () => { live = false }
+  }, [m.id, selected])
   function embedButtons(lang: "sub" | "dub") {
-    const ep = selected || 1
-    const mal = m.idMal
-    const list: StreamSource[] = [
-      { server: "MegaPlay", serverId: "megaplay", url: mal ? `https://megaplay.buzz/stream/mal/${mal}/${ep}/${lang}` : `https://megaplay.buzz/stream/ani/${m.id}/${ep}/${lang}` },
-      { server: "Megavid", serverId: "megavid", url: mal ? `https://megavid.buzz/mal/${mal}/${ep}/${lang}?color=%23e63946&autoplay=true` : `https://megavid.buzz/ani/${m.id}/${ep}/${lang}?color=%23e63946&autoplay=true` },
-      { server: "AniXo", serverId: "anixo", url: `https://anixo.buzz/embed/ani/${m.id}/${ep}/${lang}?color=%23e63946` }
-    ].map(e => ({ ...e, type: "embed", isDub: lang === "dub" }))
+    const list: StreamSource[] = lang === "dub" ? hindiEmbeds : []
     return list.map(e => {
       const active = audio === lang && activeStream?.url === e.url
       return (
