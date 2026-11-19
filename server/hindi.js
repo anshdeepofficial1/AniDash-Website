@@ -55,7 +55,7 @@ async function resolveEpisodeUrl(series, episode) {
   return lists.flat().filter((u, i, a) => a.indexOf(u) === i)[episode - 1] || null;
 }
 
-export default async function handler(req, res) {
+export async function hindiHandler(req, res) {
   res.setHeader("Cache-Control", "public, s-maxage=3600, stale-while-revalidate=86400");
   if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
   const titles = [req.query.title, req.query.alt].map(x => String(x || "").slice(0, 150)).filter(Boolean);

@@ -1,7 +1,7 @@
 // Title logo (clear-logo) lookup for the player loading animation.
 // Needs a free TMDB API key in the TMDB_API_KEY environment variable; without it the app
 // falls back to an animated text wordmark of the title.
-export default async function handler(req, res) {
+export async function titleLogoHandler(req, res) {
   res.setHeader("Cache-Control", "public, s-maxage=604800, stale-while-revalidate=2592000");
   if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
   const key = String(process.env.TMDB_API_KEY || "").trim();

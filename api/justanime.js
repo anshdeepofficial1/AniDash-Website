@@ -1,3 +1,5 @@
+import { hindiHandler } from "../server/hindi.js";
+import { titleLogoHandler } from "../server/title-logo.js";
 const API = "https://core.justanime.to/api";
 const SITE = "https://justanime.to";
 const UA = "Mozilla/5.0 (Linux; Android 15) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36";
@@ -515,6 +517,8 @@ export default async function handler(req, res) {
     }
 
     const action = String(req.query.action || "");
+    if (action === "hindi") return hindiHandler(req, res);
+    if (action === "logo") return titleLogoHandler(req, res);
     if (action === "search") {
       const query = String(req.query.query || "").trim().slice(0, 100);
       if (!query) return send(res, 400, { error: "A search query is required" });

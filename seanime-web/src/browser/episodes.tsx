@@ -1299,7 +1299,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     const t = m.title?.english || m.title?.romaji || ""
     if (!t || !selected) return
     const qs = "kind=" + (m.format === "MOVIE" ? "movie" : "tv") + "&episode=" + selected + "&title=" + encodeURIComponent(t) + "&alt=" + encodeURIComponent(m.title?.romaji || "")
-    fetch("/api/hindi?" + qs, { signal: AbortSignal.timeout(20000) })
+    fetch("/api/justanime?action=hindi&" + qs, { signal: AbortSignal.timeout(20000) })
       .then(r => (r.ok ? (r.json() as Promise<{ embeds?: Array<{ url: string; name?: string; id?: string }> }>) : null))
       .then(d => {
         if (!live || !d?.embeds?.length) return
@@ -1528,7 +1528,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     setTitleLogo(null)
     const name = m.title?.english || m.title?.romaji || ""
     if (!name) return
-    fetch("/api/title-logo?kind=" + (m.format === "MOVIE" ? "movie" : "tv") + "&title=" + encodeURIComponent(name), { signal: AbortSignal.timeout(8000) })
+    fetch("/api/justanime?action=logo&kind=" + (m.format === "MOVIE" ? "movie" : "tv") + "&title=" + encodeURIComponent(name), { signal: AbortSignal.timeout(8000) })
       .then(r => (r.ok ? (r.json() as Promise<{ logo?: string | null }>) : null))
       .then(d => { if (live && d?.logo) setTitleLogo(d.logo) })
       .catch(() => {})
