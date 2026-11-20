@@ -509,7 +509,7 @@ export function MediaEntryCardBody(props: MediaEntryCardBodyProps) {
 
                     {/*RELEASING BADGE*/}
                     {(status === "RELEASING" || status === "NOT_YET_RELEASED") && !hideReleasingBadge &&
-                        <div data-media-entry-card-body-releasing-badge-container className="absolute z-[10] right-1 top-2">
+                        <div data-media-entry-card-body-releasing-badge-container className="absolute z-[10] right-1.5 top-8">
                             <Badge intent={status === "RELEASING" ? "primary-solid" : "zinc-solid"} size="lg"><RiSignalTowerLine /></Badge>
                         </div>}
 

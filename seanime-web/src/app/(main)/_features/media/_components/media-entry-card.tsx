@@ -27,6 +27,7 @@ import {
     MediaEntryCardOverlay,
     MediaEntryCardTitleSection,
 } from "@/app/(main)/_features/media/_components/media-entry-card-components"
+import { MediaCardTags } from "@/app/(main)/_features/media/_components/media-card-tags"
 import { MediaEntryAudienceScore } from "@/app/(main)/_features/media/_components/media-entry-metadata-components"
 import { MediaEntryProgressBadge } from "@/app/(main)/_features/media/_components/media-entry-progress-badge"
 import { MediaEntryScoreBadge } from "@/app/(main)/_features/media/_components/media-entry-score-badge"
@@ -429,6 +430,13 @@ export function MediaEntryCard<T extends "anime" | "manga">(props: MediaEntryCar
                 onClick={onClick}
                 hideReleasingBadge={hideReleasingBadge}
             >
+                {type === "anime" && <MediaCardTags
+                    format={media.format}
+                    title={media.title}
+                    score={media.meanScore}
+                    episodes={mediaEpisodes}
+                    isAdult={mediaIsAdult}
+                />}
                 <div data-media-entry-card-body-progress-badge-container className="absolute z-[10] left-0 bottom-0 flex items-end">
                     <MediaEntryProgressBadge
                         progress={listData?.progress}
