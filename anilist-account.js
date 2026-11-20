@@ -398,10 +398,24 @@
     return data?.DeleteMediaListEntry?.deleted === true;
   }
 
+  async function deleteEntry(mediaId) {
+    if (!authenticated()) return false;
+    const id = Number(mediaId);
+    if (!entries.has(id)) await list(true);
+    const entry = entries.get(id);
+    if (!entry?.id) return false;
+    const data = await request(
+      "mutation ($id: Int!) { DeleteMediaListEntry(id: $id) { deleted } }",
+      { id: Number(entry.id) }
+    );
+    if (data?.DeleteMediaListEntry?.deleted) { entries.delete(id); listAt = 0; }
+    return data?.DeleteMediaListEntry?.deleted === true;
+  }
+
   window.AniDashAccount = {
     captureRedirect, setHandler, settings, init, beginLogin, logout,
     currentUser, configured, authenticated, list, listManga, favorites, isFavorite, toggleFavorite,
     parseWatchNotes, formatWatchNotes, resumeFromEntry, syncPosition, setStatus, saveManga,
-    getEntry, saveToList, deletePlanning
+    getEntry, saveToList, deletePlanning, deleteEntry
   };
 })();

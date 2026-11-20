@@ -3,7 +3,12 @@ import { useQuery } from "@tanstack/react-query"
 import { useRouter } from "@/lib/navigation"
 import { useServerStatus } from "@/app/(main)/_hooks/use-server-status"
 import { browserContinueWatching } from "./resume"
-import { LuPlay } from "react-icons/lu"
+import { LuPlay, LuX } from "react-icons/lu"
+import { SeaContextMenu } from "@/app/(main)/_features/context-menu/sea-context-menu"
+import { BrowserAnimeMenuItems } from "@/app/(main)/_features/media/_components/media-card-menu"
+import { ContextMenuTrigger } from "@/components/ui/context-menu"
+import { hideFromContinueWatching } from "./card-actions"
+import { toast } from "sonner"
 
 type EpisodeArtwork = { number: number; title?: string; image?: string | null }
 const metadataPrefix = "anidash.episodes.v2:"
@@ -35,7 +40,7 @@ async function fetchEpisodePage(id: number, mal: number, page: number, signal: A
   return episodes
 }
 
-function ContinueWatchingCard({ resume }: { resume: any }) {
+function ContinueWatchingCard({ resume, onRemove }: { resume: any, onRemove: () => void }) {
   const router = useRouter()
   const m = resume.media
   const episode = Number(resume.episode)
@@ -62,7 +67,10 @@ function ContinueWatchingCard({ resume }: { resume: any }) {
   const art = [episodeImage, fallback, m.coverImage?.extraLarge, m.coverImage?.large].find(value => secureImage(value) && !failedImages.includes(value))
   const progress = resume.duration > 0 ? Math.max(0, Math.min(100, resume.seconds / resume.duration * 100)) : 0
   return (
-    <button type="button" className="group shrink-0 w-56 sm:w-64 rounded-xl overflow-hidden border bg-[--paper] text-left transition hover:border-white/40"
+    <SeaContextMenu content={<BrowserAnimeMenuItems media={m} resume={{ episode, seconds: resume.seconds }} onRemovedFromContinue={onRemove} />}>
+    <ContextMenuTrigger asChild>
+    <div className="group/cw relative shrink-0 w-56 sm:w-64">
+    <button type="button" className="group w-full sm:w-64 rounded-xl overflow-hidden border bg-[--paper] text-left transition hover:border-white/40"
       aria-label={"Resume " + title + " episode " + episode} onClick={() => router.push("/entry?id=" + m.id + "&episode=" + episode)}>
       <div className="relative aspect-video w-full overflow-hidden bg-[--subtle]">
         {art && <img key={art} src={art} alt={episodeImage === art ? title + " episode " + episode + " thumbnail" : ""} decoding="async"
@@ -79,6 +87,14 @@ function ContinueWatchingCard({ resume }: { resume: any }) {
         <p className="text-xs text-[--muted]">Episode {episode}{resume.seconds > 0 ? " · Resume " + time(resume.seconds) : " · Start episode"}</p>
       </div>
     </button>
+    <button type="button" aria-label={"Remove " + title + " from Continue Watching"} title="Remove from Continue Watching"
+      className="absolute right-2 top-2 z-10 grid size-7 place-items-center rounded-full bg-black/60 text-white opacity-100 sm:opacity-0 transition hover:bg-red-600 focus-visible:opacity-100 group-hover/cw:opacity-100"
+      onClick={e => { e.stopPropagation(); hideFromContinueWatching(m, episode); onRemove(); toast.success("Removed from Continue Watching") }}>
+      <LuX className="size-4" />
+    </button>
+    </div>
+    </ContextMenuTrigger>
+    </SeaContextMenu>
   )
 }
 export function BrowserContinueWatching() {
@@ -97,6 +113,6 @@ export function BrowserContinueWatching() {
   if (!q.data?.length) return null
   return <section className="relative z-[5] px-4 sm:px-6 py-5 space-y-3" data-anidash-continue-watching>
     <div className="flex items-center justify-between"><h2 className="text-xl font-semibold">Continue Watching</h2><button className="text-xs text-[--muted] underline" onClick={() => q.refetch()}>Refresh</button></div>
-    <div className="flex overflow-x-auto gap-3 pb-2">{q.data.map(r => <ContinueWatchingCard key={r.media.id + ":" + r.episode} resume={r} />)}</div>
+    <div className="flex overflow-x-auto gap-3 pb-2">{q.data.map(r => <ContinueWatchingCard key={r.media.id + ":" + r.episode} resume={r} onRemove={() => setRevision(v => v + 1)} />)}</div>
   </section>
 }

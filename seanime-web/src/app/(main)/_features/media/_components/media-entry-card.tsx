@@ -27,6 +27,7 @@ import {
     MediaEntryCardOverlay,
     MediaEntryCardTitleSection,
 } from "@/app/(main)/_features/media/_components/media-entry-card-components"
+import { BrowserAnimeMenuItems } from "@/app/(main)/_features/media/_components/media-card-menu"
 import { MediaCardTags } from "@/app/(main)/_features/media/_components/media-card-tags"
 import { MediaEntryAudienceScore } from "@/app/(main)/_features/media/_components/media-entry-metadata-components"
 import { MediaEntryProgressBadge } from "@/app/(main)/_features/media/_components/media-entry-progress-badge"
@@ -267,10 +268,12 @@ export function MediaEntryCard<T extends "anime" | "manga">(props: MediaEntryCar
 
             <SeaContextMenu
                 content={<ContextMenuGroup>
-                    <ContextMenuLabel className="text-[--muted] line-clamp-1 py-0 my-2">
-                        {media.title?.userPreferred}
-                    </ContextMenuLabel>
-                    {!serverStatus?.isOffline && <ContextMenuItem
+                    {(type === "anime" && serverStatus?.os === "browser")
+                        ? <BrowserAnimeMenuItems media={media} listStatus={listData?.status} />
+                        : <ContextMenuLabel className="text-[--muted] line-clamp-1 py-0 my-2">
+                            {media.title?.userPreferred}
+                        </ContextMenuLabel>}
+                    {!serverStatus?.isOffline && serverStatus?.os !== "browser" && <ContextMenuItem
                         onClick={handlePreviewClick}
                     >
                         <LuEye /> Preview
