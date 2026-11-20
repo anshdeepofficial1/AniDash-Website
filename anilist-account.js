@@ -232,7 +232,10 @@
     const hasNoteTime = notes && notes.seconds > 0;
     const isFinished = notes && notes.duration > 0 && notes.seconds >= notes.duration - 30;
     const resumeExact = hasNoteTime && !isFinished && notes.episode > 0;
-    const ep = resumeExact ? notes.episode : (completed > 0 && (notes?.episode || next) <= completed ? next : (notes?.episode || next));
+    // Left in the last 30 seconds (credits): the viewer is done with that episode, so continue with the next one.
+    const ep = resumeExact ? notes.episode
+      : isFinished && notes.episode > 0 ? Math.max(notes.episode + 1, next)
+      : (completed > 0 && (notes?.episode || next) <= completed ? next : (notes?.episode || next));
     const sec = resumeExact ? notes.seconds : 0;
     const dur = notes?.duration || 1440;
     return {
@@ -317,6 +320,7 @@
     const ep = Math.max(1, Math.floor(Number(episode) || 1));
     const sec = Math.max(0, Math.floor(Number(seconds) || 0));
     const dur = Math.max(0, Math.floor(Number(duration) || 0));
+    if (!ended && dur > 0 && sec >= dur - 30) ended = true;
     const previous = pendingProgress.get(id) || Promise.resolve();
     const requestPromise = previous.catch(() => {}).then(async () => {
       if(!entries.has(id))await list(true);

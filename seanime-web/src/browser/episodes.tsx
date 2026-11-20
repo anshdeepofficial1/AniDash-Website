@@ -173,6 +173,39 @@ function NextIcon() {
 const PAGE_SIZE = 24
 const storageKey = "anidash.watch.web.v1"
 const JUSTANIME_SERVERS = ["momo", "onyx", "gigi", "nami", "calm", "revo"] as const
+// Short-lived client cache for stream lookups: retries and the next-episode prefetch are instant.
+const streamCache = new Map<string, { at: number, data: any }>()
+const streamInflight = new Map<string, Promise<any | null>>()
+function cachedJson(url: string, ttl = 4 * 60 * 1000): Promise<any | null> {
+  const hit = streamCache.get(url)
+  if (hit && Date.now() - hit.at < ttl) return Promise.resolve(hit.data)
+  const running = streamInflight.get(url)
+  if (running) return running
+  const request = (async () => {
+    try {
+      const res = await fetch(url, { signal: AbortSignal.timeout(10000) })
+      const data: any = res.ok ? await res.json() : null
+      if (data && (Array.isArray(data.sources) ? data.sources.length : true)) streamCache.set(url, { at: Date.now(), data })
+      return data
+    } catch (_) {
+      return null
+    } finally {
+      streamInflight.delete(url)
+    }
+  })()
+  streamInflight.set(url, request)
+  return request
+}
+function streamUrlsFor(id: number, mal: number | string, episode: number, audio: string, server: string) {
+  const base = `id=${id}&episode=${episode}&category=${audio}`
+  return [
+    `/api/justanime?action=streams&${base}&server=${server}`,
+    `/api/justanime?action=streams&${base}&server=auto`,
+    `/api/hianime?action=streams&${base}`,
+    `/api/anikoto?action=streams&anilistId=${id}&malId=${mal}&episode=${episode}&category=${audio}`
+  ]
+}
+
 const DEFAULT_SERVER = "momo"
 // The external-player notice is shown once per page load (refreshing the site shows it again).
 let externalNoticeShown = false
@@ -568,14 +601,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
       })
       .catch(() => {})
 
-    async function getJson(url: string): Promise<any | null> {
-      try {
-        const res = await fetch(url, { signal: AbortSignal.timeout(12000) })
-        return res.ok ? await res.json() : null
-      } catch (_) {
-        return null
-      }
-    }
+    const getJson = (url: string) => cachedJson(url)
 
     // Collect every candidate source (all JustAnime servers, HiAnime, AniKoto direct
     // sources and the MegaPlay/Megavid/AniXo embeds). The first provider in priority
@@ -627,15 +653,19 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
         }
       }
 
-      const base = `id=${entry.mediaId}&episode=${selected}&category=${audio}`
-      const jobs = [
-        getJson(`/api/justanime?action=streams&${base}&server=${serverParam}`),
-        getJson(`/api/justanime?action=streams&${base}&server=auto`),
-        getJson(`/api/hianime?action=streams&${base}`),
-        // AniKoto/MegaPlay expects anilistId / malId (not id) and returns iframe embeds.
-        getJson(`/api/anikoto?action=streams&anilistId=${entry.mediaId}&malId=${mal}&episode=${selected}&category=${audio}`)
-      ]
-      for (const job of jobs) add(await job)
+      const jobs = streamUrlsFor(entry.mediaId, mal, selected, audio, serverParam).map(getJson)
+      // All providers run in parallel. The preferred server gets a short head start (so Momo stays the
+      // default), but a slow or dead provider never holds playback back: whoever answers first plays.
+      const tagged = jobs.map((job, index) => job.then(data => ({ index, data })))
+      const remaining = new Set(tagged.map((_, index) => index))
+      const grace = new Promise<null>(resolve => window.setTimeout(() => resolve(null), 2500))
+      const first = await Promise.race([tagged[0], grace])
+      if (first) { remaining.delete(0); add(first.data) }
+      while (remaining.size) {
+        const result = await Promise.race([...remaining].map(index => tagged[index]))
+        remaining.delete(result.index)
+        add(result.data)
+      }
 
       stillResolving.current = false
       if (!live) return
@@ -662,6 +692,17 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
       stillResolving.current = false
     }
   }, [entry.mediaId, selected, audio, selectedServer, watchMode, resolveNonce])
+
+  // Warm the next episode while this one plays, so "next" starts almost instantly.
+  const prefetchedEpisode = React.useRef<number>(0)
+  React.useEffect(() => {
+    if (!watchMode || !selected || selected >= total || !isPlaying || currentTime < 20) return
+    const nextEpisode = selected + 1
+    const key = entry.mediaId * 100000 + nextEpisode
+    if (prefetchedEpisode.current === key) return
+    prefetchedEpisode.current = key
+    streamUrlsFor(entry.mediaId, m.idMal || "", nextEpisode, audio, selectedServer || DEFAULT_SERVER).forEach(url => { void cachedJson(url) })
+  }, [watchMode, selected, total, isPlaying, currentTime >= 20, entry.mediaId, audio, selectedServer])
 
   // Playback & HLS setup
   React.useEffect(() => {
@@ -758,11 +799,11 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
       hls = new Hls({
         enableWorker: true,
         lowLatencyMode: false,
-        manifestLoadingMaxRetry: 3,
+        manifestLoadingMaxRetry: 2,
         levelLoadingMaxRetry: 3,
         fragLoadingMaxRetry: 6,
         fragLoadingRetryDelay: 800,
-        manifestLoadingTimeOut: 15000,
+        manifestLoadingTimeOut: 10000,
         fragLoadingTimeOut: 30000
       })
       hlsInstance.current = hls
@@ -863,7 +904,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
       if (el.currentTime > 0.2 || el.readyState >= 3) return
       if (manualPlaybackIntent.current === "pause") return
       advanceStream(url)
-    }, 18000)
+    }, 14000)
     return () => window.clearTimeout(timer)
   }, [activeStream?.url, activeStream?.type, isLoadingStream, error, playbackRevision, advanceStream])
 
@@ -1252,7 +1293,8 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
   function record(force = false, ended = false) {
     const el = video.current
     if (!el || !selected || mountedMediaEpisode.current !== selected || !Number.isFinite(el.duration) || el.duration <= 0) return
-    ended = ended || el.ended
+    // Leaving in the last 30 seconds (credits) counts as finished, so the next episode is what resumes.
+    ended = ended || el.ended || el.duration - el.currentTime <= 30
     if (!force && Date.now() - lastSaved.current < 5000) return
     const position = ended ? el.duration : el.currentTime
     if (position < 1 && !ended) return
