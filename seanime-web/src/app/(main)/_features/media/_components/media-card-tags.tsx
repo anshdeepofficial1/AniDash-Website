@@ -60,31 +60,27 @@ type SortableMedia = {
     format?: string | null
     startDate?: { year?: number | null, month?: number | null, day?: number | null } | null
     seasonYear?: number | null
+    synonyms?: (string | null)[] | null
+    title?: { userPreferred?: string | null, romaji?: string | null, english?: string | null } | null
 }
 
-export type SearchGroup<T> = { key: string, label: string, items: T[] }
-
-const GROUPS: { key: string, label: string, formats: string[] }[] = [
-    { key: "series", label: "Series", formats: ["TV", "ONA"] },
-    { key: "movies", label: "Movies", formats: ["MOVIE"] },
-    { key: "other", label: "OVA, specials & shorts", formats: ["OVA", "SPECIAL", "TV_SHORT", "MUSIC"] },
-]
+const norm = (t?: string | null) => (t || "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim()
 
 function dateKey(m: SortableMedia) {
     const d = m.startDate
     return (d?.year ?? m.seasonYear ?? 9999) * 10000 + (d?.month ?? 0) * 100 + (d?.day ?? 0)
 }
 
-/** Splits results into Series / Movies / Other. With a title search each group is in release order. */
-export function groupSearchResults<T extends SortableMedia>(items: T[], byReleaseOrder: boolean): SearchGroup<T>[] {
-    const used = new Set<T>()
-    const out: SearchGroup<T>[] = []
-    for (const g of GROUPS) {
-        let list = items.filter(i => !!i.format && g.formats.includes(i.format))
-        list.forEach(i => used.add(i))
-        if (g.key === "other") list = list.concat(items.filter(i => !used.has(i)))
-        if (byReleaseOrder) list = [...list].sort((a, b) => dateKey(a) - dateKey(b))
-        if (list.length) out.push({ key: g.key, label: g.label, items: list })
-    }
-    return out
+/**
+ * Title search order: everything that belongs to the searched franchise comes first, in release order
+ * (Season 1, Season 2, Season 3, movie, Season 4 ...), then any other matches in the search's own order.
+ */
+export function orderSearchResults<T extends SortableMedia>(items: T[], query: string): T[] {
+    const q = norm(query)
+    if (!q) return items
+    const names = (m: T) => [m.title?.english, m.title?.romaji, m.title?.userPreferred, ...(m.synonyms || [])].map(norm).filter(Boolean)
+    const inFranchise = (m: T) => names(m).some(n => n === q || n.startsWith(q + " ") || n.startsWith(q))
+    const franchise = items.filter(inFranchise).sort((a, b) => dateKey(a) - dateKey(b))
+    const rest = items.filter(m => !inFranchise(m))
+    return [...franchise, ...rest]
 }

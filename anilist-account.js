@@ -5,6 +5,8 @@
   const API = "https://graphql.anilist.co";
   const TOKEN_KEY = "anidash.watch.anilist.token";
   const OAUTH_STATE_KEY = "anidash.watch.anilist.oauth-state";
+  const VIEWER_KEY = "anidash.watch.anilist.viewer";
+  const BACKUP_DB = "anidash-account", BACKUP_STORE = "session", BACKUP_KEY = "anilist";
   let token = null;
   let viewer = null;
   let config = null;
@@ -20,11 +22,59 @@
     changeHandler = typeof handler === "function" ? handler : () => {};
   }
   function inform() { try { changeHandler(copy(viewer)); } catch (_) {} }
+  // Independent IndexedDB copy so one evicted/cleared storage area never signs the user out.
+  function backupDb() {
+    return new Promise(resolve => {
+      try {
+        if (!("indexedDB" in window)) return resolve(null);
+        const r = indexedDB.open(BACKUP_DB, 1);
+        r.onupgradeneeded = () => { if (!r.result.objectStoreNames.contains(BACKUP_STORE)) r.result.createObjectStore(BACKUP_STORE); };
+        r.onsuccess = () => resolve(r.result);
+        r.onerror = () => resolve(null);
+      } catch (_) { resolve(null); }
+    });
+  }
+  async function backupWrite(value) {
+    try {
+      const db = await backupDb(); if (!db) return;
+      await new Promise(resolve => {
+        const tx = db.transaction(BACKUP_STORE, "readwrite");
+        if (value) tx.objectStore(BACKUP_STORE).put(value, BACKUP_KEY); else tx.objectStore(BACKUP_STORE).delete(BACKUP_KEY);
+        tx.oncomplete = tx.onerror = tx.onabort = () => resolve();
+      });
+      db.close();
+    } catch (_) {}
+  }
+  async function backupRead() {
+    try {
+      const db = await backupDb(); if (!db) return null;
+      const value = await new Promise(resolve => {
+        const q = db.transaction(BACKUP_STORE, "readonly").objectStore(BACKUP_STORE).get(BACKUP_KEY);
+        q.onsuccess = () => resolve(q.result || null); q.onerror = () => resolve(null);
+      });
+      db.close();
+      return value;
+    } catch (_) { return null; }
+  }
+  function persistSession() {
+    try { localStorage.setItem(TOKEN_KEY, token); } catch (_) {}
+    try { if (viewer) localStorage.setItem(VIEWER_KEY, JSON.stringify(viewer)); } catch (_) {}
+    backupWrite(token ? { token, viewer } : null);
+    try { navigator.storage?.persist?.(); } catch (_) {}
+  }
+  function readCachedViewer() {
+    try {
+      const v = JSON.parse(localStorage.getItem(VIEWER_KEY) || "null");
+      return v && typeof v === "object" && v.id ? v : null;
+    } catch (_) { return null; }
+  }
+  // Only an explicit Logout (or a token AniList itself rejects) ends the session.
   function clearToken() {
     token = null;
     viewer = null;
     entries.clear(); mangaEntries.clear(); favoriteIds.clear(); listAt = 0; listPending = null;
-    try { localStorage.removeItem(TOKEN_KEY); } catch (_) {}
+    try { localStorage.removeItem(TOKEN_KEY); localStorage.removeItem(VIEWER_KEY); } catch (_) {}
+    backupWrite(null);
     inform();
   }
   function redirectParams() {
@@ -44,13 +94,13 @@
     } catch (_) {}
     // Refuse unsolicited/mismatched callbacks; never accept URL tokens blindly.
     if (!accessToken || !expectedState || expectedState !== returnedState) {
-      clearToken();
       try { history.replaceState(null, "", "/account"); }
       catch (_) { location.assign("/account"); }
       return "invalid";
     }
     token = accessToken;
-    try { localStorage.setItem(TOKEN_KEY, token); } catch (_) {}
+    viewer = null;
+    persistSession();
     try { history.replaceState(null, "", "/account"); }
     catch (_) { location.assign("/account"); }
     return "success";
@@ -78,9 +128,10 @@
       ...(typeof AbortSignal !== "undefined" && AbortSignal.timeout ? {signal:AbortSignal.timeout(12000)} : {})
     });
     const body = await response.json();
-    if (response.status === 401 || /invalid token|unauthorized/i.test(body?.errors?.[0]?.message || "")) {
-      clearToken();
-      throw new Error("Your AniList session expired. Please sign in again.");
+    if (response.status === 401 || /invalid token/i.test(body?.errors?.[0]?.message || "")) {
+      const err = new Error("Your AniList session expired. Please sign in again.");
+      err.authRejected = true;
+      throw err;
     }
     if (!response.ok || body.errors) throw new Error(body.errors?.[0]?.message || "AniList is unavailable.");
     return body.data;
@@ -91,24 +142,49 @@
     if(initPending)return initPending;
     const run=initAccount(); initPending=run; try{return await run}finally{if(initPending===run)initPending=null}
   }
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  async function verifySession() {
+    // Retry transient failures; only AniList explicitly rejecting the token twice ends the session.
+    let rejected = 0;
+    for (let attempt = 0; attempt < 4; attempt++) {
+      try {
+        const data = await request("query { Viewer { id name avatar { medium large } siteUrl } }");
+        if (!data?.Viewer?.id) throw new Error("AniList did not return a profile.");
+        viewer = data.Viewer;
+        persistSession();
+        inform();
+        return true;
+      } catch (error) {
+        if (error?.authRejected) { if (++rejected >= 2) { clearToken(); return false; } }
+        await sleep(600 * (attempt + 1));
+      }
+    }
+    return false;
+  }
   async function initAccount() {
     if (!token) {
       try { token = localStorage.getItem(TOKEN_KEY); } catch (_) {}
     }
+    if (!token) {
+      const saved = await backupRead();
+      if (saved?.token) {
+        token = saved.token;
+        try { localStorage.setItem(TOKEN_KEY, token); } catch (_) {}
+        if (saved.viewer) { try { localStorage.setItem(VIEWER_KEY, JSON.stringify(saved.viewer)); } catch (_) {} }
+      }
+    }
     await settings();
     if (!token) { inform(); return null; }
-    try {
-      const data = await request("query { Viewer { id name avatar { medium large } siteUrl } }");
-      if (!data?.Viewer?.id) throw new Error("AniList did not return a profile.");
-      viewer = data.Viewer;
+    // Show the saved profile immediately so a slow or failed network call never looks like a sign-out.
+    if (!viewer) viewer = readCachedViewer();
+    if (viewer) {
       inform();
+      persistSession();
+      verifySession();
       return copy(viewer);
-    } catch (error) {
-      // Preserve the token on transient network failures, but don't pretend login succeeded.
-      viewer = null;
-      inform();
-      return null;
     }
+    await verifySession();
+    return viewer ? copy(viewer) : null;
   }
   async function beginLogin() {
     const settingsResult = await settings();

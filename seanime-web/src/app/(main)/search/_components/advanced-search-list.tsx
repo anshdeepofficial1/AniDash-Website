@@ -1,6 +1,6 @@
 import { MediaCardLazyGrid } from "@/app/(main)/_features/media/_components/media-card-grid"
 import { MediaEntryCard } from "@/app/(main)/_features/media/_components/media-entry-card"
-import { groupSearchResults } from "@/app/(main)/_features/media/_components/media-card-tags"
+import { orderSearchResults } from "@/app/(main)/_features/media/_components/media-card-tags"
 import { useAnilistAdvancedSearch } from "@/app/(main)/search/_lib/handle-advanced-search"
 import { __advancedSearch_paramsAtom } from "@/app/(main)/search/_lib/advanced-search.atoms"
 import { useAtomValue } from "jotai/react"
@@ -19,30 +19,19 @@ export function AdvancedSearchList() {
         const seen = new Set<number>()
         return list.filter(m => m && !seen.has(m.id) && !!seen.add(m.id)) as NonNullable<typeof list[number]>[]
     }, [data])
-    const hasTitle = !!params.title?.trim()
-    // Group by Series / Movies / Other only for anime and only when no single format was picked.
-    const groups = React.useMemo(
-        () => (type === "anime" && !params.format) ? groupSearchResults(items as any[], hasTitle) as { key: string, label: string, items: typeof items }[] : null,
-        [items, type, params.format, hasTitle],
+    const ordered = React.useMemo(
+        () => (type === "anime" && params.title?.trim()) ? orderSearchResults(items as any[], params.title) as typeof items : items,
+        [items, type, params.title],
     )
 
     if (isError) return <div role="alert" className="rounded-xl border p-5 space-y-3"><p>{(error as Error)?.message || "Unable to load search results."}</p><button className="border rounded-lg px-4 py-2" onClick={() => refetch()}>Try again</button></div>
     if (!isLoading && !items?.length) return <p className="text-[--muted] p-4">No matching titles. Try another title or clear filters.</p>
     return <>
-        {!isLoading && (groups ? groups.map(g => (
-            <section key={g.key} data-search-group={g.key} className="mb-8 space-y-3">
-                <h3 className="flex items-baseline gap-2 text-lg font-semibold">{g.label}<span className="text-sm font-normal text-[--muted]">{g.items.length}</span></h3>
-                <MediaCardLazyGrid itemCount={g.items.length}>
-                    {g.items.map(media => (
-                        <MediaEntryCard key={`${media.id}`} media={media} showLibraryBadge={true} showTrailer type={type} />
-                    ))}
-                </MediaCardLazyGrid>
-            </section>
-        )) : <MediaCardLazyGrid itemCount={items?.length ?? 0}>
-            {items?.map(media => (
+        {!isLoading && <MediaCardLazyGrid itemCount={ordered.length}>
+            {ordered.map(media => (
                 <MediaEntryCard key={`${media.id}`} media={media} showLibraryBadge={true} showTrailer type={type} />
             ))}
-        </MediaCardLazyGrid>)}
+        </MediaCardLazyGrid>}
         {isLoading && <LoadingSpinner />}
         {(items.length > 0 && hasNextPage) &&
             <div
