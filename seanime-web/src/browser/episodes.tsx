@@ -682,7 +682,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
       if (!activated) {
         setIsLoadingStream(false)
         setError(
-          `No playable ${audio.toUpperCase()} streams found for Episode ${selected}${lastStreamError ? " (" + lastStreamError + ")" : ""}. Please try another server below.`
+          `No playable ${audio.toUpperCase()} streams found for Episode ${selected}${lastStreamError ? " (" + lastStreamError + ")" : ""}. Try SUB, or use an external player from the “Languages & external players” section below.`
         )
       } else if (waitingForMoreSources.current) {
         waitingForMoreSources.current = false
