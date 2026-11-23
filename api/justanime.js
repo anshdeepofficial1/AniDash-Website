@@ -555,6 +555,25 @@ export default async function handler(req, res) {
       const resolved = await streams(req, animeId, episode, "auto", category);
       return send(res, 200, { servers: resolved.servers, category }, "no-store");
     }
+    if (action === "probe") {
+      // Diagnostics: what JustAnime answers when asked from this server (open in a browser to read it).
+      const targets = [
+        ["api", API + "/watch/21/episode/440/servers"],
+        ["site", SITE + "/"],
+        ["relay", RELAY_BASE + "?path=" + encodeURIComponent("/watch/21/episode/440/servers")]
+      ];
+      const report = await Promise.all(targets.map(async ([name, url]) => {
+        const started = Date.now();
+        try {
+          const r = await fetch(url, { headers: { Accept: "application/json, text/plain, */*", Origin: SITE, Referer: SITE + "/", "User-Agent": UA }, redirect: "follow", signal: AbortSignal.timeout(8000) });
+          const text = await r.text();
+          return { name, url, status: r.status, ms: Date.now() - started, type: r.headers.get("content-type"), server: r.headers.get("server"), cfRay: r.headers.get("cf-ray"), body: text.replace(/\s+/g, " ").slice(0, 220) };
+        } catch (error) {
+          return { name, url, error: String(error?.cause?.code || error?.message || error), ms: Date.now() - started };
+        }
+      }));
+      return send(res, 200, { checkedAt: new Date().toISOString(), report }, "no-store");
+    }
     if (action === "animetsu") {
       const animeId = String(req.query.id || "");
       const episode = String(req.query.episode || "");
