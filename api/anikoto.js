@@ -1,4 +1,7 @@
 const DEFAULT_SITE_BASES = [
+  // The hosts the AniDash app itself uses.
+  "https://animepahe.pw",
+  "https://anikoto.pw",
   "https://anikototv.to",
   "https://anikoto.cz",
   "https://anikoto.me",
@@ -129,12 +132,12 @@ async function search(query, page = 1) {
   } catch (_) {}
 
   // Legacy website mirror search remains a fallback when the API catalogue is unavailable.
-  const { payload } = await requestAcrossSites({ m: "search", q: clean });
+  const { payload, base } = await requestAcrossSites({ m: "search", q: clean });
   const rows = Array.isArray(payload.data) ? payload.data : [];
-  return { results: rows.map(normalizeTitle).filter(item => item.id && item.title !== "Unknown") };
+  return { results: rows.map(normalizeTitle).filter(item => item.id && item.title !== "Unknown"), base };
 }
 
-async function episodes(animeId) {
+async function episodes(animeId, bases = SITE_BASES) {
   const id = String(animeId || "").trim();
   if (!/^[\w-]{1,160}$/.test(id)) throw new Error("Invalid AniKoto anime ID");
 
@@ -166,7 +169,7 @@ async function episodes(animeId) {
   // Older session-based release endpoint fallback.
   let firstResult;
   try {
-    firstResult = await Promise.any(SITE_BASES.map(async base => {
+    firstResult = await Promise.any(bases.map(async base => {
       const payload = await requestJson(
         makeApiUrl(base, { m: "release", id, sort: "episode_asc" }),
         { Referer: base + "/" },
@@ -303,12 +306,12 @@ function mediaUrl(req, raw, isHls, playbackHeaders = {}) {
   }
 }
 
-async function streams(req, animeSession, episodeId, category) {
+async function streams(req, animeSession, episodeId, category, bases = SITE_BASES) {
   const parts = String(episodeId || "").split("+");
   if (parts.length !== 2 || parts[0] !== String(animeSession) || !parts[1]) {
     throw new Error("AniKoto episode session is missing. Reload the episode list and try again.");
   }
-  const pageResult = await Promise.any(SITE_BASES.map(async candidateBase => {
+  const pageResult = await Promise.any(bases.map(async candidateBase => {
     const playUrl = new URL(candidateBase + "/play/" + encodeURIComponent(parts[0]) + "/" + encodeURIComponent(parts[1]));
     const page = await requestText(playUrl.toString(), { Referer: candidateBase + "/" }, 3500);
     return { base: candidateBase, page };
@@ -412,9 +415,11 @@ const normName = value => String(value || "").toLowerCase().replace(/[^a-z0-9]+/
 async function autoStreams(req, { anilistId, titles, episode, category, year, eps, movie }) {
   const reasons = [];
   let found = null;
+  let pinned = null;
   for (const title of titles.filter(Boolean).slice(0, 2)) {
     let rows = [];
-    try { rows = (await search(title)).results; } catch (error) { reasons.push("search: " + (error?.message || error)); continue; }
+    let rowsBase = null;
+    try { const found2 = await search(title); rows = found2.results; rowsBase = found2.base || null; } catch (error) { reasons.push("search: " + (error?.message || error)); continue; }
     const wanted = normName(title);
     const scored = rows.map(row => {
       const name = normName(row.title);
@@ -427,14 +432,16 @@ async function autoStreams(req, { anilistId, titles, episode, category, year, ep
       if (eps && Number(row.episodes) === Number(eps)) score += 15;
       return { row, score };
     }).sort((a, b) => b.score - a.score);
-    if (scored[0] && scored[0].score >= 40) { found = scored[0].row; break; }
+    if (scored[0] && scored[0].score >= 40) { found = scored[0].row; pinned = rowsBase; break; }
   }
   if (!found) throw new Error("AniKoto: show not found" + (reasons.length ? " (" + reasons[0] + ")" : ""));
-  const list = await episodes(found.id);
+  // Sessions only work on the site that issued them, so stay on the mirror that found the show.
+  const bases = pinned ? [pinned] : SITE_BASES;
+  const list = await episodes(found.id, bases);
   const item = list.episodes.find(entry => entry.number === episode) || (movie ? list.episodes[0] : null);
   if (!item) throw new Error("AniKoto: episode " + episode + " not listed");
   const episodeId = String(item.id).includes("+") ? String(item.id) : found.id + "+" + item.id;
-  return streams(req, found.id, episodeId, category);
+  return streams(req, found.id, episodeId, category, bases);
 }
 
 export default async function handler(req, res) {
