@@ -213,6 +213,17 @@ function streamUrlsFor(id: number, mal: number | string, episode: number, audio:
   ]
 }
 
+/** Plain-language reason for a provider failure, shown to viewers when every built-in server is down. */
+function friendlyReason(reason: string): string {
+  if (/523|dns|1000|offline/i.test(reason)) return "its servers are offline"
+  if (/403|401|forbidden|blocked/i.test(reason)) return "is blocking AniDash's server"
+  if (/502|authenticate|decrypt|unsupported state/i.test(reason)) return "changed its video protection"
+  if (/fetch failed|network|econn|enotfound/i.test(reason)) return "cannot be reached right now"
+  if (/time/i.test(reason)) return "is too slow to respond"
+  if (/404|410|not found|not listed/i.test(reason)) return "no longer has this show at its old address"
+  return "is not responding"
+}
+
 const DEFAULT_SERVER = "momo"
 // The external-player notice is shown once per page load (refreshing the site shows it again).
 let externalNoticeShown = false
@@ -357,6 +368,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
   const [pipActive, setPipActive] = React.useState(false)
   const [playerNotice, setPlayerNotice] = React.useState("")
   const [toast, setToast] = React.useState("")
+  const [sourceReport, setSourceReport] = React.useState<{ name: string, reason: string }[] | null>(null)
   const [resolveNonce, setResolveNonce] = React.useState(0)
   React.useEffect(() => {
     if (!toast) return
@@ -683,15 +695,18 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
       if (!live) return
       if (!activated) {
         setIsLoadingStream(false)
-        setError(
-          `No playable ${audio.toUpperCase()} streams found for Episode ${selected}${streamErrors.size ? " — " + [...streamErrors].map(([key, reason]) => (key.includes("animetsu") ? "Animetsu" : key.includes("anikoto") ? "AniKoto" : key.includes("hianime") ? "HiAnime" : "JustAnime") + ": " + reason).join(" | ") : ""}. Try SUB, or use an external player from the “Languages & external players” section below.`
-        )
+        setSourceReport([...streamErrors].map(([key, reason]) => ({
+          name: key.includes("animetsu") ? "Animetsu" : key.includes("anikoto") ? "AniKoto" : key.includes("hianime") ? "HiAnime" : "JustAnime",
+          reason: friendlyReason(reason)
+        })))
+        setError(`AniDash's built-in servers can't play ${audio.toUpperCase()} Episode ${selected} right now.`)
       } else if (waitingForMoreSources.current) {
         waitingForMoreSources.current = false
         setError("All available sources failed for this episode. Try SUB/DUB or another server.")
       }
     }
 
+    setSourceReport(null)
     failedStreams.current.clear()
     streamsRef.current = []
     stillResolving.current = true
@@ -1922,6 +1937,21 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
             {error && !isLoadingStream && (
               <div className="absolute inset-0 z-20 bg-black/85 flex flex-col items-center justify-center gap-3 p-6 text-center">
                 <p className="text-sm text-red-400 max-w-md">{error}</p>
+                {sourceReport && (
+                  <div className="max-w-md space-y-2 text-left text-xs text-neutral-300" role="status">
+                    <ul className="space-y-0.5">
+                      {[...new Map(sourceReport.map(r => [r.name, r])).values()].map(r => (
+                        <li key={r.name}><span className="font-semibold text-white">{r.name}</span> {r.reason}.</li>
+                      ))}
+                    </ul>
+                    <p className="text-neutral-400">This is a problem with the video providers, not your device. You can keep watching on one of these servers instead (they open the provider's own player):</p>
+                    <div className="flex flex-wrap gap-2">
+                      {(externalGroups().find(g => g.key === "en-" + audio)?.items || []).map(item => (
+                        <Button key={item.url} size="sm" intent="primary-outline" onClick={() => openExternal(item)}>{item.server}</Button>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 {accessDenied && <p className="text-xs text-neutral-400 max-w-md">This source refused the request. Other sources were tried automatically; you can pick another server or an embed player below.</p>}
                 <div className="flex flex-wrap justify-center gap-2">
                   {activeStream?.url && <Button size="sm" intent="gray-outline" onClick={() => { failedStreams.current.clear(); mediaAccessDenied.current = false; setAccessDenied(false); setError(""); setPlaybackRevision(n => n + 1) }}>Retry playback</Button>}
