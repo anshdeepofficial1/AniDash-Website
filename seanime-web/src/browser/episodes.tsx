@@ -175,6 +175,7 @@ const storageKey = "anidash.watch.web.v1"
 const JUSTANIME_SERVERS = ["momo", "onyx", "gigi", "nami", "calm", "revo"] as const
 // Short-lived client cache for stream lookups: retries and the next-episode prefetch are instant.
 const streamCache = new Map<string, { at: number, data: any }>()
+let lastStreamError = ""
 const streamInflight = new Map<string, Promise<any | null>>()
 function cachedJson(url: string, ttl = 4 * 60 * 1000): Promise<any | null> {
   const hit = streamCache.get(url)
@@ -183,11 +184,16 @@ function cachedJson(url: string, ttl = 4 * 60 * 1000): Promise<any | null> {
   if (running) return running
   const request = (async () => {
     try {
-      const res = await fetch(url, { signal: AbortSignal.timeout(10000) })
+      const res = await fetch(url, { signal: AbortSignal.timeout(16000) })
+      if (!res.ok) {
+        const body: any = await res.json().catch(() => null)
+        lastStreamError = String(body?.error || "HTTP " + res.status).slice(0, 140)
+      }
       const data: any = res.ok ? await res.json() : null
       if (data && (Array.isArray(data.sources) ? data.sources.length : true)) streamCache.set(url, { at: Date.now(), data })
       return data
-    } catch (_) {
+    } catch (e) {
+      lastStreamError = (e as Error)?.name === "TimeoutError" ? "the source did not answer in time" : "network error"
       return null
     } finally {
       streamInflight.delete(url)
@@ -653,18 +659,22 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
         }
       }
 
-      const jobs = streamUrlsFor(entry.mediaId, mal, selected, audio, serverParam).map(getJson)
-      // All providers run in parallel. The preferred server gets a short head start (so Momo stays the
-      // default), but a slow or dead provider never holds playback back: whoever answers first plays.
-      const tagged = jobs.map((job, index) => job.then(data => ({ index, data })))
-      const remaining = new Set(tagged.map((_, index) => index))
-      const grace = new Promise<null>(resolve => window.setTimeout(() => resolve(null), 2500))
-      const first = await Promise.race([tagged[0], grace])
-      if (first) { remaining.delete(0); add(first.data) }
-      while (remaining.size) {
-        const result = await Promise.race([...remaining].map(index => tagged[index]))
-        remaining.delete(result.index)
-        add(result.data)
+      // One automatic second round: providers that were briefly unreachable often answer on the retry.
+      for (let attempt = 0; attempt < 2 && live && !activated; attempt++) {
+        if (attempt > 0) await new Promise(resolve => window.setTimeout(resolve, 1200))
+        const jobs = streamUrlsFor(entry.mediaId, mal, selected, audio, serverParam).map(getJson)
+        // All providers run in parallel. The preferred server gets a short head start (so Momo stays the
+        // default), but a slow or dead provider never holds playback back: whoever answers first plays.
+        const tagged = jobs.map((job, index) => job.then(data => ({ index, data })))
+        const remaining = new Set(tagged.map((_, index) => index))
+        const grace = new Promise<null>(resolve => window.setTimeout(() => resolve(null), 2500))
+        const first = await Promise.race([tagged[0], grace])
+        if (first) { remaining.delete(0); add(first.data) }
+        while (remaining.size) {
+          const result = await Promise.race([...remaining].map(index => tagged[index]))
+          remaining.delete(result.index)
+          add(result.data)
+        }
       }
 
       stillResolving.current = false
@@ -672,7 +682,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
       if (!activated) {
         setIsLoadingStream(false)
         setError(
-          `No playable ${audio.toUpperCase()} streams found for Episode ${selected}. Please try another server below.`
+          `No playable ${audio.toUpperCase()} streams found for Episode ${selected}${lastStreamError ? " (" + lastStreamError + ")" : ""}. Please try another server below.`
         )
       } else if (waitingForMoreSources.current) {
         waitingForMoreSources.current = false
