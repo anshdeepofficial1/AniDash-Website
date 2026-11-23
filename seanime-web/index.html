@@ -39,6 +39,18 @@
 <body>
 <div id="root"></div>
 <!-- <script type="module" src="/src/main.tsx"></script> -->
-<script src="/library-storage.js" defer></script><script src="/anilist-account.js" defer></script><script src="/mal-account.js" defer></script></body>
+<script src="/library-storage.js" defer></script><script src="/anilist-account.js" defer></script><script src="/mal-account.js" defer></script>
+<script>
+/* AniList returns to whatever Redirect URL is registered (often "/") with the token in the URL hash.
+   Capture it on any page, not only on /auth/callback, then open the profile page. */
+document.addEventListener("DOMContentLoaded",function(){
+  if(!/^#(?:\/?|\?)access_token=/.test(String(location.hash||"")))return;
+  var a=window.AniDashAccount;
+  var go=function(){location.replace("/settings?tab=profile")};
+  if(!a){go();return}
+  var r=a.captureRedirect();
+  if(r==="success"){Promise.resolve(a.init()).then(go,go)}else{go()}
+});
+</script></body>
 
 </html>
