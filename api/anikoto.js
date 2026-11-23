@@ -285,7 +285,7 @@ function mediaUrl(req, raw, isHls, playbackHeaders = {}) {
   try {
     const target = new URL(String(raw));
     if (target.protocol !== "https:") return target.toString();
-    const hosts = ["neko.justanime.to", "nexabloom.top", "give6beforegtav.site", "megaplay.buzz", "zokoanime.video", "animegg.org", "kwik.cx", "kwik.si", "kwik.to", "kwik.li", "megacloud.blog", "megacloud.tv", "rapid-cloud.co", "rapid-cloud.ru", "vidnest.fun", "norami.top", "kryntal.top", "akirax.buzz", "vid-tube.site"];
+    const hosts = ["neko.justanime.to", "nexabloom.top", "give6beforegtav.site", "megaplay.buzz", "zokoanime.video", "animegg.org", "kwik.cx", "kwik.si", "kwik.to", "kwik.li", "megacloud.blog", "megacloud.tv", "rapid-cloud.co", "rapid-cloud.ru", "vidnest.fun", "norami.top", "kryntal.top", "akirax.buzz", "vid-tube.site", "owocdn.top", "uwucdn.top", "padorupado.ru"];
     if (!hosts.some(host => target.hostname === host || target.hostname.endsWith("." + host))) return target.toString();
     const proto = String(req.headers["x-forwarded-proto"] || "https").split(",")[0].trim();
     const host = String(req.headers["x-forwarded-host"] || req.headers.host || "");
@@ -405,6 +405,38 @@ async function getAniKotoEmbedFallback(anilistId, malId, episode, category) {
   return buildDirectAniKotoEmbeds(anilistId, malId, episode, category);
 }
 
+
+const normName = value => String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+
+/** Finds the show on AniKoto from its AniList data, picks the episode and returns playable Kwik streams. */
+async function autoStreams(req, { anilistId, titles, episode, category, year, eps, movie }) {
+  const reasons = [];
+  let found = null;
+  for (const title of titles.filter(Boolean).slice(0, 2)) {
+    let rows = [];
+    try { rows = (await search(title)).results; } catch (error) { reasons.push("search: " + (error?.message || error)); continue; }
+    const wanted = normName(title);
+    const scored = rows.map(row => {
+      const name = normName(row.title);
+      let score = 0;
+      if (anilistId && String(row.anilistId || "") === String(anilistId)) score += 100;
+      if (name === wanted) score += 40; else if (name.startsWith(wanted)) score += 15; else if (wanted.startsWith(name)) score += 5;
+      const isMovie = /movie/i.test(row.type);
+      if (isMovie === movie) score += 10;
+      if (year && String(row.year) === String(year)) score += 20;
+      if (eps && Number(row.episodes) === Number(eps)) score += 15;
+      return { row, score };
+    }).sort((a, b) => b.score - a.score);
+    if (scored[0] && scored[0].score >= 40) { found = scored[0].row; break; }
+  }
+  if (!found) throw new Error("AniKoto: show not found" + (reasons.length ? " (" + reasons[0] + ")" : ""));
+  const list = await episodes(found.id);
+  const item = list.episodes.find(entry => entry.number === episode) || (movie ? list.episodes[0] : null);
+  if (!item) throw new Error("AniKoto: episode " + episode + " not listed");
+  const episodeId = String(item.id).includes("+") ? String(item.id) : found.id + "+" + item.id;
+  return streams(req, found.id, episodeId, category);
+}
+
 export default async function handler(req, res) {
   if (req.method !== "GET") return send(res, 405, { error: "Use GET" });
   try {
@@ -416,6 +448,19 @@ export default async function handler(req, res) {
     }
     if (action === "episodes") {
       return send(res, 200, await episodes(req.query.id));
+    }
+    if (action === "auto") {
+      const episode = Number.parseInt(String(req.query.episode || "1"), 10) || 1;
+      const resolved = await autoStreams(req, {
+        anilistId: String(req.query.anilistId || ""),
+        titles: [req.query.title, req.query.alt].map(v => String(v || "").slice(0, 120)),
+        episode,
+        category: req.query.category === "dub" ? "dub" : "sub",
+        year: String(req.query.year || ""),
+        eps: Number(req.query.eps) || 0,
+        movie: req.query.fmt === "MOVIE"
+      });
+      return send(res, 200, resolved, "no-store");
     }
     if (action === "servers") {
       return send(res, 200, { servers: [{ id: "anikoto-embeds", name: "AniKoto direct embeds" }] });

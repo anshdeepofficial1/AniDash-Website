@@ -27,7 +27,10 @@ const ALLOWED_HOSTS = new Set([
   "mega-cloud.top",
   "animetsu.cc",
   "animetsu.live",
-  "animetsu.net"
+  "animetsu.net",
+  "owocdn.top",
+  "uwucdn.top",
+  "padorupado.ru"
 ]);
 const STREAM_PROXY_HOST = "neko.justanime.to";
 
