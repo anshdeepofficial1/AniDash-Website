@@ -46,25 +46,52 @@ export function normalizeAnimetsu(json, serverName, category, mediaUrl) {
   return { sources, tracks, intro: skip(json?.skips?.intro), outro: skip(json?.skips?.ending) };
 }
 
-export async function animetsuStreams(id, episode, category, mediaUrl) {
-  const cat = category === "dub" ? "dub" : "sub";
+async function tryId(id, episode, cat, mediaUrl, reasons) {
   let servers = [];
   try {
     const list = await getJson(`${API}/servers/${id}/${episode}`, 6000);
     servers = (Array.isArray(list) ? list : []).map(item => ({ id: String(item?.id || ""), name: String(item?.tip || item?.id || "") })).filter(item => item.id);
-  } catch (_) { /* fall back to the default server below */ }
+  } catch (error) { reasons.push("servers: " + (error?.message || error)); }
 
   const attempts = (servers.length ? servers.slice(0, 4) : [{ id: "", name: "" }]).map(async server => {
     const query = new URLSearchParams({ source_type: cat });
     if (server.id) query.set("server", server.id);
     const json = await getJson(`${API}/oppai/${id}/${episode}?${query}`);
     const block = normalizeAnimetsu(json, server.name, cat, mediaUrl);
-    if (!block.sources.length) throw new Error("No " + cat.toUpperCase() + " streams");
+    if (!block.sources.length) throw new Error("no " + cat + " stream");
     return block;
   });
   const settled = await Promise.allSettled(attempts);
-  const blocks = settled.filter(item => item.status === "fulfilled").map(item => item.value);
-  if (!blocks.length) throw new Error("Animetsu has no " + cat.toUpperCase() + " stream for this episode");
+  settled.filter(item => item.status === "rejected").forEach(item => reasons.push(String(item.reason?.message || item.reason)));
+  return settled.filter(item => item.status === "fulfilled").map(item => item.value);
+}
+
+const norm = value => String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+
+/** Animetsu's own id for a show, found by searching its catalogue (used when the AniList id is not its id). */
+async function findByTitle(anilistId, titles, reasons) {
+  for (const title of titles.filter(Boolean).slice(0, 2)) {
+    try {
+      const json = await getJson(`${API}/search?query=${encodeURIComponent(title)}&page=1`, 6000);
+      const rows = Array.isArray(json?.results) ? json.results : [];
+      const wanted = norm(title);
+      const exact = rows.find(row => String(row?.id) === String(anilistId)) ||
+        rows.find(row => [row?.title?.english, row?.title?.romaji, row?.title?.native].some(name => norm(name) === wanted));
+      if (exact?.id) return String(exact.id);
+    } catch (error) { reasons.push("search: " + (error?.message || error)); }
+  }
+  return null;
+}
+
+export async function animetsuStreams(id, episode, category, mediaUrl, titles = []) {
+  const cat = category === "dub" ? "dub" : "sub";
+  const reasons = [];
+  let blocks = await tryId(id, episode, cat, mediaUrl, reasons);
+  if (!blocks.length) {
+    const alt = await findByTitle(id, titles, reasons);
+    if (alt && alt !== String(id)) blocks = await tryId(alt, episode, cat, mediaUrl, reasons);
+  }
+  if (!blocks.length) throw new Error("Animetsu: " + ([...new Set(reasons)].slice(0, 3).join("; ") || "no stream"));
   const first = blocks[0];
   return {
     server: "Animetsu",

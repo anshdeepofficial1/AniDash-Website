@@ -560,7 +560,7 @@ export default async function handler(req, res) {
       const episode = String(req.query.episode || "");
       if (!/^\d{1,12}$/.test(animeId) || !/^\d{1,5}$/.test(episode)) return send(res, 400, { error: "Anime ID and episode number are required" });
       const category = req.query.category === "dub" ? "dub" : "sub";
-      return send(res, 200, await animetsuStreams(animeId, episode, category, (url, isHls, headers) => mediaUrl(req, url, isHls, headers)), "no-store");
+      return send(res, 200, await animetsuStreams(animeId, episode, category, (url, isHls, headers) => mediaUrl(req, url, isHls, headers), [req.query.title, req.query.alt].map(v => String(v || "").slice(0, 120))), "no-store");
     }
     if (action === "streams") {
       const animeId = String(req.query.id || "");

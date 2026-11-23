@@ -175,7 +175,7 @@ const storageKey = "anidash.watch.web.v1"
 const JUSTANIME_SERVERS = ["momo", "onyx", "gigi", "nami", "calm", "revo"] as const
 // Short-lived client cache for stream lookups: retries and the next-episode prefetch are instant.
 const streamCache = new Map<string, { at: number, data: any }>()
-let lastStreamError = ""
+const streamErrors = new Map<string, string>()
 const streamInflight = new Map<string, Promise<any | null>>()
 function cachedJson(url: string, ttl = 4 * 60 * 1000): Promise<any | null> {
   const hit = streamCache.get(url)
@@ -187,13 +187,13 @@ function cachedJson(url: string, ttl = 4 * 60 * 1000): Promise<any | null> {
       const res = await fetch(url, { signal: AbortSignal.timeout(16000) })
       if (!res.ok) {
         const body: any = await res.json().catch(() => null)
-        lastStreamError = String(body?.error || "HTTP " + res.status).slice(0, 140)
+        streamErrors.set(url.split("?")[0] + (url.includes("action=animetsu") ? "" : "") + (url.match(/action=(\w+)/)?.[1] || ""), String(body?.error || "HTTP " + res.status).slice(0, 110))
       }
       const data: any = res.ok ? await res.json() : null
       if (data && (Array.isArray(data.sources) ? data.sources.length : true)) streamCache.set(url, { at: Date.now(), data })
       return data
     } catch (e) {
-      lastStreamError = (e as Error)?.name === "TimeoutError" ? "the source did not answer in time" : "network error"
+      streamErrors.set(url.split("?")[0] + (url.match(/action=(\w+)/)?.[1] || ""), (e as Error)?.name === "TimeoutError" ? "no answer in time" : "network error")
       return null
     } finally {
       streamInflight.delete(url)
@@ -202,12 +202,12 @@ function cachedJson(url: string, ttl = 4 * 60 * 1000): Promise<any | null> {
   streamInflight.set(url, request)
   return request
 }
-function streamUrlsFor(id: number, mal: number | string, episode: number, audio: string, server: string) {
+function streamUrlsFor(id: number, mal: number | string, episode: number, audio: string, server: string, titles: string[] = []) {
   const base = `id=${id}&episode=${episode}&category=${audio}`
   return [
     `/api/justanime?action=streams&${base}&server=${server}`,
     `/api/justanime?action=streams&${base}&server=auto`,
-    `/api/justanime?action=animetsu&${base}`,
+    `/api/justanime?action=animetsu&${base}&title=${encodeURIComponent(titles[0] || "")}&alt=${encodeURIComponent(titles[1] || "")}`,
     `/api/hianime?action=streams&${base}`,
     `/api/anikoto?action=streams&anilistId=${id}&malId=${mal}&episode=${episode}&category=${audio}`
   ]
@@ -660,10 +660,11 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
         }
       }
 
+      streamErrors.clear()
       // One automatic second round: providers that were briefly unreachable often answer on the retry.
       for (let attempt = 0; attempt < 2 && live && !activated; attempt++) {
         if (attempt > 0) await new Promise(resolve => window.setTimeout(resolve, 1200))
-        const jobs = streamUrlsFor(entry.mediaId, mal, selected, audio, serverParam).map(getJson)
+        const jobs = streamUrlsFor(entry.mediaId, mal, selected, audio, serverParam, [m.title?.english, m.title?.romaji].filter(Boolean) as string[]).map(getJson)
         // All providers run in parallel. The preferred server gets a short head start (so Momo stays the
         // default), but a slow or dead provider never holds playback back: whoever answers first plays.
         const tagged = jobs.map((job, index) => job.then(data => ({ index, data })))
@@ -683,7 +684,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
       if (!activated) {
         setIsLoadingStream(false)
         setError(
-          `No playable ${audio.toUpperCase()} streams found for Episode ${selected}${lastStreamError ? " (" + lastStreamError + ")" : ""}. Try SUB, or use an external player from the “Languages & external players” section below.`
+          `No playable ${audio.toUpperCase()} streams found for Episode ${selected}${streamErrors.size ? " — " + [...streamErrors].map(([key, reason]) => (key.includes("animetsu") ? "Animetsu" : key.includes("anikoto") ? "AniKoto" : key.includes("hianime") ? "HiAnime" : "JustAnime") + ": " + reason).join(" | ") : ""}. Try SUB, or use an external player from the “Languages & external players” section below.`
         )
       } else if (waitingForMoreSources.current) {
         waitingForMoreSources.current = false
@@ -712,7 +713,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     const key = entry.mediaId * 100000 + nextEpisode
     if (prefetchedEpisode.current === key) return
     prefetchedEpisode.current = key
-    streamUrlsFor(entry.mediaId, m.idMal || "", nextEpisode, audio, selectedServer || DEFAULT_SERVER).forEach(url => { void cachedJson(url) })
+    streamUrlsFor(entry.mediaId, m.idMal || "", nextEpisode, audio, selectedServer || DEFAULT_SERVER, [m.title?.english, m.title?.romaji].filter(Boolean) as string[]).forEach(url => { void cachedJson(url) })
   }, [watchMode, selected, total, isPlaying, currentTime >= 20, entry.mediaId, audio, selectedServer])
 
   // Playback & HLS setup
