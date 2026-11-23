@@ -110,7 +110,10 @@ async function resolveEpisodeUrl(series, opts) {
 }
 
 export async function hindiHandler(req, res) {
-  res.setHeader("Cache-Control", "public, s-maxage=3600, stale-while-revalidate=86400");
+  // Only a real hit is cached for long. An empty answer may come from a failed best-effort probe, so it
+  // is re-checked after a minute instead of locking the language out for an hour.
+  const cache = hit => res.setHeader("Cache-Control", hit ? "public, s-maxage=3600, stale-while-revalidate=86400" : "public, s-maxage=60");
+  cache(false);
   if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
   const titles = [req.query.title, req.query.alt].map(x => String(x || "").slice(0, 150)).filter(Boolean);
   const total = Math.max(0, Math.min(5000, parseInt(req.query.total, 10) || 0));
@@ -135,6 +138,7 @@ export async function hindiHandler(req, res) {
       const name = seen[base] > 1 ? base + " " + seen[base] : base;
       return { id: "hi-" + name.toLowerCase().replace(/\s+/g, "-"), name, url, type: "embed", isEmbed: true, lang: "hi", langName: "Hindi" };
     });
+    cache(embeds.length > 0);
     return res.status(200).json({ sources: [], embeds, available: embeds.length > 0 });
   } catch {
     return res.status(200).json(none);

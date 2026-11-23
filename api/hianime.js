@@ -84,7 +84,33 @@ function normaliseAnime(item) {
   };
 }
 
+// Layout-agnostic reader for the newer HiAnime markup (".hk-tile" and friends): every link to an anime page
+// becomes a result, with the title taken from a title/aria-label/alt attribute or the link text.
+function parseTileSearch(html) {
+  const out = [];
+  const seen = new Set();
+  for (const match of String(html).matchAll(/<a\b([^>]*)href=["'](\/(?:watch\/)?([a-z0-9][a-z0-9-]*-\d{1,7}))(?:\?[^"']*)?["']([^>]*)>([\s\S]*?)<\/a>/gi)) {
+    const attrs = match[1] + " " + match[4];
+    const inner = match[5];
+    const id = match[3];
+    if (seen.has(id)) continue;
+    const title = (attrs.match(/\b(?:title|aria-label|data-jname)=["']([^"']+)["']/i)?.[1]
+      || inner.match(/\balt=["']([^"']+)["']/i)?.[1]
+      || inner.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim()).replace(/&amp;/g, "&").replace(/&#0?39;/g, "'");
+    if (!title || title.length > 200) continue;
+    const poster = inner.match(/(?:data-src|data-lazy-src|src)=["'](https?:[^"']+)["']/i)?.[1] || "";
+    seen.add(id);
+    out.push({ id, title, image: poster, type: "", year: "", episodes: null, anilistId: null });
+  }
+  return out;
+}
+
 function parseHtmlSearch(html) {
+  const legacy = parseLegacySearch(html);
+  return legacy.length ? legacy : parseTileSearch(html);
+}
+
+function parseLegacySearch(html) {
   const cards = html.match(/<div[^>]+class=["'][^"']*flw-item[^"']*["'][\s\S]*?<\/div>\s*<\/div>/gi) || [];
   const out = [];
   const seen = new Set();
