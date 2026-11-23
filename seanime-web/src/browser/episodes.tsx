@@ -207,6 +207,7 @@ function streamUrlsFor(id: number, mal: number | string, episode: number, audio:
   return [
     `/api/justanime?action=streams&${base}&server=${server}`,
     `/api/justanime?action=streams&${base}&server=auto`,
+    `/api/justanime?action=animetsu&${base}`,
     `/api/hianime?action=streams&${base}`,
     `/api/anikoto?action=streams&anilistId=${id}&malId=${mal}&episode=${episode}&category=${audio}`
   ]

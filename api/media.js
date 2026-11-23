@@ -23,7 +23,11 @@ const ALLOWED_HOSTS = new Set([
   "norami.top",
   "kryntal.top",
   "akirax.buzz",
-  "vid-tube.site"
+  "vid-tube.site",
+  "mega-cloud.top",
+  "animetsu.cc",
+  "animetsu.live",
+  "animetsu.net"
 ]);
 const STREAM_PROXY_HOST = "neko.justanime.to";
 

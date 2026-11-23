@@ -1,3 +1,4 @@
+import { animetsuStreams } from "../server/animetsu.js";
 import { hindiHandler } from "../server/hindi.js";
 import { titleLogoHandler } from "../server/title-logo.js";
 const API = "https://core.justanime.to/api";
@@ -268,7 +269,8 @@ function mediaUrl(req, raw, isHls, playbackHeaders = {}) {
       "echovideo.to", "megavid.se", "animex.one",
       "kwik.cx", "kwik.si", "kwik.to", "kwik.li",
       "megacloud.blog", "megacloud.tv", "rapid-cloud.co", "rapid-cloud.ru",
-      "vidnest.fun", "norami.top", "kryntal.top", "akirax.buzz", "vid-tube.site"
+      "vidnest.fun", "norami.top", "kryntal.top", "akirax.buzz", "vid-tube.site",
+      "mega-cloud.top", "animetsu.cc", "animetsu.live", "animetsu.net"
     ];
     if (!allowed.some(host => target.hostname === host || target.hostname.endsWith("." + host))) {
       return target.toString();
@@ -552,6 +554,13 @@ export default async function handler(req, res) {
       } catch (_) {}
       const resolved = await streams(req, animeId, episode, "auto", category);
       return send(res, 200, { servers: resolved.servers, category }, "no-store");
+    }
+    if (action === "animetsu") {
+      const animeId = String(req.query.id || "");
+      const episode = String(req.query.episode || "");
+      if (!/^\d{1,12}$/.test(animeId) || !/^\d{1,5}$/.test(episode)) return send(res, 400, { error: "Anime ID and episode number are required" });
+      const category = req.query.category === "dub" ? "dub" : "sub";
+      return send(res, 200, await animetsuStreams(animeId, episode, category, (url, isHls, headers) => mediaUrl(req, url, isHls, headers)), "no-store");
     }
     if (action === "streams") {
       const animeId = String(req.query.id || "");
