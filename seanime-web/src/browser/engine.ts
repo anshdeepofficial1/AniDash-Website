@@ -33,10 +33,6 @@ export const PROVIDERS: ProviderMeta[] = [
   { id: "animeonsen", name: "AnimeOnsen", kind: "anime", delivery: "native", authorization: "third-party", version: 0, languages: [], priority: 91, incompatibleReason: "Android-only adapter; requires an authenticated token flow that is not exposed to the web.", description: "Present in the Android app only." },
   { id: "kaido", name: "Kaido", kind: "anime", delivery: "native", authorization: "third-party", version: 0, languages: [], priority: 92, incompatibleReason: "Android-only adapter; site is defunct/unstable.", description: "Present in the Android app only." },
   { id: "anizone", name: "AniZone", kind: "anime", delivery: "native", authorization: "third-party", version: 0, languages: [], priority: 93, incompatibleReason: "Android-only adapter; no reviewed web integration.", description: "Present in the Android app only." },
-  { id: "official-crunchyroll", name: "Crunchyroll", kind: "anime", delivery: "external", authorization: "official", version: 1, languages: [], priority: 200, homepage: "https://www.crunchyroll.com", description: "Opens the title on Crunchyroll (subscription/region rules apply). No in-app playback." },
-  { id: "official-netflix", name: "Netflix", kind: "anime", delivery: "external", authorization: "official", version: 1, languages: [], priority: 201, homepage: "https://www.netflix.com", description: "Opens the title on Netflix. No in-app playback." },
-  { id: "official-prime", name: "Prime Video", kind: "anime", delivery: "external", authorization: "official", version: 1, languages: [], priority: 202, homepage: "https://www.primevideo.com", description: "Opens the title on Prime Video. No in-app playback." },
-  { id: "official-youtube", name: "Official YouTube channels", kind: "anime", delivery: "external", authorization: "official", version: 1, languages: [], priority: 203, homepage: "https://www.youtube.com", description: "Links to publisher channels (Muse, Ani-One, Pokémon, Anime Times) found in AniList. Channel IDs are not verified yet, so nothing is embedded." },
   { id: "manifest", name: "User manifests", kind: "anime", delivery: "native", authorization: "user", version: 2, languages: ["en-dub", "ja-sub"], priority: 5, description: "Sources you import yourself (JSON manifest of media you are licensed to use)." },
   { id: "mangaplus", name: "MANGA Plus", kind: "manga", delivery: "external", authorization: "official", version: 1, languages: ["en"], priority: 10, recommended: true, homepage: "https://mangaplus.shueisha.co.jp", description: "Official SHUEISHA reader. Opens a search on the official site; pages are never copied." },
   { id: "viz", name: "VIZ", kind: "manga", delivery: "external", authorization: "official", version: 1, languages: ["en"], priority: 20, homepage: "https://www.viz.com", description: "Official VIZ reader. Opens a search on the official site." },
@@ -46,6 +42,9 @@ export const PROVIDERS: ProviderMeta[] = [
   { id: "mangabat", name: "MangaBat", kind: "manga", delivery: "native", authorization: "third-party", version: 0, languages: [], priority: 92, incompatibleReason: "Unlicensed scanlation host; not authorised, Android-only adapter.", description: "Present in the Android app only." },
   { id: "asura", name: "AsuraScans", kind: "manga", delivery: "native", authorization: "third-party", version: 0, languages: [], priority: 93, incompatibleReason: "Unlicensed scanlation host; not authorised, Android-only adapter.", description: "Present in the Android app only." },
 ]
+
+// The Extensions catalog contains only anime source adapters; publisher links stay outside it.
+export const animeExtensionCatalog = () => PROVIDERS.filter(p => p.kind === "anime" && p.delivery === "native" && p.authorization !== "user")
 
 export type Health = {
   ok: number; fail: number
@@ -190,9 +189,6 @@ export function externalSearchUrl(id: string, title: string): string | null {
   switch (id) {
     case "mangaplus": return `https://mangaplus.shueisha.co.jp/search_result?keyword=${q}`
     case "viz": return `https://www.viz.com/search?search=${q}`
-    case "official-crunchyroll": return `https://www.crunchyroll.com/search?q=${q}`
-    case "official-netflix": return `https://www.netflix.com/search?q=${q}`
-    case "official-prime": return `https://www.primevideo.com/search/?phrase=${q}`
     default: return null
   }
 }

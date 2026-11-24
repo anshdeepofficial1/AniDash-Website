@@ -38,3 +38,5 @@ test("url validation blocks SSRF and insecure schemes",()=>{
  assert.equal(E.isSafeHttpsUrl("https://mangaplus.shueisha.co.jp/x"),true);
 });
 test("external search urls are encoded official hosts only",()=>{assert.match(E.externalSearchUrl("mangaplus","a&b c"),/^https:\/\/mangaplus\.shueisha\.co\.jp\/.*a%26b%20c/);assert.equal(E.externalSearchUrl("justanime","x"),null)});
+
+test("anime extension catalog excludes external publisher links and manga",()=>{const rows=E.animeExtensionCatalog();assert.ok(rows.some(p=>p.id==="justanime"));assert.ok(rows.every(p=>p.kind==="anime"&&p.delivery==="native"&&p.authorization!=="user"));for(const id of ["official-crunchyroll","official-netflix","official-prime","official-youtube"]){assert.equal(E.meta(id),undefined);assert.equal(E.externalSearchUrl(id,"title"),null)}});

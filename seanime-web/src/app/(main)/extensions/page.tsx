@@ -32,7 +32,6 @@ function useEngineTick() {
 
 export default function Page() {
   useEngineTick()
-  const [kind, setKind] = React.useState<Engine.MediaKind>("anime")
   const [view, setView] = React.useState<"installed" | "available" | "all">("all")
   const [query, setQuery] = React.useState("")
   const [lang, setLang] = React.useState("")
@@ -45,7 +44,7 @@ export default function Page() {
   const [busy, setBusy] = React.useState(false)
   const prefs = Engine.loadPrefs()
 
-  const rows = Engine.PROVIDERS.filter(p => p.kind === kind && p.authorization !== "user").filter(p => {
+  const rows = Engine.animeExtensionCatalog().filter(p => {
     const runnable = Engine.isRunnable(p)
     if (view === "installed" && !(runnable && Engine.isEnabled(p.id))) return false
     if (view === "available" && runnable) return false
@@ -53,7 +52,7 @@ export default function Page() {
     if (lang && !p.languages.includes(lang) && !(lang === "none" && !p.languages.length)) return false
     return true
   }).sort((a, b) => Engine.score(a.id) - Engine.score(b.id))
-  const langs = Array.from(new Set(Engine.PROVIDERS.filter(p => p.kind === kind).flatMap(p => p.languages)))
+  const langs = Array.from(new Set(Engine.animeExtensionCatalog().flatMap(p => p.languages)))
 
   const refreshSources = () => setSources(installedSources())
   async function importText(text: string) {
@@ -81,12 +80,11 @@ export default function Page() {
     <PageWrapper className="p-4 sm:p-8 space-y-6 max-w-5xl mx-auto w-full overflow-x-hidden">
       <header className="space-y-1">
         <h1 className="text-2xl font-bold">Extensions</h1>
-        <p className="text-sm text-[--muted]">Sources are reviewed web adapters, official provider links, or manifests you import. Android APK/Dart extensions cannot run in a browser, and nothing here downloads or runs remote code. Statuses come from real playback on this device — a green badge is never shown for a source that has not played.</p>
+        <p className="text-sm text-[--muted]">Manage anime sources for AniDash playback. Android-only extensions remain incompatible until a web adapter exists. Imported manifests never execute remote code. Playback status reflects actual use on this device.</p>
       </header>
 
       <div className="flex flex-wrap gap-2 items-center" role="tablist">
-        {(["anime", "manga"] as const).map(k => <button key={k} role="tab" aria-selected={kind === k} className={chip(kind === k)} onClick={() => { setKind(k); setLang("") }}>{k === "anime" ? "Anime" : "Manga"}</button>)}
-        <span className="mx-1 h-5 border-l border-[--border]" />
+        <span className="text-sm font-medium">Anime sources</span>
         {(["all", "installed", "available"] as const).map(v => <button key={v} className={chip(view === v)} onClick={() => setView(v)}>{v === "all" ? "All" : v === "installed" ? "Installed" : "Available / not runnable"}</button>)}
       </div>
 
@@ -127,7 +125,6 @@ export default function Page() {
               {runnable && <Button size="sm" intent={enabled ? "gray-outline" : "primary"} onClick={() => Engine.setEnabled(p.id, !enabled)}>{enabled ? "Disable" : "Enable"}</Button>}
               {runnable && <label className="text-sm flex items-center gap-1.5">Priority
                 <input type="number" min={0} max={999} className="w-16 border border-[--border] rounded p-1 bg-transparent" value={prefs.order[p.id] ?? p.priority} onChange={e => Engine.setPriority(p.id, e.target.value === "" ? null : Number(e.target.value))} /></label>}
-              {p.delivery === "external" && p.homepage && <a className="text-sm underline" href={p.homepage} target="_blank" rel="noopener noreferrer">Open official site</a>}
               <button className="text-sm underline text-[--muted]" onClick={() => setOpen(open === p.id ? null : p.id)}>{open === p.id ? "Hide details" : "Details"}</button>
             </div>
             {open === p.id && <dl className="text-sm grid sm:grid-cols-2 gap-x-6 gap-y-1 pt-2 border-t border-[--border]">
@@ -138,7 +135,7 @@ export default function Page() {
               <dt className="text-[--muted]">Buffering events</dt><dd>{h?.stalls || 0}</dd>
               <dt className="text-[--muted]">Last error</dt><dd className="break-words">{h?.lastError || "–"}</dd>
               {p.incompatibleReason && <><dt className="text-[--muted]">Why incompatible</dt><dd>{p.incompatibleReason}</dd></>}
-              <dt className="text-[--muted]">Privacy</dt><dd>Using this source sends your IP address and the requested title to {p.delivery === "external" ? "the provider when you open it" : "AniDash's relay and the provider"}. Your AniList token is never sent.</dd>
+              <dt className="text-[--muted]">Privacy</dt><dd>Using a source may share network information and the requested title with AniDash’s relay and the provider. Your AniList token is never sent.</dd>
             </dl>}
           </article>
         })}
