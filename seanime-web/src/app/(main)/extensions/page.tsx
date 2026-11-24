@@ -3,6 +3,7 @@ import { CustomLibraryBanner } from "@/app/(main)/_features/anime-library/_conta
 import { PageWrapper } from "@/components/shared/page-wrapper"
 import { Button } from "@/components/ui/button"
 import * as Engine from "@/browser/engine"
+import { repositories, refreshRepository, removeRepository, installRepositoryPackage, packageState } from "@/browser/repositories"
 import { installedSources, parseSource, installSource, removeSource, setSourceEnabled } from "@/browser/sources"
 
 const STORE = "anidash.watch.web.v1"
@@ -42,6 +43,11 @@ export default function Page() {
   const [consent, setConsent] = React.useState(false)
   const [url, setUrl] = React.useState("")
   const [busy, setBusy] = React.useState(false)
+  const [repoUrl,setRepoUrl]=React.useState("")
+  const [repos,setRepos]=React.useState(repositories)
+  const [repoConsent,setRepoConsent]=React.useState(false)
+  const [repoBusy,setRepoBusy]=React.useState(false)
+  const repoAction=async(action:()=>Promise<unknown>,success:string)=>{setRepoBusy(true);try{await action();setRepos(repositories());setSources(installedSources());setMessage(success)}catch(e){setMessage(e instanceof Error?e.message:"Repository request failed")}finally{setRepoBusy(false)}}
   const prefs = Engine.loadPrefs()
 
   const rows = Engine.animeExtensionCatalog().filter(p => {
@@ -149,6 +155,17 @@ export default function Page() {
           <button className={chip(audio === "sub")} onClick={() => { writeAudio("sub"); setAudio("sub") }}>Japanese SUB</button>
         </div>
         <p className="text-xs text-[--muted]">Subtitles are chosen in the player per episode (English tracks are listed first). Hindi DUB is offered only when a release is found for that episode.</p>
+      </section>
+
+      <section className="border border-[--border] rounded-xl p-4 space-y-3" aria-label="Anime extension repositories">
+        <h2 className="text-base font-semibold">Anime extension repositories</h2>
+        <p className="text-sm text-[--muted]">Add a trusted catalog of authorized anime manifests. Repositories are read only on request; no executable Android or JavaScript packages are installed. An installed package is not evidence of playable content.</p>
+        <label className="flex gap-2 items-start text-sm"><input type="checkbox" checked={repoConsent} onChange={e=>setRepoConsent(e.target.checked)}/> I trust this repository and have permission to use its media.</label>
+        <div className="flex flex-wrap gap-2"><input type="url" aria-label="Repository URL" placeholder="HTTPS repository index URL" value={repoUrl} onChange={e=>setRepoUrl(e.target.value)} className="border border-[--border] rounded-lg p-2 flex-1 min-w-[12rem] bg-[--paper]"/><Button disabled={!repoConsent||repoBusy||!repoUrl.trim()} onClick={()=>void repoAction(async()=>{await refreshRepository(repoUrl);setRepoUrl("")},"Repository added")}>Add repository</Button></div>
+        {repos.map(repo=><div key={repo.url} className="border border-[--border] rounded-lg p-3 space-y-3"><div className="flex flex-wrap items-center justify-between gap-2"><div className="min-w-0"><h3 className="font-semibold">{repo.name}</h3><p className="text-xs text-[--muted] break-all">{repo.url}</p></div><div className="flex flex-wrap gap-2"><Button size="sm" intent="gray-outline" disabled={!repoConsent||repoBusy} onClick={()=>void repoAction(()=>refreshRepository(repo.url),"Repository refreshed")}>Check updates</Button><Button size="sm" intent="gray-outline" disabled={repoBusy} onClick={()=>{removeRepository(repo.url);setRepos(repositories());setMessage("Repository removed. Installed media sources remain until uninstalled.")}}>Remove</Button></div></div>
+          {repo.packages.length===0&&<p className="text-xs text-[--muted]">No anime packages published.</p>}
+          {repo.packages.filter(p=>!query||p.name.toLowerCase().includes(query.toLowerCase())).map(p=>{const state=packageState(repo,p);return <div key={p.id} className="flex flex-wrap items-center justify-between gap-2 border-t border-[--border] pt-2"><span>{p.name} <span className="text-xs text-[--muted]">v{p.version} · {state==="update"?"Update available":state==="installed"?"Installed, playback unverified":state==="older"?"Older version":"Available to install"}</span></span><Button size="sm" disabled={!repoConsent||repoBusy||state==="installed"||state==="older"} onClick={()=>void repoAction(()=>installRepositoryPackage(repo.url,p.id),state==="update"?"Source updated":"Source installed")}>{state==="update"?"Update":state==="installed"?"Installed":state==="older"?"Unavailable":"Install"}</Button></div>})}
+        </div>)}
       </section>
 
       <section className="border border-[--border] rounded-xl p-4 space-y-3" aria-label="Import manifest">
