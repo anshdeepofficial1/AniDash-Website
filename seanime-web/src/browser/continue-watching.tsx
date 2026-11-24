@@ -1,3 +1,4 @@
+import { useUiLanguage } from "@/browser/ui-language"
 import React from "react"
 import { useQuery } from "@tanstack/react-query"
 import { useRouter } from "@/lib/navigation"
@@ -41,6 +42,7 @@ async function fetchEpisodePage(id: number, mal: number, page: number, signal: A
 }
 
 function ContinueWatchingCard({ resume, onRemove }: { resume: any, onRemove: () => void }) {
+  const {t}=useUiLanguage()
   const router = useRouter()
   const m = resume.media
   const episode = Number(resume.episode)
@@ -84,12 +86,12 @@ function ContinueWatchingCard({ resume, onRemove }: { resume: any, onRemove: () 
       <div className="p-3 space-y-1">
         <p className="font-semibold truncate">{title}</p>
         {episodeMeta?.title && <p className="truncate text-xs text-[--muted]" title={episodeMeta.title}>{episodeMeta.title}</p>}
-        <p className="text-xs text-[--muted]">Episode {episode}{resume.seconds > 0 ? " · Resume " + time(resume.seconds) : " · Start episode"}</p>
+        <p className="text-xs text-[--muted]">{t("Episode")} {episode}{resume.seconds > 0 ? " · "+t("Resume")+" " + time(resume.seconds) : " · "+t("Start episode")}</p>
       </div>
     </button>
-    <button type="button" aria-label={"Remove " + title + " from Continue Watching"} title="Remove from Continue Watching"
+    <button type="button" aria-label={"Remove " + title + " from Continue Watching"} title={t("Remove from Continue Watching")}
       className="absolute right-2 top-2 z-10 grid size-7 place-items-center rounded-full bg-black/60 text-white opacity-100 sm:opacity-0 transition hover:bg-red-600 focus-visible:opacity-100 group-hover/cw:opacity-100"
-      onClick={e => { e.stopPropagation(); hideFromContinueWatching(m, episode); onRemove(); toast.success("Removed from Continue Watching") }}>
+      onClick={e => { e.stopPropagation(); hideFromContinueWatching(m, episode); onRemove(); toast.success(t("Removed from Continue Watching")) }}>
       <LuX className="size-4" />
     </button>
     </div>
@@ -98,6 +100,7 @@ function ContinueWatchingCard({ resume, onRemove }: { resume: any, onRemove: () 
   )
 }
 export function BrowserContinueWatching() {
+  const {t}=useUiLanguage()
   const status = useServerStatus()
   const [revision, setRevision] = React.useState(0)
   const userId = status?.user?.viewer?.id || 0
@@ -108,11 +111,11 @@ export function BrowserContinueWatching() {
     events.forEach(event => window.addEventListener(event, refresh))
     return () => events.forEach(event => window.removeEventListener(event, refresh))
   }, [])
-  if (q.isPending) return <section className="relative z-[5] px-4 py-5"><h2 className="text-xl font-semibold">Continue Watching</h2><p className="text-sm text-[--muted]">Loading watch progress…</p></section>
-  if (q.isError) return <section className="relative z-[5] px-4 py-5"><h2>Continue Watching</h2><p>Could not sync your watch list. <button onClick={() => q.refetch()} className="underline">Retry</button></p></section>
+  if (q.isPending) return <section className="relative z-[5] px-4 py-5"><h2 className="text-xl font-semibold">{t("Continue Watching")}</h2><p className="text-sm text-[--muted]">{t("Loading watch progress…")}</p></section>
+  if (q.isError) return <section className="relative z-[5] px-4 py-5"><h2>{t("Continue Watching")}</h2><p>{t("Could not sync your watch list.")} <button onClick={() => q.refetch()} className="underline">{t("Retry")}</button></p></section>
   if (!q.data?.length) return null
   return <section className="relative z-[5] px-4 sm:px-6 py-5 space-y-3" data-anidash-continue-watching>
-    <div className="flex items-center justify-between"><h2 className="text-xl font-semibold">Continue Watching</h2><button className="text-xs text-[--muted] underline" onClick={() => q.refetch()}>Refresh</button></div>
+    <div className="flex items-center justify-between"><h2 className="text-xl font-semibold">{t("Continue Watching")}</h2><button className="text-xs text-[--muted] underline" onClick={() => q.refetch()}>{t("Refresh")}</button></div>
     <div className="flex overflow-x-auto gap-3 pb-2">{q.data.map(r => <ContinueWatchingCard key={r.media.id + ":" + r.episode} resume={r} onRemove={() => setRevision(v => v + 1)} />)}</div>
   </section>
 }

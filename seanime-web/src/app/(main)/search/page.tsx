@@ -1,3 +1,4 @@
+import { useUiLanguage } from "@/browser/ui-language"
 import { AL_MediaFormat, AL_MediaSeason, AL_MediaSort, AL_MediaStatus } from "@/api/generated/types"
 import { useListCustomSourceExtensions } from "@/api/hooks/extensions.hooks.ts"
 import { CustomLibraryBanner } from "@/app/(main)/_features/anime-library/_containers/custom-library-banner"
@@ -18,6 +19,7 @@ import { MdDataSaverOn } from "react-icons/md"
 import { useMount } from "react-use"
 
 export default function Page() {
+    const {t}=useUiLanguage()
     const router = useRouter()
     const urlParams = useSearchParams()
     const sortingUrlParam = urlParams.get("sorting")
@@ -60,9 +62,7 @@ export default function Page() {
             <PageWrapper data-search-page-container className="space-y-6 px-4 md:p-8 pt-0 pb-10">
                 <div className="flex items-center gap-3">
                     <SeaLink href={`/discover`}>
-                        <Button leftIcon={<LuCompass className="text-xl" />} rounded intent="gray-outline" size="md">
-                            Discover series
-                        </Button>
+                        <Button leftIcon={<LuCompass className="text-xl" />} rounded intent="gray-outline" size="md">{t("Discover series")}</Button>
                     </SeaLink>
                     {!!customSources?.length && <div data-discover-page-header-custom-source-container>
                         <SeaLink href="/custom-sources">
@@ -72,9 +72,7 @@ export default function Page() {
                                 // size="lg"
                                 className="rounded-full"
                                 onClick={() => router.push("/search")}
-                            >
-                                Custom sources
-                            </Button>
+                            >{t("Custom sources")}</Button>
                         </SeaLink>
                     </div>}
                     {/*<h3>Discover</h3>*/}

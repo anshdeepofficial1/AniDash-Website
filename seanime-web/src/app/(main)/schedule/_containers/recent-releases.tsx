@@ -1,3 +1,4 @@
+import { useUiLanguage } from "@/browser/ui-language"
 import { useAnilistListRecentAiringAnime } from "@/api/hooks/anilist.hooks"
 import { MediaEntryCard } from "@/app/(main)/_features/media/_components/media-entry-card"
 import { MediaEntryCardSkeleton } from "@/app/(main)/_features/media/_components/media-entry-card-skeleton"
@@ -7,6 +8,7 @@ import { addSeconds, formatDistanceToNow, subDays } from "date-fns"
 import React from "react"
 
 export function RecentReleases() {
+    const {t}=useUiLanguage()
 
     const { data, isLoading } = useAnilistListRecentAiringAnime({
         page: 1,
@@ -25,7 +27,7 @@ export function RecentReleases() {
 
     return (
         <AppLayoutStack className="pb-6">
-            <h2>Aired Recently</h2>
+            <h2>{t("Aired Recently")}</h2>
             <Carousel
                 className="w-full max-w-full"
                 gap="md"

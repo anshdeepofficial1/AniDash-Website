@@ -1,3 +1,4 @@
+import { useUiLanguage } from "@/browser/ui-language"
 import { PluginWebviewSlot } from "@/app/(main)/_features/plugin/webview/plugin-webviews"
 import { useServerStatus } from "@/app/(main)/_hooks/use-server-status"
 import { DiscoverPageHeader } from "@/app/(main)/discover/_components/discover-page-header"
@@ -19,6 +20,7 @@ import React from "react"
 
 
 export default function Page() {
+    const {t}=useUiLanguage()
 
     const serverStatus = useServerStatus()
     const router = useRouter()
@@ -54,10 +56,10 @@ export default function Page() {
                             triggerClass="px-4 py-2 h-full rounded-full border-transparent"
                             pillClass="rounded-full border-transparent"
                             items={[
-                                { name: "Anime", isCurrent: pageType === "anime", onClick: () => setPageType("anime") },
-                                { name: "Schedule", isCurrent: pageType === "schedule", onClick: () => setPageType("schedule") },
+                                { name: t("Anime"), isCurrent: pageType === "anime", onClick: () => setPageType("anime") },
+                                { name: t("Schedule"), isCurrent: pageType === "schedule", onClick: () => setPageType("schedule") },
                                 ...(serverStatus?.settings?.library?.enableManga ? [{
-                                    name: "Manga",
+                                    name: t("Manga"),
                                     isCurrent: pageType === "manga",
                                     onClick: () => setPageType("manga"),
                                 }] : []),
@@ -107,25 +109,25 @@ export default function Page() {
                         data-discover-page-anime-container
                     >
                         <div className="space-y-2 z-[5] relative" data-discover-page-anime-trending-container>
-                            <h2>Trending Right Now</h2>
+                            <h2>{t("Trending Right Now")}</h2>
                             <DiscoverTrending />
                         </div>
                         <RecentReleases />
                         <div className="space-y-2 z-[5] relative" data-discover-page-anime-highest-rated-container>
-                            <h2>Top of the Season</h2>
+                            <h2>{t("Top of the Season")}</h2>
                             <DiscoverThisSeason />
                         </div>
                         <div className="space-y-2 z-[5] relative" data-discover-page-anime-highest-rated-container>
-                            <h2>Best of Last Season</h2>
+                            <h2>{t("Best of Last Season")}</h2>
                             <DiscoverPastSeason />
                         </div>
                         <DiscoverMissedSequelsSection />
                         <div className="space-y-2 z-[5] relative" data-discover-page-anime-upcoming-container>
-                            <h2>Coming Soon</h2>
+                            <h2>{t("Coming Soon")}</h2>
                             <DiscoverUpcoming />
                         </div>
                         <div className="space-y-2 z-[5] relative" data-discover-page-anime-trending-movies-container>
-                            <h2>Trending Movies</h2>
+                            <h2>{t("Trending Movies")}</h2>
                             <DiscoverTrendingMovies />
                         </div>
                         {/*<div className="space-y-2 z-[5] relative">*/}
@@ -166,15 +168,15 @@ export default function Page() {
                         {/*    <DiscoverTrendingMangaAll />*/}
                         {/*</div>*/}
                         <div className="space-y-2 z-[5] relative" data-discover-page-manga-trending-container>
-                            <h2>Trending Manga</h2>
+                            <h2>{t("Trending Manga")}</h2>
                             <DiscoverTrendingCountry country="JP" forDiscoverHeader />
                         </div>
                         <div className="space-y-2 z-[5] relative" data-discover-page-manga-trending-manhwa-container>
-                            <h2>Trending Manhwa</h2>
+                            <h2>{t("Trending Manhwa")}</h2>
                             <DiscoverTrendingCountry country="KR" />
                         </div>
                         <div className="space-y-2 z-[5] relative" data-discover-page-manga-trending-manhua-container>
-                            <h2>Trending Manhua</h2>
+                            <h2>{t("Trending Manhua")}</h2>
                             <DiscoverTrendingCountry country="CN" />
                         </div>
                         {/*<div className="space-y-2 z-[5] relative">*/}
