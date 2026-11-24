@@ -1,6 +1,7 @@
 import { episodeSources } from "./sources"
 import { useInstalledSources } from "./use-installed-sources"
 import { getEpisodeResume, localResume, persistPlayback, syncPlayback, flushPlaybackQueue, parseManualPosition, formatPosition } from "./resume"
+import { embedProgressOrigin, readEmbedCheckpoint, type EmbedCheckpoint } from "./embed-progress"
 import React from "react"
 import { useRouter } from "@/lib/navigation"
 import Hls from "hls.js"
@@ -496,6 +497,9 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
   const [metaRevision, setMetaRevision] = React.useState(0)
 
   const video = React.useRef<HTMLVideoElement>(null)
+  const embeddedFrame = React.useRef<HTMLIFrameElement>(null)
+  const embeddedCheckpoint = React.useRef<{url:string;episode:number;mediaId:number;value:EmbedCheckpoint;at:number;savedAt:number}|null>(null)
+  const [embedTracking,setEmbedTracking]=React.useState(false)
   const seekDraftRef = React.useRef<number | null>(null)
   const seekDragging = React.useRef(false)
   const decodedPreviews = React.useRef(new Map<number, SeekImage>())
@@ -1386,7 +1390,20 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
 
   // Watch progress recording & AniList cross-device sync
   function record(force = false, ended = false) {
-    if(activeStream?.type==="embed")return
+    if(activeStream?.type==="embed"){
+      const checkpoint=embeddedCheckpoint.current
+      if(!checkpoint||checkpoint.url!==activeStream.url||checkpoint.episode!==selected||checkpoint.mediaId!==m.id||checkpoint.at===checkpoint.savedAt)return
+      const value=checkpoint.value
+      if(!force&&Date.now()-lastSaved.current<5000)return
+      lastSaved.current=Date.now()
+      persistPlayback(m,selected,value.position,value.duration,value.ended)
+      if(force||value.ended||Date.now()-lastSynced.current>=10000){
+        checkpoint.savedAt=checkpoint.at
+        lastSynced.current=Date.now()
+        void syncPlayback(m,selected,value.position,value.duration,value.ended).then(ok=>setSyncState(ok?"Synced with AniList":"Saved locally · cloud sync pending or not signed in")).catch(()=>setSyncState("Saved locally · cloud sync pending"))
+      }
+      return
+    }
     const el = video.current
     if (!el || !selected || mountedMediaEpisode.current !== selected || !Number.isFinite(el.duration) || el.duration <= 0) return
     // Leaving in the last 30 seconds (credits) counts as finished, so the next episode is what resumes.
@@ -1459,6 +1476,25 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     router.push(`/entry?id=${entry.mediaId}`)
   }
 
+  React.useEffect(()=>{
+    embeddedCheckpoint.current=null;setEmbedTracking(false)
+    if(activeStream?.type!=="embed")return
+    const url=activeStream.url,origin=embedProgressOrigin(url)
+    if(!origin)return
+    const receive=(event:MessageEvent)=>{
+      if(event.origin!==origin||!embeddedFrame.current||event.source!==embeddedFrame.current.contentWindow)return
+      const previous=embeddedCheckpoint.current
+      const value=readEmbedCheckpoint(origin,event.data,previous?.value||null)
+      if(!value)return
+      if(previous&&previous.value.position===value.position&&previous.value.duration===value.duration&&previous.value.ended===value.ended)return
+      embeddedCheckpoint.current={url,episode:selected,mediaId:m.id,value,at:Date.now(),savedAt:previous?.savedAt||0}
+      setEmbedTracking(true)
+      record(value.ended)
+    }
+    window.addEventListener("message",receive)
+    return()=>window.removeEventListener("message",receive)
+  },[activeStream?.url,activeStream?.type,selected,m.id])
+
   const [manualPosition,setManualPosition]=React.useState("")
   const [manualDuration,setManualDuration]=React.useState("")
   const [manualMessage,setManualMessage]=React.useState("")
@@ -1472,6 +1508,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
   async function saveManualCheckpoint(){
     const seconds=parseManualPosition(manualPosition),duration=parseManualPosition(manualDuration)
     if(seconds===null||duration===null||duration<=0||seconds>=duration){setManualMessage("Enter your actual position and total duration (MM:SS or HH:MM:SS). Position must be before the end.");return}
+    embeddedCheckpoint.current=null
     persistPlayback(m,selected,seconds,duration,false)
     setManualMessage("Checkpoint saved locally. Syncing…")
     try{const ok=await syncPlayback(m,selected,seconds,duration,false);setManualMessage(ok?"Checkpoint synced with AniList. Seek to this time on the other player.":"Checkpoint saved locally; cloud sync pending or not signed in.")}catch{setManualMessage("Checkpoint saved locally; cloud sync pending.")}
@@ -2077,7 +2114,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
               </div>
             )}
             {activeStream?.type === "embed" && (
-              <button data-embed-bar type="button" className="absolute left-2 top-2 z-[45] rounded-full bg-black/60 px-2.5 py-1 text-[11px] font-medium text-white/90 hover:bg-black/80" onClick={() => { failedStreams.current.clear(); const native = streamsRef.current.find(x => x.type !== "embed"); if (native) setActiveStream(native); else setResolveNonce(n => n + 1) }}>
+              <button data-embed-bar type="button" className="absolute left-2 top-2 z-[45] rounded-full bg-black/60 px-2.5 py-1 text-[11px] font-medium text-white/90 hover:bg-black/80" onClick={() => { record(true); failedStreams.current.clear(); const native = streamsRef.current.find(x => x.type !== "embed"); if (native) setActiveStream(native); else setResolveNonce(n => n + 1) }}>
                 ← AniDash player
               </button>
             )}
@@ -2086,6 +2123,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
             {activeStream?.type === "embed" && !isLoadingStream && (
               <iframe
                 key={activeStream.url}
+                ref={embeddedFrame}
                 src={activeStream.url}
                 title={"AniDash " + (activeStream.server || "embed") + " player"}
                 allow="autoplay; fullscreen; picture-in-picture; encrypted-media"
@@ -2439,7 +2477,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
           </section>}
           {activeStream?.type==="embed"&&<section aria-label="Embedded player progress" className="rounded-xl border border-neutral-800 bg-[#0d0d0d] p-4 space-y-3">
             <h2 className="text-sm font-semibold">Playback checkpoint</h2>
-            <p className="text-xs text-neutral-400">This embedded player has no verified time/seek API. AniDash cannot read its playback clock or seek for you. Enter the actual time shown in the player to sync your progress.</p>
+            <p className="text-xs text-neutral-400">{embedTracking?"Actual playback timestamps are being received. AniDash saves them to your account; automatic seeking on this embedded player is not verified.":"Waiting for supported playback events. If none arrive, enter the actual position shown by the player. Automatic seeking is not verified."}</p>
             <div className="flex flex-wrap gap-3 items-end"><label className="text-xs">Current position<input aria-label="Current position" className="block rounded-lg border border-neutral-700 bg-black p-2 mt-1 w-32" placeholder="14:37" value={manualPosition} onChange={e=>setManualPosition(e.target.value)}/></label><label className="text-xs">Total duration<input aria-label="Total duration" className="block rounded-lg border border-neutral-700 bg-black p-2 mt-1 w-32" placeholder="23:40" value={manualDuration} onChange={e=>setManualDuration(e.target.value)}/></label><button className="rounded-lg px-3 py-2 bg-white text-black text-xs font-semibold" onClick={()=>void saveManualCheckpoint()}>Save checkpoint</button></div>
             {manualMessage&&<p role="status" className="text-xs text-neutral-300">{manualMessage}</p>}
           </section>}
