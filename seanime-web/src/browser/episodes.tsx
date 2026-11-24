@@ -1,3 +1,5 @@
+import { episodeSources } from "./sources"
+import { useInstalledSources } from "./use-installed-sources"
 import { getEpisodeResume, localResume, persistPlayback, syncPlayback } from "./resume"
 import React from "react"
 import { useRouter } from "@/lib/navigation"
@@ -347,6 +349,9 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     initial.preferences?.preferredAudio === "sub" ? "sub" : "dub"
   )
   const [selectedServer, setSelectedServer] = React.useState<string>(DEFAULT_SERVER)
+  const installedBrowserSources = useInstalledSources()
+  const customSourcePrefix = "local-source:"
+  const isCustomSource = selectedServer.startsWith(customSourcePrefix)
   const [serverMap, setServerMap] = React.useState<Record<string, { sub?: boolean; dub?: boolean }>>({})
   const [streams, setStreams] = React.useState<StreamSource[]>([])
   const [activeStream, setActiveStream] = React.useState<StreamSource | null>(null)
@@ -612,8 +617,8 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     setCaptionText("")
     skippedSegments.current.clear()
 
-    // Fetch server availability map in background
-    fetch(`/api/justanime?action=servers&id=${entry.mediaId}&episode=${selected}&category=${audio}`)
+    // Fetch server availability map in background (not for an explicitly selected local source).
+    if (!isCustomSource) fetch(`/api/justanime?action=servers&id=${entry.mediaId}&episode=${selected}&category=${audio}`)
       .then(r => r.json())
       .then(d => {
         if (live && d?.serverMap) setServerMap(d.serverMap)
@@ -672,6 +677,14 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
         }
       }
 
+      if (isCustomSource) {
+        const id = selectedServer.slice(customSourcePrefix.length)
+        const candidates = episodeSources(installedBrowserSources, entry.mediaId, selected, audio).filter(e=>e.sourceId===id)
+        add({sources:candidates.map(e=>({url:e.url,server:e.sourceName,serverId:selectedServer,quality:"Custom source",type:e.format==="hls"?"hls":e.format==="mp4"?"mp4":undefined,isDub:audio==="dub"}))})
+        stillResolving.current=false
+        if(!activated&&live){setIsLoadingStream(false);setError("This installed source has no matching episode or audio. Choose another source.")}
+        return
+      }
       streamErrors.clear()
       // One automatic second round: providers that were briefly unreachable often answer on the retry.
       for (let attempt = 0; attempt < 2 && live && !activated; attempt++) {
@@ -718,18 +731,18 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
       live = false
       stillResolving.current = false
     }
-  }, [entry.mediaId, selected, audio, selectedServer, watchMode, resolveNonce])
+  }, [entry.mediaId, selected, audio, selectedServer, watchMode, resolveNonce, isCustomSource ? installedBrowserSources : null])
 
   // Warm the next episode while this one plays, so "next" starts almost instantly.
   const prefetchedEpisode = React.useRef<number>(0)
   React.useEffect(() => {
-    if (!watchMode || !selected || selected >= total || !isPlaying || currentTime < 20) return
+    if (isCustomSource || !watchMode || !selected || selected >= total || !isPlaying || currentTime < 20) return
     const nextEpisode = selected + 1
     const key = entry.mediaId * 100000 + nextEpisode
     if (prefetchedEpisode.current === key) return
     prefetchedEpisode.current = key
     streamUrlsFor(entry.mediaId, m.idMal || "", nextEpisode, audio, selectedServer || DEFAULT_SERVER, [m.title?.english, m.title?.romaji].filter(Boolean) as string[], { year: m.seasonYear || m.startDate?.year, eps: m.episodes, fmt: m.format }).forEach(url => { void cachedJson(url) })
-  }, [watchMode, selected, total, isPlaying, currentTime >= 20, entry.mediaId, audio, selectedServer])
+  }, [watchMode, selected, total, isPlaying, currentTime >= 20, entry.mediaId, audio, selectedServer, isCustomSource])
 
   // Playback & HLS setup
   React.useEffect(() => {
@@ -2337,6 +2350,11 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
             </div>
           </section>
 
+          {(["sub","dub"] as const).some(channel=>episodeSources(installedBrowserSources,entry.mediaId,selected,channel).length>0) && <section aria-label="Installed browser sources" className="rounded-xl border border-neutral-800 bg-[#0d0d0d] p-4 space-y-3">
+            <h2 className="text-sm font-semibold">Installed browser sources</h2>
+            <p className="text-xs text-neutral-400">Selecting a source connects directly to its media host. Use only media you are authorized to access.</p>
+            {(["sub","dub"] as const).map(channel=>{const options=[...new Map(episodeSources(installedBrowserSources,entry.mediaId,selected,channel).map(e=>[e.sourceId,e])).values()];return options.length>0&&<div key={channel} className="flex flex-wrap items-center gap-2"><span className="text-xs text-neutral-300 w-14">{channel.toUpperCase()}</span>{options.map(e=><button key={e.sourceId} type="button" aria-pressed={selectedServer===customSourcePrefix+e.sourceId&&audio===channel} className={`rounded-lg px-3.5 py-1.5 text-xs font-medium ${selectedServer===customSourcePrefix+e.sourceId&&audio===channel?"bg-white text-black":"bg-[#1e1e1e] text-neutral-300 hover:bg-[#2a2a2a]"}`} onClick={()=>pickServer(customSourcePrefix+e.sourceId,channel)}>{e.sourceName}</button>)}</div>})}
+          </section>}
           {/* External and language players: separate from the built-in AniDash servers. */}
           <section aria-label="Languages and external players" className="rounded-xl border border-neutral-800 bg-[#0d0d0d] p-4 sm:p-5 space-y-3">
             <div>
