@@ -7,6 +7,7 @@ import Hls from "hls.js"
 import { Anime_Entry } from "@/api/generated/types"
 import { Button } from "@/components/ui/button"
 import { getArcs } from "./arcs"
+import * as Engine from "./engine"
 import {
   LuPlay,
   LuPause,
@@ -34,6 +35,7 @@ type Metadata = {
 }
 
 type StreamSource = {
+  provider?: string
   url: string
   originalUrl?: string
   quality?: string
@@ -204,15 +206,29 @@ function cachedJson(url: string, ttl = 4 * 60 * 1000): Promise<any | null> {
   streamInflight.set(url, request)
   return request
 }
-function streamUrlsFor(id: number, mal: number | string, episode: number, audio: string, server: string, titles: string[] = [], meta: { year?: number, eps?: number, fmt?: string } = {}) {
+type StreamJob = { provider: string, url: string }
+/** Candidate requests for one episode, ordered and filtered by the source engine (enabled, compatible, not cooling down). */
+function streamJobsFor(id: number, mal: number | string, episode: number, audio: string, server: string, titles: string[] = [], meta: { year?: number, eps?: number, fmt?: string } = {}): StreamJob[] {
   const base = `id=${id}&episode=${episode}&category=${audio}`
-  return [
-    `/api/justanime?action=streams&${base}&server=${server}`,
-    `/api/justanime?action=streams&${base}&server=auto`,
-    `/api/justanime?action=animetsu&${base}&title=${encodeURIComponent(titles[0] || "")}&alt=${encodeURIComponent(titles[1] || "")}`,
-    `/api/hianime?action=streams&${base}`,
-    `/api/anikoto?action=auto&anilistId=${id}&episode=${episode}&category=${audio}&title=${encodeURIComponent(titles[0] || "")}&alt=${encodeURIComponent(titles[1] || "")}&year=${meta.year || ""}&eps=${meta.eps || ""}&fmt=${meta.fmt || ""}`
-  ]
+  const urls: Record<string, string[]> = {
+    justanime: [`/api/justanime?action=streams&${base}&server=${server}`, `/api/justanime?action=streams&${base}&server=auto`],
+    animetsu: [`/api/justanime?action=animetsu&${base}&title=${encodeURIComponent(titles[0] || "")}&alt=${encodeURIComponent(titles[1] || "")}`],
+    hianime: [`/api/hianime?action=streams&${base}`],
+    anikoto: [`/api/anikoto?action=auto&anilistId=${id}&episode=${episode}&category=${audio}&title=${encodeURIComponent(titles[0] || "")}&alt=${encodeURIComponent(titles[1] || "")}&year=${meta.year || ""}&eps=${meta.eps || ""}&fmt=${meta.fmt || ""}`],
+  }
+  const lang = Engine.languageKey(audio)
+  let order = Engine.plan("anime", lang)
+  // Everything is cooling down: probe only the provider that recovers soonest instead of hammering all of them.
+  if (!order.length) {
+    const h = Engine.loadHealth()
+    const soonest = Engine.PROVIDERS.filter(p => p.kind === "anime" && Engine.isRunnable(p) && p.authorization !== "user" && p.languages.includes(lang) && Engine.isEnabled(p.id))
+      .sort((x, y) => (h[x.id]?.cooldownUntil || 0) - (h[y.id]?.cooldownUntil || 0))[0]
+    order = soonest ? [soonest] : []
+  }
+  return order.flatMap(p => (urls[p.id] || []).map(url => ({ provider: p.id, url })))
+}
+function streamUrlsFor(id: number, mal: number | string, episode: number, audio: string, server: string, titles: string[] = [], meta: { year?: number, eps?: number, fmt?: string } = {}) {
+  return streamJobsFor(id, mal, episode, audio, server, titles, meta).map(j => j.url)
 }
 
 /** Plain-language reason for a provider failure, shown to viewers when every built-in server is down. */
@@ -429,6 +445,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     failedStreams.current.add(failedUrl)
     const failed = streamsRef.current.find(s => s.url === failedUrl)
     if (hideServer && failed && failed.type !== "embed") markServerDead(failed.server)
+    if (failed?.provider) Engine.recordFailure(failed.provider, "playback failed", false)
     const next = streamsRef.current.find(s => !failedStreams.current.has(s.url))
     if (next) {
       waitingForMoreSources.current = false
@@ -490,6 +507,27 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
   const requestedEpisode = React.useRef<number | null>(null)
   const mountedMediaEpisode = React.useRef<number | null>(null)
   const playbackStarted = React.useRef(false)
+  // Source-engine health: record real playback only (first frame, then >=60 s of healthy progress).
+  const streamActivatedAt = React.useRef(0)
+  const stableTimer = React.useRef<number | null>(null)
+  const notedStream = React.useRef("")
+  const notePlaying = React.useCallback((src: StreamSource | null) => {
+    if (!src?.provider || src.type === "embed" || notedStream.current === src.url) return
+    notedStream.current = src.url
+    Engine.recordPlaying(src.provider)
+    if (streamActivatedAt.current) Engine.recordPlayStart(src.provider, Date.now() - streamActivatedAt.current)
+    const startPos = video.current?.currentTime || 0
+    if (stableTimer.current) window.clearTimeout(stableTimer.current)
+    stableTimer.current = window.setTimeout(() => {
+      const el = video.current
+      // Verified only if the element is still playing this stream and the clock really advanced.
+      if (el && !el.paused && !el.ended && el.currentTime - startPos >= 45) Engine.recordStable(src.provider!)
+    }, Engine.STABLE_MS)
+  }, [])
+  React.useEffect(() => {
+    streamActivatedAt.current = Date.now()
+    return () => { if (stableTimer.current) window.clearTimeout(stableTimer.current); stableTimer.current = null; notedStream.current = "" }
+  }, [activeStream?.url])
   const mediaAccessDenied = React.useRef(false)
   const [accessDenied, setAccessDenied] = React.useState(false)
   const autoplayRef = React.useRef(autoplay)
@@ -689,7 +727,22 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
       // One automatic second round: providers that were briefly unreachable often answer on the retry.
       for (let attempt = 0; attempt < 2 && live && !activated; attempt++) {
         if (attempt > 0) await new Promise(resolve => window.setTimeout(resolve, 1200))
-        const jobs = streamUrlsFor(entry.mediaId, mal, selected, audio, serverParam, [m.title?.english, m.title?.romaji].filter(Boolean) as string[], { year: m.seasonYear || m.startDate?.year, eps: m.episodes, fmt: m.format }).map(getJson)
+        const startedAt = Date.now()
+        const jobList = streamJobsFor(entry.mediaId, mal, selected, audio, serverParam, [m.title?.english, m.title?.romaji].filter(Boolean) as string[], { year: m.seasonYear || m.startDate?.year, eps: m.episodes, fmt: m.format })
+        // A provider counts as failed only when every one of its requests came back empty.
+        const pending = new Map<string, { left: number, ok: boolean }>()
+        for (const job of jobList) pending.set(job.provider, { left: (pending.get(job.provider)?.left || 0) + 1, ok: false })
+        const jobs = jobList.map(job => getJson(job.url).then(data => {
+          const state = pending.get(job.provider)!
+          state.left--
+          const sources = Array.isArray(data?.sources) ? data.sources : []
+          if (sources.length) { state.ok = true; for (const src of sources) src.provider = job.provider; Engine.recordResolve(job.provider, Date.now() - startedAt) }
+          if (!state.ok && state.left === 0) {
+            const reason = streamErrors.get(job.url.split("?")[0] + (job.url.match(/action=(\w+)/)?.[1] || "")) || "no matching stream"
+            Engine.recordFailure(job.provider, reason, Engine.isPermanentError(reason))
+          }
+          return data
+        }))
         // All providers run in parallel. The preferred server gets a short head start (so Momo stays the
         // default), but a slow or dead provider never holds playback back: whoever answers first plays.
         const tagged = jobs.map((job, index) => job.then(data => ({ index, data })))
@@ -2031,6 +2084,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
               onPlaying={() => {
                 if (mediaAccessDenied.current) return
                 playbackStarted.current = true
+                notePlaying(activeStream)
                 if (hlsInstance.current) {
                   hlsInstance.current.config.maxMaxBufferLength = PLAYER_BUFFER_TARGET
                   hlsInstance.current.config.maxBufferLength = PLAYER_BUFFER_TARGET
@@ -2041,7 +2095,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
                 setPlayerNotice("")
               }}
               onCanPlay={() => setBuffering(false)}
-              onWaiting={e => { if (!mediaAccessDenied.current && !e.currentTarget.paused && e.currentTarget.readyState < 3) setBuffering(true) }}
+              onWaiting={e => { if (!mediaAccessDenied.current && !e.currentTarget.paused && e.currentTarget.readyState < 3) { setBuffering(true); if (playbackStarted.current && activeStream?.provider) Engine.recordStall(activeStream.provider) } }}
               onStalled={e => { if (!mediaAccessDenied.current && !e.currentTarget.paused && e.currentTarget.readyState < 3) setBuffering(true) }}
               onVolumeChange={e => { setVolume(e.currentTarget.volume); setIsMuted(e.currentTarget.muted) }}
               onRateChange={e => setPlaybackRate(e.currentTarget.playbackRate)}
