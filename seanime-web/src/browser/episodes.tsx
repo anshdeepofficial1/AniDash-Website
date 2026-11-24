@@ -500,6 +500,9 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
   const embeddedFrame = React.useRef<HTMLIFrameElement>(null)
   const embeddedCheckpoint = React.useRef<{url:string;episode:number;mediaId:number;value:EmbedCheckpoint;at:number;savedAt:number}|null>(null)
   const [embedTracking,setEmbedTracking]=React.useState(false)
+  const embedResumeGate=React.useRef<{ready:boolean;target:number;accepted:boolean}>({ready:false,target:0,accepted:false})
+  const [embedResumeTarget,setEmbedResumeTarget]=React.useState(0)
+  const [embedResumePending,setEmbedResumePending]=React.useState(false)
   const seekDraftRef = React.useRef<number | null>(null)
   const seekDragging = React.useRef(false)
   const decodedPreviews = React.useRef(new Map<number, SeekImage>())
@@ -1477,22 +1480,28 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
   }
 
   React.useEffect(()=>{
-    embeddedCheckpoint.current=null;setEmbedTracking(false)
+    embeddedCheckpoint.current=null;setEmbedTracking(false);setEmbedResumeTarget(0);setEmbedResumePending(false)
+    embedResumeGate.current={ready:false,target:0,accepted:false}
     if(activeStream?.type!=="embed")return
     const url=activeStream.url,origin=embedProgressOrigin(url)
-    if(!origin)return
+    let live=true
+    void getEpisodeResume(m,selected).then(target=>{if(!live)return;embedResumeGate.current={ready:true,target,accepted:target<5};setEmbedResumeTarget(target);setEmbedResumePending(target>=5)}).catch(()=>{if(live)embedResumeGate.current={ready:true,target:0,accepted:true}})
+    if(!origin)return()=>{live=false}
     const receive=(event:MessageEvent)=>{
       if(event.origin!==origin||!embeddedFrame.current||event.source!==embeddedFrame.current.contentWindow)return
       const previous=embeddedCheckpoint.current
       const value=readEmbedCheckpoint(origin,event.data,previous?.value||null)
       if(!value)return
+      const gate=embedResumeGate.current
+      if(!gate.ready)return
+      if(!gate.accepted){if(value.position<Math.max(0,gate.target-5))return;gate.accepted=true;setEmbedResumePending(false)}
       if(previous&&previous.value.position===value.position&&previous.value.duration===value.duration&&previous.value.ended===value.ended)return
       embeddedCheckpoint.current={url,episode:selected,mediaId:m.id,value,at:Date.now(),savedAt:previous?.savedAt||0}
       setEmbedTracking(true)
       record(value.ended)
     }
     window.addEventListener("message",receive)
-    return()=>window.removeEventListener("message",receive)
+    return()=>{live=false;window.removeEventListener("message",receive)}
   },[activeStream?.url,activeStream?.type,selected,m.id])
 
   const [manualPosition,setManualPosition]=React.useState("")
@@ -1509,6 +1518,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     const seconds=parseManualPosition(manualPosition),duration=parseManualPosition(manualDuration)
     if(seconds===null||duration===null||duration<=0||seconds>=duration){setManualMessage("Enter your actual position and total duration (MM:SS or HH:MM:SS). Position must be before the end.");return}
     embeddedCheckpoint.current=null
+    embedResumeGate.current={ready:true,target:seconds,accepted:true};setEmbedResumePending(false)
     persistPlayback(m,selected,seconds,duration,false)
     setManualMessage("Checkpoint saved locally. Syncing…")
     try{const ok=await syncPlayback(m,selected,seconds,duration,false);setManualMessage(ok?"Checkpoint synced with AniList. Seek to this time on the other player.":"Checkpoint saved locally; cloud sync pending or not signed in.")}catch{setManualMessage("Checkpoint saved locally; cloud sync pending.")}
@@ -2477,6 +2487,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
           </section>}
           {activeStream?.type==="embed"&&<section aria-label="Embedded player progress" className="rounded-xl border border-neutral-800 bg-[#0d0d0d] p-4 space-y-3">
             <h2 className="text-sm font-semibold">Playback checkpoint</h2>
+            {embedResumePending&&<div className="flex flex-wrap items-center gap-2 text-xs text-neutral-300"><span>Resume at <strong>{formatPosition(embedResumeTarget)}</strong> in the embedded player. Progress before that time will not overwrite your saved checkpoint.</span><button className="rounded border border-neutral-600 px-2 py-1" onClick={()=>{embedResumeGate.current.accepted=true;setEmbedResumePending(false)}}>Start over instead</button></div>}
             <p className="text-xs text-neutral-400">{embedTracking?"Actual playback timestamps are being received. AniDash saves them to your account; automatic seeking on this embedded player is not verified.":"Waiting for supported playback events. If none arrive, enter the actual position shown by the player. Automatic seeking is not verified."}</p>
             <div className="flex flex-wrap gap-3 items-end"><label className="text-xs">Current position<input aria-label="Current position" className="block rounded-lg border border-neutral-700 bg-black p-2 mt-1 w-32" placeholder="14:37" value={manualPosition} onChange={e=>setManualPosition(e.target.value)}/></label><label className="text-xs">Total duration<input aria-label="Total duration" className="block rounded-lg border border-neutral-700 bg-black p-2 mt-1 w-32" placeholder="23:40" value={manualDuration} onChange={e=>setManualDuration(e.target.value)}/></label><button className="rounded-lg px-3 py-2 bg-white text-black text-xs font-semibold" onClick={()=>void saveManualCheckpoint()}>Save checkpoint</button></div>
             {manualMessage&&<p role="status" className="text-xs text-neutral-300">{manualMessage}</p>}

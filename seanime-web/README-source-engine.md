@@ -46,3 +46,5 @@ Provider-published docs for the existing MegaPlay, Megavid and AniXo integration
 
 ### User-approved anime repository format
 A repository index is an HTTPS JSON file: `{"version":1,"name":"My catalog","packages":[{"id":"licensed","name":"Licensed anime","version":1,"manifest":"episodes.json","sha256":"<64 hex characters>"}]}`. Package IDs must match their anime-only v1/v2 manifest IDs; SHA-256 is calculated over the exact manifest bytes. Install/update is explicit, same-origin for catalog packages, capped downloads, no credentials, no redirects, no execution. Source removal is in the installed sources list; removal of a repository leaves installed media intact. This is not a native Aniyomi/Mangayomi runtime and no unauthorized remote source was preinstalled. Browser-level host validation cannot establish content rights or DNS-level safety; only use trusted repositories.
+
+Embedded playback starting from zero is gated until it reaches the saved resume point or the user explicitly chooses Start over. The gate prevents overwriting a saved remote checkpoint merely because a player does not support automatic seek. The manual position form remains available.
