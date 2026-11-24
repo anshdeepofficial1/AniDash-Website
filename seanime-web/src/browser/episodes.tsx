@@ -1,6 +1,6 @@
 import { episodeSources } from "./sources"
 import { useInstalledSources } from "./use-installed-sources"
-import { getEpisodeResume, localResume, persistPlayback, syncPlayback } from "./resume"
+import { getEpisodeResume, localResume, persistPlayback, syncPlayback, flushPlaybackQueue, parseManualPosition, formatPosition } from "./resume"
 import React from "react"
 import { useRouter } from "@/lib/navigation"
 import Hls from "hls.js"
@@ -1386,6 +1386,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
 
   // Watch progress recording & AniList cross-device sync
   function record(force = false, ended = false) {
+    if(activeStream?.type==="embed")return
     const el = video.current
     if (!el || !selected || mountedMediaEpisode.current !== selected || !Number.isFinite(el.duration) || el.duration <= 0) return
     // Leaving in the last 30 seconds (credits) counts as finished, so the next episode is what resumes.
@@ -1401,7 +1402,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
       syncBusy.current = true
       setSyncState("Saving progress…")
       void syncPlayback(m, selected, position, el.duration, ended)
-        .then(ok => setSyncState(ok ? "Synced with AniList" : "Saved on this device"))
+        .then(ok => setSyncState(ok ? "Synced with AniList" : "Saved locally · cloud sync pending or not signed in"))
         .catch(() => {
           lastSynced.current = 0
           setSyncState("Saved on this device · AniList sync failed")
@@ -1417,8 +1418,13 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     const save = () => {
       if (document.visibilityState === "hidden") record(true)
     }
+    const pagehide=()=>record(true)
+    const reconnect=()=>{void flushPlaybackQueue().catch(()=>{})}
     document.addEventListener("visibilitychange", save)
-    return () => document.removeEventListener("visibilitychange", save)
+    window.addEventListener("pagehide",pagehide)
+    window.addEventListener("online",reconnect)
+    reconnect()
+    return () => {document.removeEventListener("visibilitychange", save);window.removeEventListener("pagehide",pagehide);window.removeEventListener("online",reconnect)}
   }, [watchMode, selected, activeStream?.url])
 
   // Navigation handlers
@@ -1451,6 +1457,24 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
   function closePlayer() {
     if (watchMode) record(true)
     router.push(`/entry?id=${entry.mediaId}`)
+  }
+
+  const [manualPosition,setManualPosition]=React.useState("")
+  const [manualDuration,setManualDuration]=React.useState("")
+  const [manualMessage,setManualMessage]=React.useState("")
+  React.useEffect(()=>{
+    if(activeStream?.type!=="embed")return
+    let live=true;setManualMessage("");setManualPosition("");setManualDuration("")
+    void getEpisodeResume(m,selected).then(sec=>{if(live&&sec>0)setManualPosition(formatPosition(sec))}).catch(()=>{})
+    const local=localResume(m);if(local?.episode===selected&&local.duration>0)setManualDuration(formatPosition(local.duration))
+    return()=>{live=false}
+  },[activeStream?.url,selected,m.id])
+  async function saveManualCheckpoint(){
+    const seconds=parseManualPosition(manualPosition),duration=parseManualPosition(manualDuration)
+    if(seconds===null||duration===null||duration<=0||seconds>=duration){setManualMessage("Enter your actual position and total duration (MM:SS or HH:MM:SS). Position must be before the end.");return}
+    persistPlayback(m,selected,seconds,duration,false)
+    setManualMessage("Checkpoint saved locally. Syncing…")
+    try{const ok=await syncPlayback(m,selected,seconds,duration,false);setManualMessage(ok?"Checkpoint synced with AniList. Seek to this time on the other player.":"Checkpoint saved locally; cloud sync pending or not signed in.")}catch{setManualMessage("Checkpoint saved locally; cloud sync pending.")}
   }
 
   // Language players (animehindi.fun and similar) are loaded per episode and shown in their own section.
@@ -1491,6 +1515,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     return groups
   }
   function openExternal(e: StreamSource) {
+    record(true)
     setError(""); setAccessDenied(false); setPlayerNotice("")
     setStreams(prev => (prev.some(x => x.url === e.url) ? prev : [...prev, e]))
     if (!streamsRef.current.some(x=>x.url===e.url)) streamsRef.current = [...streamsRef.current,e]
@@ -2411,6 +2436,12 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
             <h2 className="text-sm font-semibold">Installed browser sources</h2>
             <p className="text-xs text-neutral-400">Selecting a source connects directly to its media host. Use only media you are authorized to access.</p>
             {(["sub","dub"] as const).map(channel=>{const options=[...new Map(episodeSources(installedBrowserSources,entry.mediaId,selected,channel).map(e=>[e.sourceId,e])).values()];return options.length>0&&<div key={channel} className="flex flex-wrap items-center gap-2"><span className="text-xs text-neutral-300 w-14">{channel.toUpperCase()}</span>{options.map(e=><button key={e.sourceId} type="button" aria-pressed={selectedServer===customSourcePrefix+e.sourceId&&audio===channel} className={`rounded-lg px-3.5 py-1.5 text-xs font-medium ${selectedServer===customSourcePrefix+e.sourceId&&audio===channel?"bg-white text-black":"bg-[#1e1e1e] text-neutral-300 hover:bg-[#2a2a2a]"}`} onClick={()=>pickServer(customSourcePrefix+e.sourceId,channel)}>{e.sourceName}</button>)}</div>})}
+          </section>}
+          {activeStream?.type==="embed"&&<section aria-label="Embedded player progress" className="rounded-xl border border-neutral-800 bg-[#0d0d0d] p-4 space-y-3">
+            <h2 className="text-sm font-semibold">Playback checkpoint</h2>
+            <p className="text-xs text-neutral-400">This embedded player has no verified time/seek API. AniDash cannot read its playback clock or seek for you. Enter the actual time shown in the player to sync your progress.</p>
+            <div className="flex flex-wrap gap-3 items-end"><label className="text-xs">Current position<input aria-label="Current position" className="block rounded-lg border border-neutral-700 bg-black p-2 mt-1 w-32" placeholder="14:37" value={manualPosition} onChange={e=>setManualPosition(e.target.value)}/></label><label className="text-xs">Total duration<input aria-label="Total duration" className="block rounded-lg border border-neutral-700 bg-black p-2 mt-1 w-32" placeholder="23:40" value={manualDuration} onChange={e=>setManualDuration(e.target.value)}/></label><button className="rounded-lg px-3 py-2 bg-white text-black text-xs font-semibold" onClick={()=>void saveManualCheckpoint()}>Save checkpoint</button></div>
+            {manualMessage&&<p role="status" className="text-xs text-neutral-300">{manualMessage}</p>}
           </section>}
           {/* External and language players: separate from the built-in AniDash servers. */}
           <section aria-label="Languages and external players" className="rounded-xl border border-neutral-800 bg-[#0d0d0d] p-4 sm:p-5 space-y-3">

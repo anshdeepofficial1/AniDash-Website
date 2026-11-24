@@ -140,3 +140,5 @@ test("MAL invalid OAuth state is rejected without calling token exchange",async(
 });
 
 test("first playback sync fetches existing Android notes before writing",async()=>{const {client,queries}=aniHarness();await client.init();await client.syncPosition(21,381,345,1440,false);const mutation=queries.find(q=>q.query.includes("SaveMediaListEntry"));assert.equal(mutation.variables.progress,380);assert.match(mutation.variables.notes,/shx:ep=381&sec=345&dur=1440/);assert.match(mutation.variables.notes,/My personal note/);});
+
+test("offline checkpoint never overwrites a newer remote entry",async()=>{const {client,queries}=aniHarness();await client.init();await client.list();const result=await client.syncPosition(21,381,111,1440,false,999000);assert.equal(result.notes,cloudEntry.notes);assert.equal(queries.filter(x=>x.query.includes("SaveMediaListEntry")).length,0)});

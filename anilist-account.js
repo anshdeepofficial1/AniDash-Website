@@ -314,17 +314,22 @@
     if (data?.SaveMediaListEntry) entries.set(id, { ...existing, ...data.SaveMediaListEntry });
     return copy(data?.SaveMediaListEntry || null);
   }
-  async function syncPosition(mediaId, episode, seconds, duration, ended = false) {
+  async function syncPosition(mediaId, episode, seconds, duration, ended = false, observedAt = 0) {
     if (!authenticated()) return null;
     const id = Number(mediaId);
     const ep = Math.max(1, Math.floor(Number(episode) || 1));
     const sec = Math.max(0, Math.floor(Number(seconds) || 0));
     const dur = Math.max(0, Math.floor(Number(duration) || 0));
     if (!ended && dur > 0 && sec >= dur - 30) ended = true;
+    const userId = viewer.id;
     const previous = pendingProgress.get(id) || Promise.resolve();
     const requestPromise = previous.catch(() => {}).then(async () => {
-      if(!entries.has(id))await list(true);
+      if (!authenticated() || viewer.id !== userId) return null;
+      if(observedAt || !entries.has(id))await list(true);
+      if (!authenticated() || viewer.id !== userId) return null;
       const entry = entries.get(id);
+      // A recovered offline checkpoint must not replace a newer remote edit.
+      if(observedAt && Number(entry?.updatedAt||0)*1000 > observedAt) return copy(entry);
       // Android uses the number of fully watched episodes, never increment on a partial episode.
       const progress = Math.max(Number(entry?.progress || 0), ended ? ep : ep - 1);
       const noteText = formatWatchNotes(entry?.notes, ep, ended && dur > 0 ? dur : sec, dur);
@@ -334,6 +339,7 @@
         "mutation ($id:Int!,$status:MediaListStatus,$progress:Int,$notes:String) { SaveMediaListEntry(mediaId:$id,status:$status,progress:$progress,notes:$notes) {id mediaId status progress notes updatedAt} }",
         { id, status, progress, notes: noteText }
       );
+      if (!authenticated() || viewer.id !== userId) return null;
       if (data?.SaveMediaListEntry) {
         entries.set(id, { ...entry, ...data.SaveMediaListEntry });
         listAt=0;
