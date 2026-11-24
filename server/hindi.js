@@ -1,3 +1,4 @@
+import { gatewayFetch } from "./gateway.js";
 // Hindi dub sources from animehindi.fun. Best effort: when the title or episode cannot be matched the
 // response is empty and the player simply shows no Hindi button.
 const SITE = "https://animehindi.fun";
@@ -9,7 +10,7 @@ export const slugify = t => String(t || "").toLowerCase().normalize("NFKD").repl
 
 async function page(url) {
   try {
-    const r = await fetch(url, { headers: { "user-agent": UA, accept: "text/html" }, signal: AbortSignal.timeout(8000), redirect: "follow" });
+    const r = await gatewayFetch(url, { headers: { "user-agent": UA, accept: "text/html" }, signal: AbortSignal.timeout(8000), redirect: "follow" });
     return r.ok ? await r.text() : null;
   } catch { return null; }
 }

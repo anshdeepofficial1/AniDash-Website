@@ -1,3 +1,4 @@
+import { gatewayFetch } from "./gateway.js";
 // Animetsu provider (the same source the AniDash app uses as "Gojo"). Independent of JustAnime,
 // so playback keeps working when JustAnime's origin is down.
 const API = "https://animetsu.net/v2/api/anime";
@@ -7,7 +8,7 @@ const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,
 const HEADERS = { Accept: "application/json, text/plain, */*", Origin: SITE, Referer: SITE + "/", "User-Agent": UA };
 
 async function getJson(url, timeout = 8000) {
-  const response = await fetch(url, { headers: HEADERS, redirect: "follow", signal: AbortSignal.timeout(timeout) });
+  const response = await gatewayFetch(url, { headers: HEADERS, redirect: "follow", signal: AbortSignal.timeout(timeout) });
   if (!response.ok) throw new Error("HTTP " + response.status);
   return JSON.parse(await response.text());
 }

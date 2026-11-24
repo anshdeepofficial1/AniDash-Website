@@ -1,3 +1,4 @@
+import { gatewayFetch } from "../server/gateway.js";
 import crypto from "node:crypto";
 
 const API_BASE = String(process.env.HIANIME_API_URL || "https://shonenx-aniwatch-instance.vercel.app/api/v2/hianime").replace(/\/$/, "");
@@ -19,7 +20,7 @@ function send(res, status, body, cacheControl) {
 }
 
 async function requestJson(url, timeout = 6000) {
-  const response = await fetch(url, {
+  const response = await gatewayFetch(url, {
     headers: { Accept: "application/json, text/plain, */*", "User-Agent": UA },
     signal: AbortSignal.timeout(timeout)
   });
@@ -28,7 +29,7 @@ async function requestJson(url, timeout = 6000) {
 }
 
 async function requestText(url, timeout = 6000) {
-  const response = await fetch(url, {
+  const response = await gatewayFetch(url, {
     headers: { Accept: "text/html,application/xhtml+xml,*/*", "User-Agent": UA, Referer: SITE_BASE + "/" },
     signal: AbortSignal.timeout(timeout)
   });

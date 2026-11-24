@@ -1,3 +1,4 @@
+import { gatewayFetch, gatewayConfigured } from "../server/gateway.js";
 import { animetsuStreams } from "../server/animetsu.js";
 import { hindiHandler } from "../server/hindi.js";
 import { titleLogoHandler } from "../server/title-logo.js";
@@ -62,7 +63,7 @@ function allowedJustAnimePath(path) {
 }
 
 async function requestJson(url, timeout = 8500, signal) {
-  const response = await fetch(url, {
+  const response = await gatewayFetch(url, {
     headers: {
       Accept: "application/json, text/plain, */*",
       Origin: SITE,
@@ -242,7 +243,7 @@ async function episodes(req, animeId) {
 
 async function relayPath(path) {
   if (!allowedJustAnimePath(path)) throw new Error("Invalid JustAnime path");
-  const response = await fetch(API + path, {
+  const response = await gatewayFetch(API + path, {
     headers: {
       Accept: "application/json, text/plain, */*",
       Origin: SITE,
@@ -565,14 +566,14 @@ export default async function handler(req, res) {
       const report = await Promise.all(targets.map(async ([name, url]) => {
         const started = Date.now();
         try {
-          const r = await fetch(url, { headers: { Accept: "application/json, text/plain, */*", Origin: SITE, Referer: SITE + "/", "User-Agent": UA }, redirect: "follow", signal: AbortSignal.timeout(8000) });
+          const r = await gatewayFetch(url, { headers: { Accept: "application/json, text/plain, */*", Origin: SITE, Referer: SITE + "/", "User-Agent": UA }, redirect: "follow", signal: AbortSignal.timeout(8000) });
           const text = await r.text();
           return { name, url, status: r.status, ms: Date.now() - started, type: r.headers.get("content-type"), server: r.headers.get("server"), cfRay: r.headers.get("cf-ray"), body: text.replace(/\s+/g, " ").slice(0, 220) };
         } catch (error) {
           return { name, url, error: String(error?.cause?.code || error?.message || error), ms: Date.now() - started };
         }
       }));
-      return send(res, 200, { checkedAt: new Date().toISOString(), report }, "no-store");
+      return send(res, 200, { checkedAt: new Date().toISOString(), gateway: gatewayConfigured(), report }, "no-store");
     }
     if (action === "matrix") {
       // Per-server truth table: does each JustAnime server return a stream for this episode, and is the first
@@ -599,7 +600,7 @@ export default async function handler(req, res) {
           return { server, category, ok: false, error: String(e?.message || e).slice(0, 160), ms: Date.now() - started };
         }
       })));
-      return send(res, 200, { checkedAt: new Date().toISOString(), animeId, episode, rows }, "no-store");
+      return send(res, 200, { checkedAt: new Date().toISOString(), gateway: gatewayConfigured(), animeId, episode, rows }, "no-store");
     }
     if (action === "animetsu") {
       const animeId = String(req.query.id || "");
