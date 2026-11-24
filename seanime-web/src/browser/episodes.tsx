@@ -181,23 +181,25 @@ const JUSTANIME_SERVERS = ["momo", "onyx", "gigi", "nami", "calm", "revo"] as co
 const streamCache = new Map<string, { at: number, data: any }>()
 const streamErrors = new Map<string, string>()
 const streamInflight = new Map<string, Promise<any | null>>()
-function cachedJson(url: string, ttl = 4 * 60 * 1000): Promise<any | null> {
+function cachedJson(url: string, ttl = 30 * 1000): Promise<any | null> {
   const hit = streamCache.get(url)
   if (hit && Date.now() - hit.at < ttl) return Promise.resolve(hit.data)
   const running = streamInflight.get(url)
   if (running) return running
   const request = (async () => {
     try {
-      const res = await fetch(url, { signal: AbortSignal.timeout(16000) })
+      streamErrors.delete(url)
+      const res = await fetch(url, { cache: "no-store", signal: AbortSignal.timeout(16000) })
       if (!res.ok) {
         const body: any = await res.json().catch(() => null)
-        streamErrors.set(url.split("?")[0] + (url.includes("action=animetsu") ? "" : "") + (url.match(/action=(\w+)/)?.[1] || ""), String(body?.error || "HTTP " + res.status).slice(0, 110))
+        streamErrors.set(url, String(body?.error || "HTTP " + res.status).slice(0, 110))
       }
       const data: any = res.ok ? await res.json() : null
-      if (data && (Array.isArray(data.sources) ? data.sources.length : true)) streamCache.set(url, { at: Date.now(), data })
+      if (data && Array.isArray(data.sources) && data.sources.length) { streamCache.set(url, { at: Date.now(), data }); if (streamCache.size > 100) streamCache.delete(streamCache.keys().next().value!) }
+      if (streamErrors.size > 100) streamErrors.delete(streamErrors.keys().next().value!)
       return data
     } catch (e) {
-      streamErrors.set(url.split("?")[0] + (url.match(/action=(\w+)/)?.[1] || ""), (e as Error)?.name === "TimeoutError" ? "no answer in time" : "network error")
+      streamErrors.set(url, (e as Error)?.name === "TimeoutError" ? "no answer in time" : "network error")
       return null
     } finally {
       streamInflight.delete(url)
@@ -438,14 +440,14 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
   const [titleLogo, setTitleLogo] = React.useState<string | null>(null)
   const failedStreams = React.useRef<Set<string>>(new Set())
   const streamsRef = React.useRef<StreamSource[]>([])
+  const streamMetadata = React.useRef(new Map<string,{tracks:StreamTrack[],segments:SkipSegments}>())
   const stillResolving = React.useRef(false)
   const waitingForMoreSources = React.useRef(false)
-  streamsRef.current = streams
   const advanceStream = React.useCallback((failedUrl: string, hideServer = true): boolean => {
     failedStreams.current.add(failedUrl)
     const failed = streamsRef.current.find(s => s.url === failedUrl)
     if (hideServer && failed && failed.type !== "embed") markServerDead(failed.server)
-    if (failed?.provider) Engine.recordFailure(failed.provider, "playback failed", false)
+    if (failed?.provider && !streamsRef.current.some(s=>s.provider===failed.provider&&!failedStreams.current.has(s.url))) Engine.recordFailure(failed.provider, "playback failed", false)
     const next = streamsRef.current.find(s => !failedStreams.current.has(s.url))
     if (next) {
       waitingForMoreSources.current = false
@@ -456,6 +458,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     }
     // Other providers may still be loading; resume automatically when they arrive.
     waitingForMoreSources.current = stillResolving.current
+    if (waitingForMoreSources.current) { setError(""); setPlayerNotice("Waiting for another source…"); setBuffering(true); return true }
     return false
   }, [markServerDead])
   const [volume, setVolume] = React.useState(1)
@@ -656,7 +659,8 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     skippedSegments.current.clear()
 
     // Fetch server availability map in background (not for an explicitly selected local source).
-    if (!isCustomSource) fetch(`/api/justanime?action=servers&id=${entry.mediaId}&episode=${selected}&category=${audio}`)
+    setServerMap({})
+    if (!isCustomSource && Engine.isEnabled("justanime")) fetch(`/api/justanime?action=servers&id=${entry.mediaId}&episode=${selected}&category=${audio}`)
       .then(r => r.json())
       .then(d => {
         if (live && d?.serverMap) setServerMap(d.serverMap)
@@ -673,7 +677,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
       const serverParam = selectedServer || DEFAULT_SERVER
       const mal = m.idMal || ""
       let activated = false
-      let gotMeta = false
+      const attempted = new Map<string,string>()
       const forced = forcedEmbed.current
       forcedEmbed.current = null
       if (forced) {
@@ -691,11 +695,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
         for (const src of Array.isArray(data.sources) ? data.sources : []) if (src?.url) incoming.push(src)
         // External iframe players are never selected automatically: AniDash's own player always comes first.
         if (!incoming.length) return
-        if (!gotMeta && Array.isArray(data.sources) && data.sources.length) {
-          gotMeta = true
-          setTracks(Array.isArray(data.tracks) ? data.tracks : [])
-          setSegments({ intro: parseSkipInterval(data.intro), outro: parseSkipInterval(data.outro) })
-        }
+        for (const src of incoming) { streamMetadata.current.set(src.url, {tracks:Array.isArray(data.tracks)?data.tracks:[], segments:{intro:parseSkipInterval(data.intro),outro:parseSkipInterval(data.outro)}}) }
         setStreams(prev => {
           const known = new Set(prev.map(x => x.url))
           return [...prev, ...incoming.filter(x => !known.has(x.url))]
@@ -723,25 +723,27 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
         if(!activated&&live){setIsLoadingStream(false);setError("This installed source has no matching episode or audio. Choose another source.")}
         return
       }
-      streamErrors.clear()
       // One automatic second round: providers that were briefly unreachable often answer on the retry.
       for (let attempt = 0; attempt < 2 && live && !activated; attempt++) {
         if (attempt > 0) await new Promise(resolve => window.setTimeout(resolve, 1200))
         const startedAt = Date.now()
         const jobList = streamJobsFor(entry.mediaId, mal, selected, audio, serverParam, [m.title?.english, m.title?.romaji].filter(Boolean) as string[], { year: m.seasonYear || m.startDate?.year, eps: m.episodes, fmt: m.format })
+        if (!jobList.length) break
         // A provider counts as failed only when every one of its requests came back empty.
         const pending = new Map<string, { left: number, ok: boolean }>()
         for (const job of jobList) pending.set(job.provider, { left: (pending.get(job.provider)?.left || 0) + 1, ok: false })
         const jobs = jobList.map(job => getJson(job.url).then(data => {
+          if (!live) return null
           const state = pending.get(job.provider)!
           state.left--
-          const sources = Array.isArray(data?.sources) ? data.sources : []
-          if (sources.length) { state.ok = true; for (const src of sources) src.provider = job.provider; Engine.recordResolve(job.provider, Date.now() - startedAt) }
+          const sources = Array.isArray(data?.sources) ? data.sources.filter((s:StreamSource)=>s?.url && (typeof s.isDub!=="boolean" || s.isDub===(audio==="dub"))) : []
+          if (sources.length) { state.ok = true; Engine.recordResolve(job.provider, Date.now() - startedAt) }
           if (!state.ok && state.left === 0) {
-            const reason = streamErrors.get(job.url.split("?")[0] + (job.url.match(/action=(\w+)/)?.[1] || "")) || "no matching stream"
-            Engine.recordFailure(job.provider, reason, Engine.isPermanentError(reason))
+            const reason = streamErrors.get(job.url) || "no matching stream"
+            attempted.set(job.provider,reason)
+            if (Engine.isProviderOutage(reason)) Engine.recordFailure(job.provider, reason, Engine.isPermanentError(reason))
           }
-          return data
+          return data ? {...data,sources:sources.map((src:StreamSource)=>({...src,provider:job.provider}))} : null
         }))
         // All providers run in parallel. The preferred server gets a short head start (so Momo stays the
         // default), but a slow or dead provider never holds playback back: whoever answers first plays.
@@ -761,11 +763,8 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
       if (!live) return
       if (!activated) {
         setIsLoadingStream(false)
-        setSourceReport([...streamErrors].map(([key, reason]) => ({
-          name: key.includes("animetsu") ? "Animetsu" : key.includes("anikoto") ? "AniKoto" : key.includes("hianime") ? "HiAnime" : "JustAnime",
-          reason: friendlyReason(reason)
-        })))
-        setError(`AniDash's built-in servers can't play ${audio.toUpperCase()} Episode ${selected} right now.`)
+        setSourceReport([...attempted].map(([id,reason])=>({name:Engine.meta(id)?.name||id,reason:friendlyReason(reason)})))
+        setError(attempted.size ? `AniDash cannot play ${audio.toUpperCase()} Episode ${selected} right now. See source details below.` : "No enabled compatible source is available. Enable a source in Extensions or select an installed source.")
       } else if (waitingForMoreSources.current) {
         waitingForMoreSources.current = false
         setError("All available sources failed for this episode. Try SUB/DUB or another server.")
@@ -775,11 +774,12 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     setSourceReport(null)
     failedStreams.current.clear()
     streamsRef.current = []
+    streamMetadata.current.clear()
     stillResolving.current = true
     waitingForMoreSources.current = false
     setStreams([])
     setActiveStream(null)
-    resolveStreams()
+    void resolveStreams().catch(()=>{if(live){stillResolving.current=false;setIsLoadingStream(false);setBuffering(false);setError("Source resolution failed. Retry or check Extensions.")}})
     return () => {
       live = false
       stillResolving.current = false
@@ -796,6 +796,8 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     prefetchedEpisode.current = key
     streamUrlsFor(entry.mediaId, m.idMal || "", nextEpisode, audio, selectedServer || DEFAULT_SERVER, [m.title?.english, m.title?.romaji].filter(Boolean) as string[], { year: m.seasonYear || m.startDate?.year, eps: m.episodes, fmt: m.format }).forEach(url => { void cachedJson(url) })
   }, [watchMode, selected, total, isPlaying, currentTime >= 20, entry.mediaId, audio, selectedServer, isCustomSource])
+
+  React.useEffect(()=>{const metadata=activeStream?.url?streamMetadata.current.get(activeStream.url):undefined;setTracks(metadata?.tracks||[]);setSegments(metadata?.segments||EMPTY_SEGMENTS)},[activeStream?.url])
 
   // Playback & HLS setup
   React.useEffect(() => {
@@ -994,9 +996,9 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     if (!el) return
     const url = activeStream.url
     const timer = window.setTimeout(() => {
-      if (el.currentTime > 0.2 || el.readyState >= 3) return
+      if (playbackStarted.current || el.readyState >= 3) return
       if (manualPlaybackIntent.current === "pause") return
-      advanceStream(url)
+      if(!advanceStream(url)){setBuffering(false);setIsPlaying(false);setError("This source did not start within 14 seconds. Retry or select another source.")}
     }, 14000)
     return () => window.clearTimeout(timer)
   }, [activeStream?.url, activeStream?.type, isLoadingStream, error, playbackRevision, advanceStream])
@@ -1457,7 +1459,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     let live = true
     setLangEmbeds([])
     const t = m.title?.english || m.title?.romaji || ""
-    if (!t || !selected) return
+    if (!t || !selected || !Engine.isEnabled("hindi")) return
     const qs = "kind=" + (m.format === "MOVIE" ? "movie" : "tv") + "&episode=" + selected + "&title=" + encodeURIComponent(t) + "&alt=" + encodeURIComponent(m.title?.romaji || "") + "&total=" + (m.episodes || 0)
     fetch("/api/justanime?action=hindi&" + qs, { signal: AbortSignal.timeout(20000) })
       .then(r => (r.ok ? (r.json() as Promise<{ embeds?: Array<{ url: string; name?: string; id?: string; lang?: string }> }>) : null))

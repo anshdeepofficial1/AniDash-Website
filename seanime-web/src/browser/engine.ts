@@ -121,7 +121,7 @@ export function recordPlayStart(id: string, ms: number) {
 }
 /** Called once playback has been healthy for STABLE_MS. */
 export function recordStable(id: string, now = Date.now()) {
-  const h = rec(id); h.stableOk = (h.stableOk || 0) + 1; h.lastOk = now; h.lastVerified = now; h.strikes = 0; h.cooldownUntil = undefined; saveHealth()
+  const h = rec(id); h.stableOk = (h.stableOk || 0) + 1; h.stalls = 0; h.lastOk = now; h.lastVerified = now; h.strikes = 0; h.cooldownUntil = undefined; saveHealth()
 }
 export function recordPlaying(id: string, now = Date.now()) {
   const h = rec(id); h.ok++; h.lastOk = now; h.strikes = 0; h.cooldownUntil = undefined; saveHealth()
@@ -133,6 +133,8 @@ export function recordFailure(id: string, error: string, permanent = false, now 
   const step = Math.min(h.strikes - 1 + (permanent ? 2 : 0), 12)
   h.cooldownUntil = now + Math.min(COOLDOWN_MAX_MS, COOLDOWN_BASE_MS * 2 ** step); saveHealth()
 }
+// Missing episodes and empty results are title-specific, not evidence that an entire provider is down.
+export const isProviderOutage = (e: string) => /\b(401|403|429|5\d\d)\b|timeout|no answer in time|network error|offline|unreachable|forbidden|authenticate data/i.test(e)
 export const isPermanentError = (e: string) => /\b(401|403|404|410)\b|blocked|forbidden|not found|not listed|protection/i.test(e)
 
 // ---- status ----------------------------------------------------------------------------------

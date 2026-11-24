@@ -40,3 +40,6 @@ test("url validation blocks SSRF and insecure schemes",()=>{
 test("external search urls are encoded official hosts only",()=>{assert.match(E.externalSearchUrl("mangaplus","a&b c"),/^https:\/\/mangaplus\.shueisha\.co\.jp\/.*a%26b%20c/);assert.equal(E.externalSearchUrl("justanime","x"),null)});
 
 test("anime extension catalog excludes external publisher links and manga",()=>{const rows=E.animeExtensionCatalog();assert.ok(rows.some(p=>p.id==="justanime"));assert.ok(rows.every(p=>p.kind==="anime"&&p.delivery==="native"&&p.authorization!=="user"));for(const id of ["official-crunchyroll","official-netflix","official-prime","official-youtube"]){assert.equal(E.meta(id),undefined);assert.equal(E.externalSearchUrl(id,"title"),null)}});
+
+test("missing title does not imply provider outage",()=>{for(const reason of ["no matching stream","show not found","episode not listed","404"])assert.equal(E.isProviderOutage(reason),false);for(const reason of ["HTTP 523","HTTP 403","no answer in time","network error","unable to authenticate data"])assert.equal(E.isProviderOutage(reason),true)});
+test("stable playback clears previous buffering penalty",()=>{for(let i=0;i<6;i++)E.recordStall("justanime");E.recordPlaying("justanime",1000);E.recordStable("justanime",2000);assert.equal(E.statusOf("justanime",2001).status,"verified")});

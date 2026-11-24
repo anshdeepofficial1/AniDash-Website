@@ -13,7 +13,8 @@ const jsonHeaders = {
 
 function send(res, status, body, cacheControl) {
   Object.entries(jsonHeaders).forEach(([key, value]) => res.setHeader(key, value));
-  if (cacheControl) res.setHeader("Cache-Control", cacheControl);
+  if (status >= 400) res.setHeader("Cache-Control", "no-store");
+  else if (cacheControl) res.setHeader("Cache-Control", cacheControl);
   return res.status(status).json(body);
 }
 

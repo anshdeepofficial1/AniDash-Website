@@ -32,3 +32,6 @@ The Extensions catalog is anime-only and excludes external publisher/OTT links. 
 4. Subtitle default preference is not a setting yet (English tracks are listed first in the player; selection is manual).
 5. Update-available/repository management is limited to manifest import; no remote repository index exists.
 6. Screenshots were taken only from a local static build with mocked API (see PR).
+
+## Preview reliability follow-up (2026-11-24)
+Live preview API requests for One Piece episode 1 English dub returned JustAnime 502 (upstream 523/502), HiAnime 502 (authentication-data error), and AniKoto 502 (upstream 403/timeout). These are not playback successes. This change does not circumvent provider restrictions. Client changes: request-scoped errors, no global cooldown for missing episodes, empty provider list handled, late results isolated, per-stream subtitle/skip metadata, bounded cache, and no indefinite initial buffering. API error responses are no-store. No new upstream provider has been verified or added.
