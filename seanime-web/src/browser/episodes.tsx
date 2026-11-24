@@ -1,6 +1,7 @@
 import { episodeSources } from "./sources"
 import { useInstalledSources } from "./use-installed-sources"
-import { getEpisodeResume, localResume, persistPlayback, syncPlayback } from "./resume"
+import { getEpisodeResume, localResume, persistPlayback, syncPlayback, flushPlaybackQueue, parseManualPosition, formatPosition } from "./resume"
+import { embedProgressOrigin, readEmbedCheckpoint, type EmbedCheckpoint } from "./embed-progress"
 import React from "react"
 import { useRouter } from "@/lib/navigation"
 import Hls from "hls.js"
@@ -8,7 +9,6 @@ import { Anime_Entry } from "@/api/generated/types"
 import { Button } from "@/components/ui/button"
 import { getArcs } from "./arcs"
 import * as Engine from "./engine"
-import { embedCapability, parseEmbedMessage } from "./embed-progress"
 import {
   LuPlay,
   LuPause,
@@ -182,23 +182,25 @@ const JUSTANIME_SERVERS = ["momo", "onyx", "gigi", "nami", "calm", "revo"] as co
 const streamCache = new Map<string, { at: number, data: any }>()
 const streamErrors = new Map<string, string>()
 const streamInflight = new Map<string, Promise<any | null>>()
-function cachedJson(url: string, ttl = 4 * 60 * 1000): Promise<any | null> {
+function cachedJson(url: string, ttl = 30 * 1000): Promise<any | null> {
   const hit = streamCache.get(url)
   if (hit && Date.now() - hit.at < ttl) return Promise.resolve(hit.data)
   const running = streamInflight.get(url)
   if (running) return running
   const request = (async () => {
     try {
-      const res = await fetch(url, { signal: AbortSignal.timeout(16000) })
+      streamErrors.delete(url)
+      const res = await fetch(url, { cache: "no-store", signal: AbortSignal.timeout(16000) })
       if (!res.ok) {
         const body: any = await res.json().catch(() => null)
-        streamErrors.set(url.split("?")[0] + (url.includes("action=animetsu") ? "" : "") + (url.match(/action=(\w+)/)?.[1] || ""), String(body?.error || "HTTP " + res.status).slice(0, 110))
+        streamErrors.set(url, String(body?.error || "HTTP " + res.status).slice(0, 110))
       }
       const data: any = res.ok ? await res.json() : null
-      if (data && (Array.isArray(data.sources) ? data.sources.length : true)) streamCache.set(url, { at: Date.now(), data })
+      if (data && Array.isArray(data.sources) && data.sources.length) { streamCache.set(url, { at: Date.now(), data }); if (streamCache.size > 100) streamCache.delete(streamCache.keys().next().value!) }
+      if (streamErrors.size > 100) streamErrors.delete(streamErrors.keys().next().value!)
       return data
     } catch (e) {
-      streamErrors.set(url.split("?")[0] + (url.match(/action=(\w+)/)?.[1] || ""), (e as Error)?.name === "TimeoutError" ? "no answer in time" : "network error")
+      streamErrors.set(url, (e as Error)?.name === "TimeoutError" ? "no answer in time" : "network error")
       return null
     } finally {
       streamInflight.delete(url)
@@ -214,7 +216,7 @@ function streamJobsFor(id: number, mal: number | string, episode: number, audio:
   const urls: Record<string, string[]> = {
     justanime: [`/api/justanime?action=streams&${base}&server=${server}`, `/api/justanime?action=streams&${base}&server=auto`],
     animetsu: [`/api/justanime?action=animetsu&${base}&title=${encodeURIComponent(titles[0] || "")}&alt=${encodeURIComponent(titles[1] || "")}`],
-    hianime: [`/api/hianime?action=streams&${base}`],
+    hianime: [`/api/hianime?action=streams&${base}&anilistId=${id}`],
     anikoto: [`/api/anikoto?action=auto&anilistId=${id}&episode=${episode}&category=${audio}&title=${encodeURIComponent(titles[0] || "")}&alt=${encodeURIComponent(titles[1] || "")}&year=${meta.year || ""}&eps=${meta.eps || ""}&fmt=${meta.fmt || ""}`],
   }
   const lang = Engine.languageKey(audio)
@@ -439,14 +441,14 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
   const [titleLogo, setTitleLogo] = React.useState<string | null>(null)
   const failedStreams = React.useRef<Set<string>>(new Set())
   const streamsRef = React.useRef<StreamSource[]>([])
+  const streamMetadata = React.useRef(new Map<string,{tracks:StreamTrack[],segments:SkipSegments}>())
   const stillResolving = React.useRef(false)
   const waitingForMoreSources = React.useRef(false)
-  streamsRef.current = streams
   const advanceStream = React.useCallback((failedUrl: string, hideServer = true): boolean => {
     failedStreams.current.add(failedUrl)
     const failed = streamsRef.current.find(s => s.url === failedUrl)
     if (hideServer && failed && failed.type !== "embed") markServerDead(failed.server)
-    if (failed?.provider) Engine.recordFailure(failed.provider, "playback failed", false)
+    if (failed?.provider && !stillResolving.current && !streamsRef.current.some(s=>s.provider===failed.provider&&!failedStreams.current.has(s.url))) Engine.recordFailure(failed.provider, "playback failed", false)
     const next = streamsRef.current.find(s => !failedStreams.current.has(s.url))
     if (next) {
       waitingForMoreSources.current = false
@@ -457,6 +459,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     }
     // Other providers may still be loading; resume automatically when they arrive.
     waitingForMoreSources.current = stillResolving.current
+    if (waitingForMoreSources.current) { setError(""); setPlayerNotice("Waiting for another source…"); setBuffering(true); return true }
     return false
   }, [markServerDead])
   const [volume, setVolume] = React.useState(1)
@@ -494,6 +497,12 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
   const [metaRevision, setMetaRevision] = React.useState(0)
 
   const video = React.useRef<HTMLVideoElement>(null)
+  const embeddedFrame = React.useRef<HTMLIFrameElement>(null)
+  const embeddedCheckpoint = React.useRef<{url:string;episode:number;mediaId:number;value:EmbedCheckpoint;at:number;savedAt:number}|null>(null)
+  const [embedTracking,setEmbedTracking]=React.useState(false)
+  const embedResumeGate=React.useRef<{ready:boolean;target:number;accepted:boolean}>({ready:false,target:0,accepted:false})
+  const [embedResumeTarget,setEmbedResumeTarget]=React.useState(0)
+  const [embedResumePending,setEmbedResumePending]=React.useState(false)
   const seekDraftRef = React.useRef<number | null>(null)
   const seekDragging = React.useRef(false)
   const decodedPreviews = React.useRef(new Map<number, SeekImage>())
@@ -657,7 +666,8 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     skippedSegments.current.clear()
 
     // Fetch server availability map in background (not for an explicitly selected local source).
-    if (!isCustomSource) fetch(`/api/justanime?action=servers&id=${entry.mediaId}&episode=${selected}&category=${audio}`)
+    setServerMap({})
+    if (!isCustomSource && Engine.isEnabled("justanime")) fetch(`/api/justanime?action=servers&id=${entry.mediaId}&episode=${selected}&category=${audio}`)
       .then(r => r.json())
       .then(d => {
         if (live && d?.serverMap) setServerMap(d.serverMap)
@@ -674,7 +684,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
       const serverParam = selectedServer || DEFAULT_SERVER
       const mal = m.idMal || ""
       let activated = false
-      let gotMeta = false
+      const attempted = new Map<string,string>()
       const forced = forcedEmbed.current
       forcedEmbed.current = null
       if (forced) {
@@ -692,11 +702,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
         for (const src of Array.isArray(data.sources) ? data.sources : []) if (src?.url) incoming.push(src)
         // External iframe players are never selected automatically: AniDash's own player always comes first.
         if (!incoming.length) return
-        if (!gotMeta && Array.isArray(data.sources) && data.sources.length) {
-          gotMeta = true
-          setTracks(Array.isArray(data.tracks) ? data.tracks : [])
-          setSegments({ intro: parseSkipInterval(data.intro), outro: parseSkipInterval(data.outro) })
-        }
+        for (const src of incoming) { streamMetadata.current.set(src.url, {tracks:Array.isArray(data.tracks)?data.tracks:[], segments:{intro:parseSkipInterval(data.intro),outro:parseSkipInterval(data.outro)}}) }
         setStreams(prev => {
           const known = new Set(prev.map(x => x.url))
           return [...prev, ...incoming.filter(x => !known.has(x.url))]
@@ -724,25 +730,27 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
         if(!activated&&live){setIsLoadingStream(false);setError("This installed source has no matching episode or audio. Choose another source.")}
         return
       }
-      streamErrors.clear()
       // One automatic second round: providers that were briefly unreachable often answer on the retry.
       for (let attempt = 0; attempt < 2 && live && !activated; attempt++) {
         if (attempt > 0) await new Promise(resolve => window.setTimeout(resolve, 1200))
         const startedAt = Date.now()
         const jobList = streamJobsFor(entry.mediaId, mal, selected, audio, serverParam, [m.title?.english, m.title?.romaji].filter(Boolean) as string[], { year: m.seasonYear || m.startDate?.year, eps: m.episodes, fmt: m.format })
+        if (!jobList.length) break
         // A provider counts as failed only when every one of its requests came back empty.
         const pending = new Map<string, { left: number, ok: boolean }>()
         for (const job of jobList) pending.set(job.provider, { left: (pending.get(job.provider)?.left || 0) + 1, ok: false })
         const jobs = jobList.map(job => getJson(job.url).then(data => {
+          if (!live) return null
           const state = pending.get(job.provider)!
           state.left--
-          const sources = Array.isArray(data?.sources) ? data.sources : []
-          if (sources.length) { state.ok = true; for (const src of sources) src.provider = job.provider; Engine.recordResolve(job.provider, Date.now() - startedAt) }
+          const sources = Array.isArray(data?.sources) ? data.sources.filter((s:StreamSource)=>s?.url && (typeof s.isDub!=="boolean" || s.isDub===(audio==="dub"))) : []
+          if (sources.length) { state.ok = true; Engine.recordResolve(job.provider, Date.now() - startedAt) }
           if (!state.ok && state.left === 0) {
-            const reason = streamErrors.get(job.url.split("?")[0] + (job.url.match(/action=(\w+)/)?.[1] || "")) || "no matching stream"
-            if (!Engine.isEpisodeMiss(reason)) Engine.recordFailure(job.provider, reason, Engine.isPermanentError(reason))
+            const reason = streamErrors.get(job.url) || "no matching stream"
+            attempted.set(job.provider,reason)
+            if (Engine.isProviderOutage(reason)) Engine.recordFailure(job.provider, reason, Engine.isPermanentError(reason))
           }
-          return data
+          return data ? {...data,sources:sources.map((src:StreamSource)=>({...src,provider:job.provider}))} : null
         }))
         // All providers run in parallel. The preferred server gets a short head start (so Momo stays the
         // default), but a slow or dead provider never holds playback back: whoever answers first plays.
@@ -762,11 +770,8 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
       if (!live) return
       if (!activated) {
         setIsLoadingStream(false)
-        setSourceReport([...streamErrors].map(([key, reason]) => ({
-          name: key.includes("animetsu") ? "Animetsu" : key.includes("anikoto") ? "AniKoto" : key.includes("hianime") ? "HiAnime" : "JustAnime",
-          reason: friendlyReason(reason)
-        })))
-        setError(`AniDash's built-in servers can't play ${audio.toUpperCase()} Episode ${selected} right now.`)
+        setSourceReport([...attempted].map(([id,reason])=>({name:Engine.meta(id)?.name||id,reason:friendlyReason(reason)})))
+        setError(attempted.size ? `AniDash cannot play ${audio.toUpperCase()} Episode ${selected} right now. See source details below.` : "No enabled compatible source is available. Enable a source in Extensions or select an installed source.")
       } else if (waitingForMoreSources.current) {
         waitingForMoreSources.current = false
         setError("All available sources failed for this episode. Try SUB/DUB or another server.")
@@ -776,11 +781,12 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     setSourceReport(null)
     failedStreams.current.clear()
     streamsRef.current = []
+    streamMetadata.current.clear()
     stillResolving.current = true
     waitingForMoreSources.current = false
     setStreams([])
     setActiveStream(null)
-    resolveStreams()
+    void resolveStreams().catch(()=>{if(live){stillResolving.current=false;setIsLoadingStream(false);setBuffering(false);setError("Source resolution failed. Retry or check Extensions.")}})
     return () => {
       live = false
       stillResolving.current = false
@@ -797,6 +803,8 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     prefetchedEpisode.current = key
     streamUrlsFor(entry.mediaId, m.idMal || "", nextEpisode, audio, selectedServer || DEFAULT_SERVER, [m.title?.english, m.title?.romaji].filter(Boolean) as string[], { year: m.seasonYear || m.startDate?.year, eps: m.episodes, fmt: m.format }).forEach(url => { void cachedJson(url) })
   }, [watchMode, selected, total, isPlaying, currentTime >= 20, entry.mediaId, audio, selectedServer, isCustomSource])
+
+  React.useEffect(()=>{const metadata=activeStream?.url?streamMetadata.current.get(activeStream.url):undefined;setTracks(metadata?.tracks||[]);setSegments(metadata?.segments||EMPTY_SEGMENTS)},[activeStream?.url])
 
   // Playback & HLS setup
   React.useEffect(() => {
@@ -995,9 +1003,9 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     if (!el) return
     const url = activeStream.url
     const timer = window.setTimeout(() => {
-      if (el.currentTime > 0.2 || el.readyState >= 3) return
+      if (playbackStarted.current || el.readyState >= 3) return
       if (manualPlaybackIntent.current === "pause") return
-      advanceStream(url)
+      if(!advanceStream(url)){setBuffering(false);setIsPlaying(false);setError("This source did not start within 14 seconds. Retry or select another source.")}
     }, 14000)
     return () => window.clearTimeout(timer)
   }, [activeStream?.url, activeStream?.type, isLoadingStream, error, playbackRevision, advanceStream])
@@ -1385,6 +1393,20 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
 
   // Watch progress recording & AniList cross-device sync
   function record(force = false, ended = false) {
+    if(activeStream?.type==="embed"){
+      const checkpoint=embeddedCheckpoint.current
+      if(!checkpoint||checkpoint.url!==activeStream.url||checkpoint.episode!==selected||checkpoint.mediaId!==m.id||checkpoint.at===checkpoint.savedAt)return
+      const value=checkpoint.value
+      if(!force&&Date.now()-lastSaved.current<5000)return
+      lastSaved.current=Date.now()
+      persistPlayback(m,selected,value.position,value.duration,value.ended)
+      if(force||value.ended||Date.now()-lastSynced.current>=10000){
+        checkpoint.savedAt=checkpoint.at
+        lastSynced.current=Date.now()
+        void syncPlayback(m,selected,value.position,value.duration,value.ended).then(ok=>setSyncState(ok?"Synced with AniList":"Saved locally · cloud sync pending or not signed in")).catch(()=>setSyncState("Saved locally · cloud sync pending"))
+      }
+      return
+    }
     const el = video.current
     if (!el || !selected || mountedMediaEpisode.current !== selected || !Number.isFinite(el.duration) || el.duration <= 0) return
     // Leaving in the last 30 seconds (credits) counts as finished, so the next episode is what resumes.
@@ -1400,7 +1422,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
       syncBusy.current = true
       setSyncState("Saving progress…")
       void syncPlayback(m, selected, position, el.duration, ended)
-        .then(ok => setSyncState(ok ? "Synced with AniList" : "Saved on this device"))
+        .then(ok => setSyncState(ok ? "Synced with AniList" : "Saved locally · cloud sync pending or not signed in"))
         .catch(() => {
           lastSynced.current = 0
           setSyncState("Saved on this device · AniList sync failed")
@@ -1416,44 +1438,14 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     const save = () => {
       if (document.visibilityState === "hidden") record(true)
     }
-    const leave = () => record(true)
+    const pagehide=()=>record(true)
+    const reconnect=()=>{void flushPlaybackQueue().catch(()=>{})}
     document.addEventListener("visibilitychange", save)
-    window.addEventListener("pagehide", leave)
-    return () => { document.removeEventListener("visibilitychange", save); window.removeEventListener("pagehide", leave) }
+    window.addEventListener("pagehide",pagehide)
+    window.addEventListener("online",reconnect)
+    reconnect()
+    return () => {document.removeEventListener("visibilitychange", save);window.removeEventListener("pagehide",pagehide);window.removeEventListener("online",reconnect)}
   }, [watchMode, selected, activeStream?.url])
-
-  // Embedded players: accept real position only from a provider with a documented postMessage API
-  // (validated origin + the iframe's own window). Other embeds are reported as untracked; nothing is fabricated.
-  const embedFrame = React.useRef<HTMLIFrameElement | null>(null)
-  const embedCap = activeStream?.type === "embed" ? embedCapability(activeStream.url) : null
-  React.useEffect(() => {
-    if (!watchMode || !selected || !embedCap?.progress) return
-    let lastLocal = 0, lastRemote = 0, last: { position: number, duration: number } | null = null
-    const ep = selected
-    const onMessage = (ev: MessageEvent) => {
-      if (!embedFrame.current || ev.source !== embedFrame.current.contentWindow) return
-      const p = parseEmbedMessage(ev.origin, ev.data, embedCap)
-      if (!p) return
-      const position = p.ended && !p.duration ? (last?.duration || 0) : p.position
-      const duration = p.ended && !p.duration ? (last?.duration || 0) : p.duration
-      if (duration <= 0) return
-      last = { position, duration }
-      const now = Date.now()
-      if (!p.ended && now - lastLocal < 5000) return
-      lastLocal = now
-      persistPlayback(m, ep, p.ended ? duration : position, duration, p.ended)
-      if (p.ended || now - lastRemote >= 15000) {
-        lastRemote = now
-        void syncPlayback(m, ep, p.ended ? duration : position, duration, p.ended).then(ok => setSyncState(ok ? "Synced with AniList" : "Saved on this device")).catch(() => setSyncState("Saved on this device · will sync when online"))
-      }
-    }
-    const flush = () => { if (last) { persistPlayback(m, ep, last.position, last.duration, false); void syncPlayback(m, ep, last.position, last.duration, false).catch(() => {}) } }
-    const hide = () => { if (document.visibilityState === "hidden") flush() }
-    window.addEventListener("message", onMessage)
-    document.addEventListener("visibilitychange", hide)
-    window.addEventListener("pagehide", flush)
-    return () => { window.removeEventListener("message", onMessage); document.removeEventListener("visibilitychange", hide); window.removeEventListener("pagehide", flush); flush() }
-  }, [watchMode, selected, embedCap?.origin, activeStream?.url])
 
   // Navigation handlers
   function openEpisode(n: number, alreadyRecorded = false) {
@@ -1487,13 +1479,58 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     router.push(`/entry?id=${entry.mediaId}`)
   }
 
+  React.useEffect(()=>{
+    embeddedCheckpoint.current=null;setEmbedTracking(false);setEmbedResumeTarget(0);setEmbedResumePending(false)
+    embedResumeGate.current={ready:false,target:0,accepted:false}
+    if(activeStream?.type!=="embed")return
+    const url=activeStream.url,origin=embedProgressOrigin(url)
+    let live=true
+    void getEpisodeResume(m,selected).then(target=>{if(!live)return;embedResumeGate.current={ready:true,target,accepted:target<5};setEmbedResumeTarget(target);setEmbedResumePending(target>=5)}).catch(()=>{if(live)embedResumeGate.current={ready:true,target:0,accepted:true}})
+    if(!origin)return()=>{live=false}
+    const receive=(event:MessageEvent)=>{
+      if(event.origin!==origin||!embeddedFrame.current||event.source!==embeddedFrame.current.contentWindow)return
+      const previous=embeddedCheckpoint.current
+      const value=readEmbedCheckpoint(origin,event.data,previous?.value||null)
+      if(!value)return
+      const gate=embedResumeGate.current
+      if(!gate.ready)return
+      if(!gate.accepted){if(value.position<Math.max(0,gate.target-5))return;gate.accepted=true;setEmbedResumePending(false)}
+      if(previous&&previous.value.position===value.position&&previous.value.duration===value.duration&&previous.value.ended===value.ended)return
+      embeddedCheckpoint.current={url,episode:selected,mediaId:m.id,value,at:Date.now(),savedAt:previous?.savedAt||0}
+      setEmbedTracking(true)
+      record(value.ended)
+    }
+    window.addEventListener("message",receive)
+    return()=>{live=false;window.removeEventListener("message",receive)}
+  },[activeStream?.url,activeStream?.type,selected,m.id])
+
+  const [manualPosition,setManualPosition]=React.useState("")
+  const [manualDuration,setManualDuration]=React.useState("")
+  const [manualMessage,setManualMessage]=React.useState("")
+  React.useEffect(()=>{
+    if(activeStream?.type!=="embed")return
+    let live=true;setManualMessage("");setManualPosition("");setManualDuration("")
+    void getEpisodeResume(m,selected).then(sec=>{if(live&&sec>0)setManualPosition(formatPosition(sec))}).catch(()=>{})
+    const local=localResume(m);if(local?.episode===selected&&local.duration>0)setManualDuration(formatPosition(local.duration))
+    return()=>{live=false}
+  },[activeStream?.url,selected,m.id])
+  async function saveManualCheckpoint(){
+    const seconds=parseManualPosition(manualPosition),duration=parseManualPosition(manualDuration)
+    if(seconds===null||duration===null||duration<=0||seconds>=duration){setManualMessage("Enter your actual position and total duration (MM:SS or HH:MM:SS). Position must be before the end.");return}
+    embeddedCheckpoint.current=null
+    embedResumeGate.current={ready:true,target:seconds,accepted:true};setEmbedResumePending(false)
+    persistPlayback(m,selected,seconds,duration,false)
+    setManualMessage("Checkpoint saved locally. Syncing…")
+    try{const ok=await syncPlayback(m,selected,seconds,duration,false);setManualMessage(ok?"Checkpoint synced with AniList. Seek to this time on the other player.":"Checkpoint saved locally; cloud sync pending or not signed in.")}catch{setManualMessage("Checkpoint saved locally; cloud sync pending.")}
+  }
+
   // Language players (animehindi.fun and similar) are loaded per episode and shown in their own section.
   const [langEmbeds, setLangEmbeds] = React.useState<StreamSource[]>([])
   React.useEffect(() => {
     let live = true
     setLangEmbeds([])
     const t = m.title?.english || m.title?.romaji || ""
-    if (!t || !selected) return
+    if (!t || !selected || !Engine.isEnabled("hindi")) return
     const qs = "kind=" + (m.format === "MOVIE" ? "movie" : "tv") + "&episode=" + selected + "&title=" + encodeURIComponent(t) + "&alt=" + encodeURIComponent(m.title?.romaji || "") + "&total=" + (m.episodes || 0)
     fetch("/api/justanime?action=hindi&" + qs, { signal: AbortSignal.timeout(20000) })
       .then(r => (r.ok ? (r.json() as Promise<{ embeds?: Array<{ url: string; name?: string; id?: string; lang?: string }> }>) : null))
@@ -1511,7 +1548,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
       { server: "MegaPlay", serverId: "megaplay-" + lang, url: mal ? `https://megaplay.buzz/stream/mal/${mal}/${ep}/${lang}` : `https://megaplay.buzz/stream/ani/${m.id}/${ep}/${lang}` },
       { server: "Megavid", serverId: "megavid-" + lang, url: mal ? `https://megavid.buzz/mal/${mal}/${ep}/${lang}?color=%23e63946&autoplay=true` : `https://megavid.buzz/ani/${m.id}/${ep}/${lang}?color=%23e63946&autoplay=true` },
       { server: "AniXo", serverId: "anixo-" + lang, url: `https://anixo.buzz/embed/ani/${m.id}/${ep}/${lang}?color=%23e63946` }
-    ].filter(e => Engine.isEnabled("embed-" + e.serverId.split("-")[0])).map(e => ({ ...e, type: "embed", isDub: lang === "dub" }) as StreamSource)
+    ].map(e => ({ ...e, type: "embed", isDub: lang === "dub" }) as StreamSource)
     const groups: Array<{ key: string; label: string; note?: string; tone: "sky" | "amber"; items: StreamSource[] }> = [
       { key: "en-sub", label: "SUB", note: "Japanese", tone: "sky", items: english("sub") },
       { key: "en-dub", label: "DUB", note: "English", tone: "sky", items: english("dub") }
@@ -1525,8 +1562,10 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     return groups
   }
   function openExternal(e: StreamSource) {
+    record(true)
     setError(""); setAccessDenied(false); setPlayerNotice("")
     setStreams(prev => (prev.some(x => x.url === e.url) ? prev : [...prev, e]))
+    if (!streamsRef.current.some(x=>x.url===e.url)) streamsRef.current = [...streamsRef.current,e]
     setActiveStream(e)
   }
   function changeAudio(a: "dub" | "sub") {
@@ -2085,7 +2124,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
               </div>
             )}
             {activeStream?.type === "embed" && (
-              <button data-embed-bar type="button" className="absolute left-2 top-2 z-[45] rounded-full bg-black/60 px-2.5 py-1 text-[11px] font-medium text-white/90 hover:bg-black/80" onClick={() => { failedStreams.current.clear(); const native = streamsRef.current.find(x => x.type !== "embed"); if (native) setActiveStream(native); else setResolveNonce(n => n + 1) }}>
+              <button data-embed-bar type="button" className="absolute left-2 top-2 z-[45] rounded-full bg-black/60 px-2.5 py-1 text-[11px] font-medium text-white/90 hover:bg-black/80" onClick={() => { record(true); failedStreams.current.clear(); const native = streamsRef.current.find(x => x.type !== "embed"); if (native) setActiveStream(native); else setResolveNonce(n => n + 1) }}>
                 ← AniDash player
               </button>
             )}
@@ -2093,20 +2132,14 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
             {/* Embedded partner player (MegaPlay, Megavid, AniXo). Covers the custom controls, which only drive the native video element. */}
             {activeStream?.type === "embed" && !isLoadingStream && (
               <iframe
-                ref={embedFrame}
                 key={activeStream.url}
+                ref={embeddedFrame}
                 src={activeStream.url}
                 title={"AniDash " + (activeStream.server || "embed") + " player"}
                 allow="autoplay; fullscreen; picture-in-picture; encrypted-media"
                 allowFullScreen
                 className="absolute inset-0 z-[25] h-full w-full border-0 bg-black"
               />
-            )}
-            {activeStream?.type === "embed" && !isLoadingStream && (
-              <div className="pointer-events-none absolute left-2 top-2 z-[26] max-w-[85%] rounded-md bg-black/70 px-2 py-1 text-[11px] leading-tight text-white" role="status">
-                {(activeStream.server || "Embedded") + " player"}{embedCap?.progress ? " · exact progress is saved" : " · progress isn't tracked for this player"}
-                {embedCap?.progress && (() => { const r = localResume(m); const t = r && r.episode === selected ? Math.floor(r.seconds) : 0; return t > 30 ? ` · last saved ${Math.floor(t / 60)}:${String(t % 60).padStart(2, "0")} (drag the bar to it)` : "" })()}
-              </div>
             )}
 
             {/* Video Element */}
@@ -2451,6 +2484,13 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
             <h2 className="text-sm font-semibold">Installed browser sources</h2>
             <p className="text-xs text-neutral-400">Selecting a source connects directly to its media host. Use only media you are authorized to access.</p>
             {(["sub","dub"] as const).map(channel=>{const options=[...new Map(episodeSources(installedBrowserSources,entry.mediaId,selected,channel).map(e=>[e.sourceId,e])).values()];return options.length>0&&<div key={channel} className="flex flex-wrap items-center gap-2"><span className="text-xs text-neutral-300 w-14">{channel.toUpperCase()}</span>{options.map(e=><button key={e.sourceId} type="button" aria-pressed={selectedServer===customSourcePrefix+e.sourceId&&audio===channel} className={`rounded-lg px-3.5 py-1.5 text-xs font-medium ${selectedServer===customSourcePrefix+e.sourceId&&audio===channel?"bg-white text-black":"bg-[#1e1e1e] text-neutral-300 hover:bg-[#2a2a2a]"}`} onClick={()=>pickServer(customSourcePrefix+e.sourceId,channel)}>{e.sourceName}</button>)}</div>})}
+          </section>}
+          {activeStream?.type==="embed"&&<section aria-label="Embedded player progress" className="rounded-xl border border-neutral-800 bg-[#0d0d0d] p-4 space-y-3">
+            <h2 className="text-sm font-semibold">Playback checkpoint</h2>
+            {embedResumePending&&<div className="flex flex-wrap items-center gap-2 text-xs text-neutral-300"><span>Resume at <strong>{formatPosition(embedResumeTarget)}</strong> in the embedded player. Progress before that time will not overwrite your saved checkpoint.</span><button className="rounded border border-neutral-600 px-2 py-1" onClick={()=>{embedResumeGate.current.accepted=true;setEmbedResumePending(false)}}>Start over instead</button></div>}
+            <p className="text-xs text-neutral-400">{embedTracking?"Actual playback timestamps are being received. AniDash saves them to your account; automatic seeking on this embedded player is not verified.":"Waiting for supported playback events. If none arrive, enter the actual position shown by the player. Automatic seeking is not verified."}</p>
+            <div className="flex flex-wrap gap-3 items-end"><label className="text-xs">Current position<input aria-label="Current position" className="block rounded-lg border border-neutral-700 bg-black p-2 mt-1 w-32" placeholder="14:37" value={manualPosition} onChange={e=>setManualPosition(e.target.value)}/></label><label className="text-xs">Total duration<input aria-label="Total duration" className="block rounded-lg border border-neutral-700 bg-black p-2 mt-1 w-32" placeholder="23:40" value={manualDuration} onChange={e=>setManualDuration(e.target.value)}/></label><button className="rounded-lg px-3 py-2 bg-white text-black text-xs font-semibold" onClick={()=>void saveManualCheckpoint()}>Save checkpoint</button></div>
+            {manualMessage&&<p role="status" className="text-xs text-neutral-300">{manualMessage}</p>}
           </section>}
           {/* External and language players: separate from the built-in AniDash servers. */}
           <section aria-label="Languages and external players" className="rounded-xl border border-neutral-800 bg-[#0d0d0d] p-4 sm:p-5 space-y-3">

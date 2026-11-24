@@ -1,40 +1,21 @@
-// Embedded-player progress adapter. Only providers that publish a documented postMessage API are trusted.
-// Nothing here fabricates progress: a position is accepted only from a validated message sent by the
-// approved provider origin through the provider's own iframe window.
-
-export type EmbedCapability = { name: string; origin: string; progress: boolean; seek: boolean; startAt: boolean; note: string }
-
-export const EMBED_PLAYERS: EmbedCapability[] = [
-  { name: "MegaPlay", origin: "https://megaplay.buzz", progress: true, seek: false, startAt: false,
-    note: "Documented postMessage events (time, complete, watching-log). Exact position is saved; the player has no documented seek or start-time option, so resuming means scrubbing to the saved time." },
-  { name: "Megavid", origin: "https://megavid.buzz", progress: false, seek: false, startAt: false,
-    note: "No documented player events could be confirmed. Playback works but exact position is not tracked." },
-  { name: "AniXo", origin: "https://anixo.buzz", progress: false, seek: false, startAt: false,
-    note: "No documented player events could be confirmed. Playback works but exact position is not tracked." },
-]
-
-export function embedOrigin(url: string): string | null {
-  try { const u = new URL(url); return u.protocol === "https:" ? u.origin : null } catch { return null }
-}
-export function embedCapability(url: string): EmbedCapability | null {
-  const o = embedOrigin(url); return o ? EMBED_PLAYERS.find(p => p.origin === o) || null : null
-}
-
-export type EmbedProgress = { position: number; duration: number; ended: boolean }
-
-const num = (v: unknown) => typeof v === "number" && Number.isFinite(v) ? v : null
-
-/** Returns a normalised progress record, or null for anything untrusted or malformed. */
-export function parseEmbedMessage(origin: string, data: unknown, approved: EmbedCapability | null): EmbedProgress | null {
-  if (!approved || !approved.progress || origin !== approved.origin) return null
-  let msg: any = data
-  if (typeof msg === "string") { if (msg.length > 4096) return null; try { msg = JSON.parse(msg) } catch { return null } }
-  if (!msg || typeof msg !== "object" || Array.isArray(msg)) return null
-  if (msg.event === "complete") return { position: 0, duration: 0, ended: true }
-  let t: number | null = null, d: number | null = null
-  if (msg.event === "time") { t = num(msg.time); d = num(msg.duration) }
-  else if (msg.type === "watching-log") { t = num(msg.currentTime); d = num(msg.duration) }
-  else return null
-  if (t == null || d == null || t < 0 || d <= 0 || d > 86_400 || t > d + 1) return null
-  return { position: Math.min(t, d), duration: d, ended: d - t <= 30 }
+// Playback telemetry only. No stream retrieval, authentication bypass, or player injection.
+export type EmbedCheckpoint={position:number;duration:number;ended:boolean}
+const supported=new Set(["https://megaplay.buzz","https://megavid.buzz","https://anixo.buzz"])
+export function embedProgressOrigin(url:string){try{const origin=new URL(url).origin;return supported.has(origin)?origin:null}catch{return null}}
+export function readEmbedCheckpoint(origin:string,raw:unknown,previous:EmbedCheckpoint|null=null):EmbedCheckpoint|null{
+ if(!supported.has(origin))return null
+ let d:any=raw;if(typeof raw==="string"){if(raw.length>4096)return null;try{d=JSON.parse(raw)}catch{return null}}
+ if(!d||typeof d!=="object"||Array.isArray(d))return null
+ const anixo=origin==="https://anixo.buzz"
+ const channel=origin==="https://megaplay.buzz"?"megacloud":"kisskh"
+ const log=!anixo&&d.type==="watching-log"
+ const time=anixo?["aniembed:timeupdate","aniembed:pause","aniembed:play"].includes(d.type):d.channel===channel&&d.event==="time"
+ const ended=anixo?d.type==="aniembed:ended":d.channel===channel&&d.event==="complete"
+ if(!log&&!time&&!ended)return null
+ const duration=typeof d.duration==="number"?d.duration:ended?previous?.duration:undefined
+ const position=typeof d.currentTime==="number"?d.currentTime:typeof d.time==="number"?d.time:ended?previous?.position:undefined
+ if(typeof duration!=="number"||typeof position!=="number"||!Number.isFinite(duration)||!Number.isFinite(position)||duration<=0||duration>86400||position<0||position>duration+2)return null
+ // Do not turn an isolated premature completion message into a completed episode.
+ if(ended&&duration-position>30)return null
+ return {position:ended?duration:Math.min(position,duration),duration,ended}
 }

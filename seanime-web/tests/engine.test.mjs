@@ -38,15 +38,8 @@ test("url validation blocks SSRF and insecure schemes",()=>{
  assert.equal(E.isSafeHttpsUrl("https://mangaplus.shueisha.co.jp/x"),true);
 });
 test("external search urls are encoded official hosts only",()=>{assert.match(E.externalSearchUrl("mangaplus","a&b c"),/^https:\/\/mangaplus\.shueisha\.co\.jp\/.*a%26b%20c/);assert.equal(E.externalSearchUrl("justanime","x"),null)});
-test("marketplace is anime-only native/embed adapters; no streaming-platform directories",()=>{
- const anime=E.PROVIDERS.filter(p=>p.kind==="anime");
- assert.ok(!anime.some(p=>/crunchyroll|netflix|prime|youtube/i.test(p.id+p.name)));
- assert.ok(anime.every(p=>p.delivery!=="external"));
- assert.equal(E.isInstalled(E.meta("embed-megaplay")),true);assert.equal(E.isInstalled(E.meta("anikai")),false);
- assert.ok(!E.plan("anime","en-dub").some(p=>p.delivery==="embed"));
-});
-test("a missing episode is not a provider failure",()=>{
- assert.equal(E.isEpisodeMiss("no matching stream"),true);assert.equal(E.isEpisodeMiss("No DUB streams were returned by available servers"),true);
- assert.equal(E.isEpisodeMiss("HTTP 502"),false);assert.equal(E.isEpisodeMiss("fetch failed"),false);assert.equal(E.isEpisodeMiss("HTTP 523"),false);
-});
-test("miss message that carries an upstream error is still a failure",()=>{assert.equal(E.isEpisodeMiss("No DUB streams were returned by available servers: JustAnime upstream returned HTTP 523"),false)});
+
+test("anime extension catalog excludes external publisher links and manga",()=>{const rows=E.animeExtensionCatalog();assert.ok(rows.some(p=>p.id==="justanime"));assert.ok(rows.every(p=>p.kind==="anime"&&p.delivery==="native"&&p.authorization!=="user"));for(const id of ["official-crunchyroll","official-netflix","official-prime","official-youtube"]){assert.equal(E.meta(id),undefined);assert.equal(E.externalSearchUrl(id,"title"),null)}});
+
+test("missing title does not imply provider outage",()=>{for(const reason of ["no matching stream","show not found","episode not listed","404"])assert.equal(E.isProviderOutage(reason),false);for(const reason of ["HTTP 523","HTTP 403","no answer in time","network error","unable to authenticate data"])assert.equal(E.isProviderOutage(reason),true)});
+test("stable playback clears previous buffering penalty",()=>{for(let i=0;i<6;i++)E.recordStall("justanime");E.recordPlaying("justanime",1000);E.recordStable("justanime",2000);assert.equal(E.statusOf("justanime",2001).status,"verified")});

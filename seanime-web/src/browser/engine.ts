@@ -33,9 +33,6 @@ export const PROVIDERS: ProviderMeta[] = [
   { id: "animeonsen", name: "AnimeOnsen", kind: "anime", delivery: "native", authorization: "third-party", version: 0, languages: [], priority: 91, incompatibleReason: "Android-only adapter; requires an authenticated token flow that is not exposed to the web.", description: "Present in the Android app only." },
   { id: "kaido", name: "Kaido", kind: "anime", delivery: "native", authorization: "third-party", version: 0, languages: [], priority: 92, incompatibleReason: "Android-only adapter; site is defunct/unstable.", description: "Present in the Android app only." },
   { id: "anizone", name: "AniZone", kind: "anime", delivery: "native", authorization: "third-party", version: 0, languages: [], priority: 93, incompatibleReason: "Android-only adapter; no reviewed web integration.", description: "Present in the Android app only." },
-  { id: "embed-megaplay", name: "MegaPlay (embedded player)", kind: "anime", delivery: "embed", authorization: "third-party", version: 1, languages: ["en-dub", "ja-sub"], priority: 60, description: "Provider's own embedded player. Exact progress is saved through its documented postMessage events; no seek/start-time option." },
-  { id: "embed-megavid", name: "Megavid (embedded player)", kind: "anime", delivery: "embed", authorization: "third-party", version: 1, languages: ["en-dub", "ja-sub"], priority: 61, description: "Provider's own embedded player. Playback only; progress tracking is not available." },
-  { id: "embed-anixo", name: "AniXo (embedded player)", kind: "anime", delivery: "embed", authorization: "third-party", version: 1, languages: ["en-dub", "ja-sub"], priority: 62, description: "Provider's own embedded player. Playback only; progress tracking is not available." },
   { id: "manifest", name: "User manifests", kind: "anime", delivery: "native", authorization: "user", version: 2, languages: ["en-dub", "ja-sub"], priority: 5, description: "Sources you import yourself (JSON manifest of media you are licensed to use)." },
   { id: "mangaplus", name: "MANGA Plus", kind: "manga", delivery: "external", authorization: "official", version: 1, languages: ["en"], priority: 10, recommended: true, homepage: "https://mangaplus.shueisha.co.jp", description: "Official SHUEISHA reader. Opens a search on the official site; pages are never copied." },
   { id: "viz", name: "VIZ", kind: "manga", delivery: "external", authorization: "official", version: 1, languages: ["en"], priority: 20, homepage: "https://www.viz.com", description: "Official VIZ reader. Opens a search on the official site." },
@@ -45,6 +42,9 @@ export const PROVIDERS: ProviderMeta[] = [
   { id: "mangabat", name: "MangaBat", kind: "manga", delivery: "native", authorization: "third-party", version: 0, languages: [], priority: 92, incompatibleReason: "Unlicensed scanlation host; not authorised, Android-only adapter.", description: "Present in the Android app only." },
   { id: "asura", name: "AsuraScans", kind: "manga", delivery: "native", authorization: "third-party", version: 0, languages: [], priority: 93, incompatibleReason: "Unlicensed scanlation host; not authorised, Android-only adapter.", description: "Present in the Android app only." },
 ]
+
+// The Extensions catalog contains only anime source adapters; publisher links stay outside it.
+export const animeExtensionCatalog = () => PROVIDERS.filter(p => p.kind === "anime" && p.delivery === "native" && p.authorization !== "user")
 
 export type Health = {
   ok: number; fail: number
@@ -99,7 +99,6 @@ function savePrefs() { try { ls()?.setItem(PREFS_KEY, JSON.stringify(loadPrefs()
 
 export const meta = (id: string) => PROVIDERS.find(p => p.id === id)
 export const isRunnable = (p: ProviderMeta) => !p.incompatibleReason && p.delivery === "native" && p.version > 0
-export const isInstalled = (p: ProviderMeta) => !p.incompatibleReason && p.version > 0 && (p.delivery === "native" || p.delivery === "embed")
 
 export function isEnabled(id: string) { return !loadPrefs().disabled.includes(id) }
 export function setEnabled(id: string, on: boolean) {
@@ -122,7 +121,7 @@ export function recordPlayStart(id: string, ms: number) {
 }
 /** Called once playback has been healthy for STABLE_MS. */
 export function recordStable(id: string, now = Date.now()) {
-  const h = rec(id); h.stableOk = (h.stableOk || 0) + 1; h.lastOk = now; h.lastVerified = now; h.strikes = 0; h.cooldownUntil = undefined; saveHealth()
+  const h = rec(id); h.stableOk = (h.stableOk || 0) + 1; h.stalls = 0; h.lastOk = now; h.lastVerified = now; h.strikes = 0; h.cooldownUntil = undefined; saveHealth()
 }
 export function recordPlaying(id: string, now = Date.now()) {
   const h = rec(id); h.ok++; h.lastOk = now; h.strikes = 0; h.cooldownUntil = undefined; saveHealth()
@@ -134,8 +133,8 @@ export function recordFailure(id: string, error: string, permanent = false, now 
   const step = Math.min(h.strikes - 1 + (permanent ? 2 : 0), 12)
   h.cooldownUntil = now + Math.min(COOLDOWN_MAX_MS, COOLDOWN_BASE_MS * 2 ** step); saveHealth()
 }
-/** An empty result for one episode says nothing about the provider's health, so it must not trigger a cooldown. */
-export const isEpisodeMiss = (e: string) => !e || !/\b(?:5\d\d|40[13]|timeout|timed out|fetch failed|econn|enotfound|abort|network)/i.test(e) && /no matching stream|no (?:sub|dub|hindi|english)?\s*streams?|not available for this episode|episode (?:not|is not)|no episode|could not match|not listed|no results/i.test(e)
+// Missing episodes and empty results are title-specific, not evidence that an entire provider is down.
+export const isProviderOutage = (e: string) => /\b(401|403|429|5\d\d)\b|timeout|no answer in time|network error|offline|unreachable|forbidden|authenticate data/i.test(e)
 export const isPermanentError = (e: string) => /\b(401|403|404|410)\b|blocked|forbidden|not found|not listed|protection/i.test(e)
 
 // ---- status ----------------------------------------------------------------------------------
@@ -144,7 +143,6 @@ export function statusOf(id: string, now = Date.now(), health = loadHealth()): {
   if (!p) return { status: "unverified", label: "Unverified", detail: "Unknown source" }
   if (p.incompatibleReason || p.version === 0) return { status: "incompatible", label: "Incompatible", detail: p.incompatibleReason || "No browser adapter" }
   if (p.delivery === "external") return { status: "available", label: "Available", detail: "Opens the official provider in a new tab" }
-  if (p.delivery === "embed") return { status: "unverified", label: "Unverified", detail: "Plays inside the provider's own player. Playback is not verified by AniDash and is clearly labelled in the player." }
   const h = health[id]
   if (h?.cooldownUntil && h.cooldownUntil > now) return { status: "unavailable", label: "Temporarily unavailable", detail: `${h.lastError || "Recent failures"} — retry after ${new Date(h.cooldownUntil).toLocaleTimeString()}` }
   if (!h || (!h.ok && !h.fail)) return { status: "unverified", label: "Unverified", detail: "Not played on this device yet" }
@@ -193,9 +191,6 @@ export function externalSearchUrl(id: string, title: string): string | null {
   switch (id) {
     case "mangaplus": return `https://mangaplus.shueisha.co.jp/search_result?keyword=${q}`
     case "viz": return `https://www.viz.com/search?search=${q}`
-    case "official-crunchyroll": return `https://www.crunchyroll.com/search?q=${q}`
-    case "official-netflix": return `https://www.netflix.com/search?q=${q}`
-    case "official-prime": return `https://www.primevideo.com/search/?phrase=${q}`
     default: return null
   }
 }
