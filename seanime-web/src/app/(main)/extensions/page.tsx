@@ -32,7 +32,7 @@ function useEngineTick() {
 
 export default function Page() {
   useEngineTick()
-  const [kind, setKind] = React.useState<Engine.MediaKind>("anime")
+  const kind: Engine.MediaKind = "anime"
   const [view, setView] = React.useState<"installed" | "available" | "all">("all")
   const [query, setQuery] = React.useState("")
   const [lang, setLang] = React.useState("")
@@ -46,7 +46,7 @@ export default function Page() {
   const prefs = Engine.loadPrefs()
 
   const rows = Engine.PROVIDERS.filter(p => p.kind === kind && p.authorization !== "user").filter(p => {
-    const runnable = Engine.isRunnable(p)
+    const runnable = Engine.isInstalled(p)
     if (view === "installed" && !(runnable && Engine.isEnabled(p.id))) return false
     if (view === "available" && runnable) return false
     if (query && !(p.name + " " + p.description).toLowerCase().includes(query.toLowerCase())) return false
@@ -81,12 +81,10 @@ export default function Page() {
     <PageWrapper className="p-4 sm:p-8 space-y-6 max-w-5xl mx-auto w-full overflow-x-hidden">
       <header className="space-y-1">
         <h1 className="text-2xl font-bold">Extensions</h1>
-        <p className="text-sm text-[--muted]">Sources are reviewed web adapters, official provider links, or manifests you import. Android APK/Dart extensions cannot run in a browser, and nothing here downloads or runs remote code. Statuses come from real playback on this device — a green badge is never shown for a source that has not played.</p>
+        <p className="text-sm text-[--muted]">Anime sources are reviewed web adapters, providers' own embedded players, or manifests you import. Manga lives on its own page. Android APK/Dart extensions cannot run in a browser, and nothing here downloads or runs remote code. Statuses come from real playback on this device — a green badge is never shown for a source that has not played.</p>
       </header>
 
       <div className="flex flex-wrap gap-2 items-center" role="tablist">
-        {(["anime", "manga"] as const).map(k => <button key={k} role="tab" aria-selected={kind === k} className={chip(kind === k)} onClick={() => { setKind(k); setLang("") }}>{k === "anime" ? "Anime" : "Manga"}</button>)}
-        <span className="mx-1 h-5 border-l border-[--border]" />
         {(["all", "installed", "available"] as const).map(v => <button key={v} className={chip(view === v)} onClick={() => setView(v)}>{v === "all" ? "All" : v === "installed" ? "Installed" : "Available / not runnable"}</button>)}
       </div>
 
@@ -106,7 +104,7 @@ export default function Page() {
         {!rows.length && <p className="text-[--muted]">No sources match.</p>}
         {rows.map(p => {
           const st = Engine.statusOf(p.id)
-          const runnable = Engine.isRunnable(p)
+          const runnable = Engine.isInstalled(p)
           const enabled = Engine.isEnabled(p.id)
           const h = Engine.loadHealth()[p.id]
           return <article key={p.id} className="border border-[--border] rounded-xl p-4 bg-[--paper] space-y-2 min-w-0">

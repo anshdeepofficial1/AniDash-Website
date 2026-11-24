@@ -1,3 +1,4 @@
+import * as Q from "./sync-queue"
 const KEY="anidash.watch.web.v1"
 const account=()=> (window as any).AniDashAccount
 export function readWatchState(){try{return JSON.parse(localStorage.getItem(KEY)||"{}")}catch{return {}}}
@@ -12,4 +13,7 @@ export async function browserContinueWatching(force=false){const s=readWatchStat
 }
 export async function getEpisodeResume(m:any,episode:number){let local=localResume(m),remote=null;const a=account();if(a){try{if(!a.authenticated?.())await a.init();if(a.authenticated?.()){try{await a.list(true)}catch{}remote=remoteResume(a.getEntry(m.id))}}catch{}}const best=chooseResume(local,remote);return best?.episode===episode?best.seconds:0}
 export function persistPlayback(m:any,episode:number,position:number,duration:number,ended=false){const s=readWatchState();const h={media:m,episode,position,duration,ended,updatedAt:Date.now()};saveWatchState({...s,history:{...s.history,[m.id]:h},watchlist:{...s.watchlist,[m.id]:m},libraryStatuses:{...s.libraryStatuses,[m.id]:ended&&released(m)===episode&&m.status==="FINISHED"?"COMPLETED":"CURRENT"}});return h}
-export async function syncPlayback(m:any,episode:number,position:number,duration:number,ended=false){const a=account();if(!a?.authenticated?.())return false;await a.syncPosition(m.id,episode,position,duration,ended);window.dispatchEvent(new Event("anidash-watch-progress"));return true}
+export async function syncPlayback(m:any,episode:number,position:number,duration:number,ended=false){const a=account();if(!a?.authenticated?.())return false;const item:Q.QueueItem={mediaId:m.id,episode,position:Math.floor(position),duration:Math.floor(duration),ended,at:Date.now(),session:Q.SESSION,platform:"web"};try{if(typeof navigator!=="undefined"&&navigator.onLine===false)throw new Error("offline");await a.syncPosition(m.id,episode,position,duration,ended);Q.dequeue(m.id,item.at);window.dispatchEvent(new Event("anidash-watch-progress"));return true}catch(e){Q.enqueue(item);throw e}}
+/** Replays progress saved while offline; a write is dropped if another device saved something newer in the meantime. */
+export async function flushSyncQueue(){const a=account();if(!a?.authenticated?.()||!Q.pending().length)return null;return Q.flush(i=>a.syncPosition(i.mediaId,i.episode,i.position,i.duration,i.ended),async id=>{await a.list(true);const e=a.getEntry(id);return e?.updatedAt?Number(e.updatedAt)*1000:null})}
+if(typeof window!=="undefined"){const go=()=>{void flushSyncQueue().then(r=>{if(r?.sent)window.dispatchEvent(new Event("anidash-watch-progress"))}).catch(()=>{})};window.addEventListener("online",go);document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible")go()});setTimeout(go,4000)}

@@ -38,3 +38,15 @@ test("url validation blocks SSRF and insecure schemes",()=>{
  assert.equal(E.isSafeHttpsUrl("https://mangaplus.shueisha.co.jp/x"),true);
 });
 test("external search urls are encoded official hosts only",()=>{assert.match(E.externalSearchUrl("mangaplus","a&b c"),/^https:\/\/mangaplus\.shueisha\.co\.jp\/.*a%26b%20c/);assert.equal(E.externalSearchUrl("justanime","x"),null)});
+test("marketplace is anime-only native/embed adapters; no streaming-platform directories",()=>{
+ const anime=E.PROVIDERS.filter(p=>p.kind==="anime");
+ assert.ok(!anime.some(p=>/crunchyroll|netflix|prime|youtube/i.test(p.id+p.name)));
+ assert.ok(anime.every(p=>p.delivery!=="external"));
+ assert.equal(E.isInstalled(E.meta("embed-megaplay")),true);assert.equal(E.isInstalled(E.meta("anikai")),false);
+ assert.ok(!E.plan("anime","en-dub").some(p=>p.delivery==="embed"));
+});
+test("a missing episode is not a provider failure",()=>{
+ assert.equal(E.isEpisodeMiss("no matching stream"),true);assert.equal(E.isEpisodeMiss("No DUB streams were returned by available servers"),true);
+ assert.equal(E.isEpisodeMiss("HTTP 502"),false);assert.equal(E.isEpisodeMiss("fetch failed"),false);assert.equal(E.isEpisodeMiss("HTTP 523"),false);
+});
+test("miss message that carries an upstream error is still a failure",()=>{assert.equal(E.isEpisodeMiss("No DUB streams were returned by available servers: JustAnime upstream returned HTTP 523"),false)});

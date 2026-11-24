@@ -33,3 +33,30 @@
 4. Subtitle default preference is not a setting yet (English tracks are listed first in the player; selection is manual).
 5. Update-available/repository management is limited to manifest import; no remote repository index exists.
 6. Screenshots were taken only from a local static build with mocked API (see PR).
+
+---
+# Update 2: playback sync, embedded players, native servers
+
+## Cross-device position sync (audit result)
+Android (`CloudWatchProgressSync`) and the website already share one record: the AniList/MAL list entry `notes` field carries `shx:ep=<episode>&sec=<seconds>&dur=<duration>`. The website reads and writes the same tag (`anilist-account.js`, covered by `tests/cross-device-sync.test.js`), so **no Android change and no new backend are needed**. Limits of this channel: one record per anime (the latest episode), second-level precision, no per-device/session fields, and the timestamp is AniList's `updatedAt`. AniList tokens never leave the browser except to AniList.
+
+Added here:
+- Saves on pause, seek, source/episode change, close, `visibilitychange`, **`pagehide`**, end, and every 5 s locally / ≥10 s remotely during real playback (existing, kept).
+- **Offline queue** (`sync-queue.ts`): newest item per anime, replayed on `online`/tab visible/startup. A queued write is **dropped** if AniList shows a newer write from another device (`updatedAt` > action time + 2 s); a deliberate rewind is applied because ordering is by action time, not by "largest position".
+
+## Embedded players
+| Player | Progress tracking | Evidence |
+|---|---|---|
+| MegaPlay | **Yes** – `postMessage` `{event:"time",time,duration}`, `{type:"watching-log",currentTime,duration}`, `{event:"complete"}` | Provider's API page (megaplay.buzz/api). No seek / start-time option is documented, so returning shows "last saved mm:ss — drag the bar to it". |
+| Megavid | No | No documentation could be fetched/confirmed. Kept working, labelled "progress isn't tracked". |
+| AniXo | No | Same. |
+`embed-progress.ts` accepts messages only from the exact approved origin **and** the player's own iframe window, validates the schema and ranges, and never invents progress from a timer.
+
+## Marketplace changes
+Anime-only. Netflix/Prime/Crunchyroll/YouTube entries and the Manga tab were removed from Extensions (manga stays on its own page). Embedded players are listed as "Embedded player" sources and can be disabled. An episode that a provider doesn't have no longer triggers a cooldown for the whole provider.
+
+## Native servers (momo, onyx, gigi, nami, calm, revo, zoko, neko)
+New diagnostic: `/api/justanime?action=matrix&id=21&episode=440` returns, per server and audio, whether a stream is returned and whether the first media URL is really fetchable (HLS must start with `#EXTM3U`). Use it on the preview to see which servers truly work from Vercel.
+
+## Still not verified (sandbox cannot reach providers/Vercel)
+No live playback, no 14:37-style Android↔website round trip, no Playwright run against the preview. Android-side changes: none required.

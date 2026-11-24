@@ -574,6 +574,33 @@ export default async function handler(req, res) {
       }));
       return send(res, 200, { checkedAt: new Date().toISOString(), report }, "no-store");
     }
+    if (action === "matrix") {
+      // Per-server truth table: does each JustAnime server return a stream for this episode, and is the first
+      // media URL actually fetchable with the headers the player would use? (HLS must start with #EXTM3U.)
+      const animeId = String(req.query.id || "21");
+      const episode = String(req.query.episode || "1");
+      if (!/^\d{1,12}$/.test(animeId) || !/^\d{1,5}$/.test(episode)) return send(res, 400, { error: "id and episode required" });
+      const cats = req.query.category === "dub" ? ["dub"] : req.query.category === "sub" ? ["sub"] : ["sub", "dub"];
+      const ids = ["momo", "onyx", "gigi", "nami", "calm", "revo", "zokoanime", "anineko"];
+      const rows = await Promise.all(cats.flatMap(category => ids.map(async server => {
+        const started = Date.now();
+        try {
+          const out = await streams(req, animeId, episode, server, category);
+          const src = out.sources[0];
+          let media = null;
+          try {
+            const u = new URL(src.originalUrl);
+            const r = await fetch(u, { headers: { "User-Agent": UA, Accept: "*/*", Referer: out.headers?.Referer || out.headers?.referer || "https://justanime.to/" }, signal: AbortSignal.timeout(7000) });
+            const head = (await r.text()).slice(0, 12);
+            media = { host: u.host, status: r.status, playable: r.ok && (!src.isM3U8 || head.startsWith("#EXTM3U")) };
+          } catch (e) { media = { error: String(e?.cause?.code || e?.message || e).slice(0, 80) }; }
+          return { server, category, ok: true, sources: out.sources.length, hls: !!src.isM3U8, subtitles: (out.tracks || []).length, media, ms: Date.now() - started };
+        } catch (e) {
+          return { server, category, ok: false, error: String(e?.message || e).slice(0, 160), ms: Date.now() - started };
+        }
+      })));
+      return send(res, 200, { checkedAt: new Date().toISOString(), animeId, episode, rows }, "no-store");
+    }
     if (action === "animetsu") {
       const animeId = String(req.query.id || "");
       const episode = String(req.query.episode || "");

@@ -8,6 +8,7 @@ import { Anime_Entry } from "@/api/generated/types"
 import { Button } from "@/components/ui/button"
 import { getArcs } from "./arcs"
 import * as Engine from "./engine"
+import { embedCapability, parseEmbedMessage } from "./embed-progress"
 import {
   LuPlay,
   LuPause,
@@ -739,7 +740,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
           if (sources.length) { state.ok = true; for (const src of sources) src.provider = job.provider; Engine.recordResolve(job.provider, Date.now() - startedAt) }
           if (!state.ok && state.left === 0) {
             const reason = streamErrors.get(job.url.split("?")[0] + (job.url.match(/action=(\w+)/)?.[1] || "")) || "no matching stream"
-            Engine.recordFailure(job.provider, reason, Engine.isPermanentError(reason))
+            if (!Engine.isEpisodeMiss(reason)) Engine.recordFailure(job.provider, reason, Engine.isPermanentError(reason))
           }
           return data
         }))
@@ -1415,9 +1416,44 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     const save = () => {
       if (document.visibilityState === "hidden") record(true)
     }
+    const leave = () => record(true)
     document.addEventListener("visibilitychange", save)
-    return () => document.removeEventListener("visibilitychange", save)
+    window.addEventListener("pagehide", leave)
+    return () => { document.removeEventListener("visibilitychange", save); window.removeEventListener("pagehide", leave) }
   }, [watchMode, selected, activeStream?.url])
+
+  // Embedded players: accept real position only from a provider with a documented postMessage API
+  // (validated origin + the iframe's own window). Other embeds are reported as untracked; nothing is fabricated.
+  const embedFrame = React.useRef<HTMLIFrameElement | null>(null)
+  const embedCap = activeStream?.type === "embed" ? embedCapability(activeStream.url) : null
+  React.useEffect(() => {
+    if (!watchMode || !selected || !embedCap?.progress) return
+    let lastLocal = 0, lastRemote = 0, last: { position: number, duration: number } | null = null
+    const ep = selected
+    const onMessage = (ev: MessageEvent) => {
+      if (!embedFrame.current || ev.source !== embedFrame.current.contentWindow) return
+      const p = parseEmbedMessage(ev.origin, ev.data, embedCap)
+      if (!p) return
+      const position = p.ended && !p.duration ? (last?.duration || 0) : p.position
+      const duration = p.ended && !p.duration ? (last?.duration || 0) : p.duration
+      if (duration <= 0) return
+      last = { position, duration }
+      const now = Date.now()
+      if (!p.ended && now - lastLocal < 5000) return
+      lastLocal = now
+      persistPlayback(m, ep, p.ended ? duration : position, duration, p.ended)
+      if (p.ended || now - lastRemote >= 15000) {
+        lastRemote = now
+        void syncPlayback(m, ep, p.ended ? duration : position, duration, p.ended).then(ok => setSyncState(ok ? "Synced with AniList" : "Saved on this device")).catch(() => setSyncState("Saved on this device · will sync when online"))
+      }
+    }
+    const flush = () => { if (last) { persistPlayback(m, ep, last.position, last.duration, false); void syncPlayback(m, ep, last.position, last.duration, false).catch(() => {}) } }
+    const hide = () => { if (document.visibilityState === "hidden") flush() }
+    window.addEventListener("message", onMessage)
+    document.addEventListener("visibilitychange", hide)
+    window.addEventListener("pagehide", flush)
+    return () => { window.removeEventListener("message", onMessage); document.removeEventListener("visibilitychange", hide); window.removeEventListener("pagehide", flush); flush() }
+  }, [watchMode, selected, embedCap?.origin, activeStream?.url])
 
   // Navigation handlers
   function openEpisode(n: number, alreadyRecorded = false) {
@@ -1475,7 +1511,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
       { server: "MegaPlay", serverId: "megaplay-" + lang, url: mal ? `https://megaplay.buzz/stream/mal/${mal}/${ep}/${lang}` : `https://megaplay.buzz/stream/ani/${m.id}/${ep}/${lang}` },
       { server: "Megavid", serverId: "megavid-" + lang, url: mal ? `https://megavid.buzz/mal/${mal}/${ep}/${lang}?color=%23e63946&autoplay=true` : `https://megavid.buzz/ani/${m.id}/${ep}/${lang}?color=%23e63946&autoplay=true` },
       { server: "AniXo", serverId: "anixo-" + lang, url: `https://anixo.buzz/embed/ani/${m.id}/${ep}/${lang}?color=%23e63946` }
-    ].map(e => ({ ...e, type: "embed", isDub: lang === "dub" }) as StreamSource)
+    ].filter(e => Engine.isEnabled("embed-" + e.serverId.split("-")[0])).map(e => ({ ...e, type: "embed", isDub: lang === "dub" }) as StreamSource)
     const groups: Array<{ key: string; label: string; note?: string; tone: "sky" | "amber"; items: StreamSource[] }> = [
       { key: "en-sub", label: "SUB", note: "Japanese", tone: "sky", items: english("sub") },
       { key: "en-dub", label: "DUB", note: "English", tone: "sky", items: english("dub") }
@@ -2057,6 +2093,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
             {/* Embedded partner player (MegaPlay, Megavid, AniXo). Covers the custom controls, which only drive the native video element. */}
             {activeStream?.type === "embed" && !isLoadingStream && (
               <iframe
+                ref={embedFrame}
                 key={activeStream.url}
                 src={activeStream.url}
                 title={"AniDash " + (activeStream.server || "embed") + " player"}
@@ -2064,6 +2101,12 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
                 allowFullScreen
                 className="absolute inset-0 z-[25] h-full w-full border-0 bg-black"
               />
+            )}
+            {activeStream?.type === "embed" && !isLoadingStream && (
+              <div className="pointer-events-none absolute left-2 top-2 z-[26] max-w-[85%] rounded-md bg-black/70 px-2 py-1 text-[11px] leading-tight text-white" role="status">
+                {(activeStream.server || "Embedded") + " player"}{embedCap?.progress ? " · exact progress is saved" : " · progress isn't tracked for this player"}
+                {embedCap?.progress && (() => { const r = localResume(m); const t = r && r.episode === selected ? Math.floor(r.seconds) : 0; return t > 30 ? ` · last saved ${Math.floor(t / 60)}:${String(t % 60).padStart(2, "0")} (drag the bar to it)` : "" })()}
+              </div>
             )}
 
             {/* Video Element */}
