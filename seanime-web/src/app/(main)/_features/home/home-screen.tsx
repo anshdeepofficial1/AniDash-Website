@@ -1,3 +1,4 @@
+import { useUiLanguage } from "@/browser/ui-language"
 import { BrowserContinueWatching } from "@/browser/continue-watching"
 import { AL_ListRecentAnime_Page_AiringSchedules, Anime_ScheduleItem, Models_HomeItem } from "@/api/generated/types"
 import { useAnilistListAnime, useAnilistListRecentAiringAnime } from "@/api/hooks/anilist.hooks"
@@ -61,6 +62,7 @@ export const __home_currentView = atom<"base" | "detailed">("base")
 export const __home_discoverHeaderType = atomWithStorage<"anime" | "manga">("sea-home-discover-header-type", "anime", undefined, { getOnInit: true })
 
 export function HomeScreen() {
+    const {t}=useUiLanguage()
     const serverStatus = useServerStatus()
     const { data: _homeItems, isLoading: isLoadingItems } = useGetHomeItems()
 
@@ -183,7 +185,7 @@ export function HomeScreen() {
                 />
 
                 <div className="text-center space-y-6 py-10 z-[10] relative">
-                    <h2>Your home screen is empty</h2>
+                    <h2>{t("Your home screen is empty")}</h2>
 
                     {!!serverStatus?.settings?.library?.libraryPath && <>
                         <Button
@@ -236,7 +238,7 @@ export function HomeScreen() {
 
                 </div>
 
-                <h3>Trending Right Now</h3>
+                <h3>{t("Trending Right Now")}</h3>
                 <DiscoverTrending />
 
                 <div data-home-screen-item-divider className="h-8" />
@@ -445,6 +447,7 @@ export type HomeScreenItemProps = {
 }
 
 export function HomeScreenItem(props: HomeScreenItemProps) {
+    const {t}=useUiLanguage()
     const { item: _item, index } = props
     const {
         libraryGenres,
@@ -590,7 +593,7 @@ export function HomeScreenItem(props: HomeScreenItemProps) {
     if (item.type === "missed-sequels") {
         return (
             <PageWrapper className="px-4">
-                <DiscoverMissedSequelsSection title="Missed Sequels" />
+                <DiscoverMissedSequelsSection title={t("Missed Sequels")} />
             </PageWrapper>
         )
     }
@@ -623,27 +626,27 @@ export function HomeScreenItem(props: HomeScreenItemProps) {
                 >
                     {!isNakamaLibrary && <div>
                         <h3>{data?.stats?.totalSize ?? "-"}</h3>
-                        <p>Library</p>
+                        <p>{t("Library")}</p>
                     </div>}
                     <div>
                         <h3>{data?.stats?.totalFiles ?? "-"}</h3>
-                        <p>Files</p>
+                        <p>{t("Files")}</p>
                     </div>
                     <div>
                         <h3>{data?.stats?.totalEntries ?? "-"}</h3>
-                        <p>Entries</p>
+                        <p>{t("Entries")}</p>
                     </div>
                     <div>
                         <h3>{data?.stats?.totalShows ?? "-"}</h3>
-                        <p>TV Shows</p>
+                        <p>{t("TV Shows")}</p>
                     </div>
                     <div>
                         <h3>{data?.stats?.totalMovies ?? "-"}</h3>
-                        <p>Movies</p>
+                        <p>{t("Movies")}</p>
                     </div>
                     <div>
                         <h3>{data?.stats?.totalSpecials ?? "-"}</h3>
-                        <p>Specials</p>
+                        <p>{t("Specials")}</p>
                     </div>
                 </div>
             </PageWrapper>
@@ -935,6 +938,7 @@ function AnimeCarousel(props: { libraryCollectionProps: HandleLibraryCollectionP
 }
 
 function MyLists(props: { item: Models_HomeItem }) {
+    const {t}=useUiLanguage()
     const { item } = props
 
     const {
@@ -957,23 +961,23 @@ function MyLists(props: { item: Models_HomeItem }) {
                 <AnilistAnimeEntryList type={item.options?.type ?? "anime"} layout={item.options?.layout} list={currentList} />
             </>}
             {(!!repeatingList?.entries?.length && !isCustomList && (!item.options?.statuses?.length || item.options?.statuses?.includes("REPEATING"))) && <>
-                <h2>Repeating <span className="text-[--muted] font-medium ml-3">{repeatingList?.entries?.length}</span></h2>
+                <h2>{t("Repeating")} <span className="text-[--muted] font-medium ml-3">{repeatingList?.entries?.length}</span></h2>
                 <AnilistAnimeEntryList type={item.options?.type ?? "anime"} layout={item.options?.layout} list={repeatingList} />
             </>}
             {(!!planningList?.entries?.length && !isCustomList && (!item.options?.statuses?.length || item.options?.statuses?.includes("PLANNING"))) && <>
-                <h2>Planning <span className="text-[--muted] font-medium ml-3">{planningList?.entries?.length}</span></h2>
+                <h2>{t("Planning")} <span className="text-[--muted] font-medium ml-3">{planningList?.entries?.length}</span></h2>
                 <AnilistAnimeEntryList type={item.options?.type ?? "anime"} layout={item.options?.layout} list={planningList} />
             </>}
             {(!!pausedList?.entries?.length && !isCustomList && (!item.options?.statuses?.length || item.options?.statuses?.includes("PAUSED"))) && <>
-                <h2>Paused <span className="text-[--muted] font-medium ml-3">{pausedList?.entries?.length}</span></h2>
+                <h2>{t("Paused")} <span className="text-[--muted] font-medium ml-3">{pausedList?.entries?.length}</span></h2>
                 <AnilistAnimeEntryList type={item.options?.type ?? "anime"} layout={item.options?.layout} list={pausedList} />
             </>}
             {(!!completedList?.entries?.length && !isCustomList && (!item.options?.statuses?.length || item.options?.statuses?.includes("COMPLETED"))) && <>
-                <h2>Completed <span className="text-[--muted] font-medium ml-3">{completedList?.entries?.length}</span></h2>
+                <h2>{t("Completed")} <span className="text-[--muted] font-medium ml-3">{completedList?.entries?.length}</span></h2>
                 <AnilistAnimeEntryList type={item.options?.type ?? "anime"} layout={item.options?.layout} list={completedList} />
             </>}
             {(!!droppedList?.entries?.length && !isCustomList && (!item.options?.statuses?.length || item.options?.statuses?.includes("DROPPED"))) && <>
-                <h2>Dropped <span className="text-[--muted] font-medium ml-3">{droppedList?.entries?.length}</span></h2>
+                <h2>{t("Dropped")} <span className="text-[--muted] font-medium ml-3">{droppedList?.entries?.length}</span></h2>
                 <AnilistAnimeEntryList type={item.options?.type ?? "anime"} layout={item.options?.layout} list={droppedList} />
             </>}
             {customLists?.map(list => {

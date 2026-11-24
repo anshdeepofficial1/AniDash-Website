@@ -1,3 +1,4 @@
+import { useUiLanguage } from "@/browser/ui-language"
 import { useMissingEpisodeCount } from "@/app/(main)/_hooks/missing-episodes-loader"
 import { useServerStatus } from "@/app/(main)/_hooks/use-server-status"
 import { NavigationMenu, NavigationMenuProps } from "@/components/ui/navigation-menu"
@@ -10,6 +11,7 @@ interface TopMenuProps {
 
 export const TopMenu: React.FC<TopMenuProps> = (props) => {
 
+    const {t}=useUiLanguage()
     const { children, ...rest } = props
 
     const serverStatus = useServerStatus()
@@ -25,13 +27,13 @@ export const TopMenu: React.FC<TopMenuProps> = (props) => {
                 href: "/",
                 // icon: IoLibrary,
                 isCurrent: pathname === "/",
-                name: "Home",
+                name: t("Home"),
             },
             {
                 href: "/schedule",
                 icon: null,
                 isCurrent: pathname.startsWith("/schedule"),
-                name: "Schedule",
+                name: t("Schedule"),
                 // addon: missingEpisodeCount > 0 ? <Badge
                 //     className="absolute -top-1 right-2 h-2 w-2 p-0 z-[5]" size="sm"
                 //     intent="alert-solid"
@@ -41,22 +43,22 @@ export const TopMenu: React.FC<TopMenuProps> = (props) => {
                 href: "/manga",
                 icon: null,
                 isCurrent: pathname.startsWith("/manga"),
-                name: "Manga",
+                name: t("Manga"),
             }].filter(Boolean) as NavigationMenuProps["items"],
             {
                 href: "/lists",
                 icon: null,
                 isCurrent: pathname.startsWith("/lists"),
-                name: "My List",
+                name: t("My List"),
             },
             {
                 href: "/discover",
                 icon: null,
                 isCurrent: pathname.startsWith("/discover") || pathname.startsWith("/search"),
-                name: "Discover",
+                name: t("Discover"),
             },
         ].filter(Boolean)
-    }, [pathname, missingEpisodeCount, serverStatus?.settings?.library?.enableManga])
+    }, [t, pathname, missingEpisodeCount, serverStatus?.settings?.library?.enableManga])
 
     return (
         <NavigationMenu

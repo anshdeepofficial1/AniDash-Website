@@ -1,3 +1,4 @@
+import { useUiLanguage } from "@/browser/ui-language"
 import { useRefreshAnimeCollection } from "@/api/hooks/anilist.hooks"
 import { useLogout } from "@/api/hooks/auth.hooks"
 import { useGetExtensionUpdateData as useGetExtensionUpdateData, usePluginWithIssuesCount } from "@/api/hooks/extensions.hooks"
@@ -161,6 +162,7 @@ export function MainSidebar() {
 
 
 function SidebarNavigation({ isCollapsed, containerRef }: { isCollapsed: boolean, containerRef: React.RefObject<HTMLDivElement | null> }) {
+    const {t}=useUiLanguage()
     const ctx = useAppSidebarContext()
     const ts = useThemeSettings()
     const router = useRouter()
@@ -191,7 +193,7 @@ function SidebarNavigation({ isCollapsed, containerRef }: { isCollapsed: boolean
         {
             id: "home",
             iconType: IoHomeOutline,
-            name: "Home",
+            name: t("Home"),
             href: "/",
             isCurrent: pathname === "/",
         },
@@ -205,7 +207,7 @@ function SidebarNavigation({ isCollapsed, containerRef }: { isCollapsed: boolean
         {
             id: "schedule",
             iconType: LuCalendar,
-            name: "Schedule",
+            name: t("Schedule"),
             href: "/schedule",
             isCurrent: pathname === "/schedule",
             addon: missingEpisodeCount > 0 ? <Badge
@@ -216,28 +218,28 @@ function SidebarNavigation({ isCollapsed, containerRef }: { isCollapsed: boolean
         ...serverStatus?.settings?.library?.enableManga ? [{
             id: "manga",
             iconType: LuBookOpen,
-            name: "Manga",
+            name: t("Manga"),
             href: "/manga",
             isCurrent: pathname.startsWith("/manga"),
         }] : [],
         {
             id: "lists",
             iconType: RiListCheck3,
-            name: "My List",
+            name: t("My List"),
             href: "/lists",
             isCurrent: pathname === "/lists",
         },
         {
             id: "discover",
             iconType: LuCompass,
-            name: "Discover",
+            name: t("Discover"),
             href: "/discover",
             isCurrent: pathname === "/discover",
         },
         {
             id: "search",
             iconType: FiSearch,
-            name: "Search",
+            name: t("Search"),
             href: "/search",
             isCurrent: pathname === "/search",
             // onClick: () => {
@@ -291,6 +293,7 @@ function SidebarNavigation({ isCollapsed, containerRef }: { isCollapsed: boolean
             >{autoDownloaderQueueCount}</Badge> : undefined,
         }] : [],
     ], [
+        t,
         pathname,
         missingEpisodeCount,
         serverStatus?.settings?.library?.enableManga,
@@ -392,14 +395,14 @@ function SidebarNavigation({ isCollapsed, containerRef }: { isCollapsed: boolean
         return [
             {
                 iconType: BiChevronRight,
-                name: "More",
+                name: t("More"),
                 subContent: <VerticalMenu
                     items={allHidden}
                     isSidebar
                 />,
             } as VerticalMenuItem,
         ]
-    }, [items, ts.unpinnedMenuItems, autoUnpinnedIds, pluginWebviewItems])
+    }, [t, items, ts.unpinnedMenuItems, autoUnpinnedIds, pluginWebviewItems])
 
     return (
         <div>
@@ -437,7 +440,7 @@ function SidebarNavigation({ isCollapsed, containerRef }: { isCollapsed: boolean
                     ...unpinnedMenuItems,
                     {
                         iconType: LuRefreshCw,
-                        name: "Refresh AniList",
+                        name: t("Refresh AniList"),
                         onClick: () => {
                             ctx.setOpen(false)
                             if (isRefreshingAC) return
@@ -495,6 +498,7 @@ function SidebarUpdates({ isCollapsed }: { isCollapsed: boolean }) {
 }
 
 function SidebarFooter({ isCollapsed, onLogout }: { isCollapsed: boolean, onLogout: () => void }) {
+    const {t}=useUiLanguage()
     const ctx = useAppSidebarContext()
     const pathname = usePathname()
     const serverStatus = useServerStatus()
@@ -562,7 +566,7 @@ function SidebarFooter({ isCollapsed, onLogout }: { isCollapsed: boolean, onLogo
                     }] : [],
                     {
                         iconType: BiExtension,
-                        name: "Extensions",
+                        name: t("Extensions"),
                         href: "/extensions",
                         isCurrent: pathname.includes("/extensions"),
                         addon: (!!updateData?.length || !!pluginWithIssuesCount)
@@ -576,13 +580,13 @@ function SidebarFooter({ isCollapsed, onLogout }: { isCollapsed: boolean, onLogo
                     },
                     {
                         iconType: FiLogIn,
-                        name: "Profile",
+                        name: t("Profile"),
                         href: "/settings?tab=profile",
                         isCurrent: false,
                     },
                     {
                         iconType: LuSettings,
-                        name: "Settings",
+                        name: t("Settings"),
                         href: "/settings",
                         isCurrent: pathname === ("/settings"),
                     },

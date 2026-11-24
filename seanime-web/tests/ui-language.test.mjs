@@ -1,0 +1,3 @@
+import test from "node:test";import assert from "node:assert/strict";import {languages,translate,normalizeLanguage} from "../src/browser/ui-language-catalog.ts";
+test("valid locale and English default",()=>{assert.equal(normalizeLanguage("hi"),"hi");assert.equal(normalizeLanguage("es"),"es");assert.equal(normalizeLanguage("invalid"),"en");assert.equal(normalizeLanguage(null),"en");assert.equal(languages.length,3)});
+test("translation and safe fallback",()=>{assert.equal(translate("en","Home"),"Home");assert.equal(translate("hi","Home"),"होम");assert.equal(translate("es","Home"),"Inicio");assert.equal(translate("hi","Untranslated"),"Untranslated");assert.equal(translate("es","__proto__"),"__proto__")});
