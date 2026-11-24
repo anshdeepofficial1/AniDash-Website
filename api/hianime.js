@@ -297,7 +297,9 @@ async function streams(req, animeId, episodeId, anilistId, serverName, category)
   const lang = category === "dub" ? "dub" : "sub";
   const actualEpisodeId = safeEpisodeId(animeId, episodeId);
   const server = String(serverName || "hd-1");
+  // An AniList ID is not a native HiAnime episode ID. Only use the native adapter for explicit native identifiers.
   try {
+    if (/^\d+$/.test(String(animeId)) || !episodeId) throw new Error("Native episode identifier is unavailable");
     const url = new URL(API_BASE + "/episode/sources");
     url.searchParams.set("animeEpisodeId", actualEpisodeId);
     url.searchParams.set("server", server);
@@ -318,7 +320,8 @@ async function streams(req, animeId, episodeId, anilistId, serverName, category)
 
   const mappedId = await resolveAniListId(animeId, anilistId);
   if (!mappedId) throw new Error("HiAnime source API is unavailable and the episode could not be mapped to AniList.");
-  const episodeNo = String(episodeId).match(/(\d+(?:\.\d+)?)(?!.*\d)/)?.[1] || "1";
+  const episodeNo = String(req.query.episode || "").trim();
+  if (!/^\d{1,5}(?:\.\d{1,3})?$/.test(episodeNo) || Number(episodeNo) <= 0) throw new Error("Explicit episode number is required for AniList-mapped playback");
   const requested = server.toLowerCase();
   const paths = [];
   if (requested.includes("hianime") || requested.includes("hd-2")) {

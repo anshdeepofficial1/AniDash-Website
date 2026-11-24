@@ -35,3 +35,5 @@ The Extensions catalog is anime-only and excludes external publisher/OTT links. 
 
 ## Preview reliability follow-up (2026-11-24)
 Live preview API requests for One Piece episode 1 English dub returned JustAnime 502 (upstream 523/502), HiAnime 502 (authentication-data error), and AniKoto 502 (upstream 403/timeout). These are not playback successes. This change does not circumvent provider restrictions. Client changes: request-scoped errors, no global cooldown for missing episodes, empty provider list handled, late results isolated, per-stream subtitle/skip metadata, bounded cache, and no indefinite initial buffering. API error responses are no-store. No new upstream provider has been verified or added.
+
+HiAnime previously received AniList ID and episode number in the browser but its server handler read only episodeId and defaulted to episode 1. Explicit AniList episode numbers are now required for mapped requests; native IDs are not confused with AniList IDs. This fixes request identity, not upstream access or availability. Animetsu also returned 502 (fetch failed) in the preview API check.

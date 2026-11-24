@@ -215,7 +215,7 @@ function streamJobsFor(id: number, mal: number | string, episode: number, audio:
   const urls: Record<string, string[]> = {
     justanime: [`/api/justanime?action=streams&${base}&server=${server}`, `/api/justanime?action=streams&${base}&server=auto`],
     animetsu: [`/api/justanime?action=animetsu&${base}&title=${encodeURIComponent(titles[0] || "")}&alt=${encodeURIComponent(titles[1] || "")}`],
-    hianime: [`/api/hianime?action=streams&${base}`],
+    hianime: [`/api/hianime?action=streams&${base}&anilistId=${id}`],
     anikoto: [`/api/anikoto?action=auto&anilistId=${id}&episode=${episode}&category=${audio}&title=${encodeURIComponent(titles[0] || "")}&alt=${encodeURIComponent(titles[1] || "")}&year=${meta.year || ""}&eps=${meta.eps || ""}&fmt=${meta.fmt || ""}`],
   }
   const lang = Engine.languageKey(audio)
@@ -447,7 +447,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     failedStreams.current.add(failedUrl)
     const failed = streamsRef.current.find(s => s.url === failedUrl)
     if (hideServer && failed && failed.type !== "embed") markServerDead(failed.server)
-    if (failed?.provider && !streamsRef.current.some(s=>s.provider===failed.provider&&!failedStreams.current.has(s.url))) Engine.recordFailure(failed.provider, "playback failed", false)
+    if (failed?.provider && !stillResolving.current && !streamsRef.current.some(s=>s.provider===failed.provider&&!failedStreams.current.has(s.url))) Engine.recordFailure(failed.provider, "playback failed", false)
     const next = streamsRef.current.find(s => !failedStreams.current.has(s.url))
     if (next) {
       waitingForMoreSources.current = false
@@ -1493,6 +1493,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
   function openExternal(e: StreamSource) {
     setError(""); setAccessDenied(false); setPlayerNotice("")
     setStreams(prev => (prev.some(x => x.url === e.url) ? prev : [...prev, e]))
+    if (!streamsRef.current.some(x=>x.url===e.url)) streamsRef.current = [...streamsRef.current,e]
     setActiveStream(e)
   }
   function changeAudio(a: "dub" | "sub") {
