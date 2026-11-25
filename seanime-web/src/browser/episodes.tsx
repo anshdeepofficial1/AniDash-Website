@@ -47,6 +47,25 @@ type StreamSource = {
   isDub?: boolean
 }
 
+const preflightCache = new Map<string, Promise<boolean>>()
+/** True when an HLS playlist behind AniDash's relay really answers with a playlist. Anything else is assumed fine (no false negatives). */
+function preflightStream(src: StreamSource): Promise<boolean> {
+  let u: URL
+  try { u = new URL(src.url, window.location.href) } catch { return Promise.resolve(true) }
+  if (src.type === "embed" || src.type === "mp4" || u.pathname !== "/api/media" || u.origin !== window.location.origin) return Promise.resolve(true)
+  const target = decodeURIComponent(u.searchParams.get("url") || "")
+  if (!(src.isM3U8 || src.type === "hls" || /\.m3u8(\?|$)/i.test(target))) return Promise.resolve(true)
+  let hit = preflightCache.get(src.url)
+  if (!hit) {
+    hit = fetch(u.toString(), { signal: AbortSignal.timeout(5000), cache: "no-store" })
+      .then(async r => r.ok && (await r.text()).trimStart().startsWith("#EXTM3U"))
+      .catch(() => false)
+    preflightCache.set(src.url, hit)
+    if (preflightCache.size > 60) preflightCache.delete(preflightCache.keys().next().value as string)
+  }
+  return hit
+}
+
 type StreamTrack = { url?: string; file?: string; src?: string; lang?: string; label?: string; language?: string; kind?: string; type?: string }
 type CaptionFile = { id: string; url: string; label: string; language: string }
 type CaptionOption = { id: string; index: number; label: string; language: string }
@@ -453,13 +472,14 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     if (next) {
       waitingForMoreSources.current = false
       setError("")
-      setPlayerNotice("That source failed. Switching to " + (next.server || "the next source") + "…")
+      // Before the first frame the viewer just sees the loading screen; only a mid-playback switch is announced.
+      setPlayerNotice(playbackStarted.current ? "That source failed. Switching to " + (next.server || "the next source") + "…" : "")
       setActiveStream(next)
       return true
     }
     // Other providers may still be loading; resume automatically when they arrive.
     waitingForMoreSources.current = stillResolving.current
-    if (waitingForMoreSources.current) { setError(""); setPlayerNotice("Waiting for another source…"); setBuffering(true); return true }
+    if (waitingForMoreSources.current) { setError(""); setPlayerNotice(playbackStarted.current ? "Waiting for another source…" : ""); setBuffering(true); return true }
     return false
   }, [markServerDead])
   const [volume, setVolume] = React.useState(1)
@@ -696,12 +716,20 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
         setIsLoadingStream(false)
       }
 
-      const add = (data: any) => {
+      const adds: Promise<void>[] = []
+      const add = async (data: any) => {
         if (!live || !data) return
-        const incoming: StreamSource[] = []
+        let incoming: StreamSource[] = []
         for (const src of Array.isArray(data.sources) ? data.sources : []) if (src?.url) incoming.push(src)
         // External iframe players are never selected automatically: AniDash's own player always comes first.
         if (!incoming.length) return
+        // Check that each HLS playlist can really be fetched before it is allowed to start playback, so a dead
+        // server is skipped silently instead of flashing an error. Unreachable ones stay in the list as a last resort.
+        const checks = await Promise.all(incoming.map(src => preflightStream(src)))
+        if (!live) return
+        const good = new Set(incoming.filter((_, i) => checks[i]).map(x => x.url))
+        incoming = [...incoming.filter(x => good.has(x.url)), ...incoming.filter(x => !good.has(x.url))]
+        if (good.size) for (const src of incoming) if (!good.has(src.url)) failedStreams.current.add(src.url)
         for (const src of incoming) { streamMetadata.current.set(src.url, {tracks:Array.isArray(data.tracks)?data.tracks:[], segments:{intro:parseSkipInterval(data.intro),outro:parseSkipInterval(data.outro)}}) }
         setStreams(prev => {
           const known = new Set(prev.map(x => x.url))
@@ -725,7 +753,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
       if (isCustomSource) {
         const id = selectedServer.slice(customSourcePrefix.length)
         const candidates = episodeSources(installedBrowserSources, entry.mediaId, selected, audio).filter(e=>e.sourceId===id)
-        add({sources:candidates.map(e=>({url:e.url,server:e.sourceName,serverId:selectedServer,quality:"Custom source",type:e.format==="hls"?"hls":e.format==="mp4"?"mp4":undefined,isDub:audio==="dub"}))})
+        await add({sources:candidates.map(e=>({url:e.url,server:e.sourceName,serverId:selectedServer,quality:"Custom source",type:e.format==="hls"?"hls":e.format==="mp4"?"mp4":undefined,isDub:audio==="dub"}))})
         stillResolving.current=false
         if(!activated&&live){setIsLoadingStream(false);setError("This installed source has no matching episode or audio. Choose another source.")}
         return
@@ -758,12 +786,13 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
         const remaining = new Set(tagged.map((_, index) => index))
         const grace = new Promise<null>(resolve => window.setTimeout(() => resolve(null), 2500))
         const first = await Promise.race([tagged[0], grace])
-        if (first) { remaining.delete(0); add(first.data) }
+        if (first) { remaining.delete(0); adds.push(add(first.data)) }
         while (remaining.size) {
           const result = await Promise.race([...remaining].map(index => tagged[index]))
           remaining.delete(result.index)
-          add(result.data)
+          adds.push(add(result.data))
         }
+        await Promise.all(adds)
       }
 
       stillResolving.current = false
@@ -1764,7 +1793,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     setTitleLogo(null)
     const name = m.title?.english || m.title?.romaji || ""
     if (!name) return
-    fetch("/api/justanime?action=logo&kind=" + (m.format === "MOVIE" ? "movie" : "tv") + "&title=" + encodeURIComponent(name), { signal: AbortSignal.timeout(8000) })
+    fetch("/api/justanime?action=logo&id=" + m.id + "&kind=" + (m.format === "MOVIE" ? "movie" : "tv") + "&title=" + encodeURIComponent(name), { signal: AbortSignal.timeout(8000) })
       .then(r => (r.ok ? (r.json() as Promise<{ logo?: string | null }>) : null))
       .then(d => { if (live && d?.logo) setTitleLogo(d.logo) })
       .catch(() => {})
