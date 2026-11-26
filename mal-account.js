@@ -43,6 +43,7 @@
     return Array.from(buffer, byte => byte.toString(16).padStart(2, "0")).join("");
   }
   async function beginLogin() {
+    if(paired) throw Error("Sign out of the paired device before using direct MAL login.");
     const config = await configuration();
     if (!config.enabled) throw new Error("MyAnimeList web login needs its own OAuth client ID in Vercel.");
     const state = randomString(20);
@@ -112,7 +113,7 @@
   }
   async function init() {
     try {
-      try { const r=await fetch("/api/device-pair/account",{cache:"no-store"}); if(r.ok){const a=await r.json();if(a.success&&a.accounts?.myanimelist?.id){paired=true;session=null;try{localStorage.removeItem(STORAGE)}catch(_){}viewer=a.accounts.myanimelist;emit();return clone(viewer)}} }catch(_){}
+      try { const r=await fetch("/api/device-pair/account",{cache:"no-store"}); if(r.ok){const a=await r.json();if(a.success){paired=!!a.accounts?.myanimelist?.id;session=null;try{localStorage.removeItem(STORAGE)}catch(_){}viewer=a.accounts?.myanimelist||null;emit();return clone(viewer)}} }catch(_){}
       if (!readSession()) { emit(); return null; }
       viewer = await data("profile");
     } catch (_) { viewer = null; }
