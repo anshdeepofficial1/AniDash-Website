@@ -1,3 +1,4 @@
+import { browserSession } from "../server/device-pair.js";
 // Strict MAL API whitelist to avoid exposing general-purpose credential proxy.
 export default async function handler(req, res) {
   res.setHeader("Cache-Control", "no-store");
@@ -7,7 +8,9 @@ export default async function handler(req, res) {
       !(req.headers.host?.startsWith("localhost") && req.headers.origin === "http://" + req.headers.host)) {
     return res.status(403).json({ error: "Cross-origin mutation denied" });
   }
-  const auth = String(req.headers.authorization || "");
+  let auth = String(req.headers.authorization || "");
+  if (!auth) { try { const s=await browserSession(req); if(s?.accounts?.myanimelist?.accessToken) auth="Bearer "+s.accounts.myanimelist.accessToken; } catch (_) { return res.status(503).json({error:"Session unavailable"}); } }
+  if (req.method === "PUT" && !req.headers.authorization && req.headers.origin !== origin) return res.status(403).json({error:"Cross-origin mutation denied"});
   if (!/^Bearer [a-zA-Z0-9._~+\/-]{20,4096}=?$/.test(auth)) {
     return res.status(401).json({ error: "MyAnimeList login required" });
   }
@@ -41,7 +44,7 @@ export default async function handler(req, res) {
     });
     const json = await response.json().catch(() => ({}));
     if (!response.ok) return res.status(response.status >= 500 ? 502 : response.status)
-      .json({ error: json.error || "MyAnimeList request failed" });
+      .json({ error: "MyAnimeList request failed" });
     return res.status(200).json(json);
   } catch (_) { return res.status(502).json({ error: "MyAnimeList API temporarily unavailable" }); }
 }
