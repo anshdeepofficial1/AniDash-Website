@@ -20,6 +20,7 @@ export async function setListStatus(media: any, status: string) {
   const s: any = readWatchState()
   saveWatchState({ ...s, watchlist: { ...s.watchlist, [media.id]: media }, libraryStatuses: { ...s.libraryStatuses, [media.id]: status } })
   if (account()?.authenticated?.()) await account().setStatus(media.id, status)
+  const mal=(window as any).AniDashMal;const map:Record<string,string>={CURRENT:"watching",PLANNING:"plan_to_watch",COMPLETED:"completed",PAUSED:"on_hold",DROPPED:"dropped",REPEATING:"watching"};if(media.idMal&&mal?.isPaired?.()&&mal.authenticated()&&map[status])await mal.setStatus(media.idMal,map[status])
 }
 
 export async function removeFromList(media: any) {
@@ -28,6 +29,7 @@ export async function removeFromList(media: any) {
   const libraryStatuses = { ...s.libraryStatuses }; delete libraryStatuses[media.id]
   saveWatchState({ ...s, watchlist, libraryStatuses })
   if (account()?.authenticated?.()) await account().deleteEntry(media.id)
+  const mal=(window as any).AniDashMal;if(media.idMal&&mal?.isPaired?.()&&mal.authenticated())await mal.deleteEntry(media.idMal)
 }
 
 /** Hides the card until the viewer watches something new (it comes back automatically then). */
