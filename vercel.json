@@ -267,13 +267,31 @@
           "value": "no-cache, must-revalidate"
         }
       ]
+    },
+    {
+      "source": "/connect",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-store"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "no-referrer"
+        },
+        {
+          "key": "X-Robots-Tag",
+          "value": "noindex, nofollow"
+        }
+      ]
     }
   ],
   "git": {
     "deploymentEnabled": {
       "**": false,
       "main": true,
-      "migration/seanime-react-browser": true
+      "migration/seanime-react-browser": true,
+      "feature/device-pairing": true
     }
   },
   "rewrites": [
