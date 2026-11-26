@@ -1,0 +1,32 @@
+name: Device pairing security
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [feature/device-pairing]
+jobs:
+  pairing:
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: --health-cmd "redis-cli ping" --health-interval 10s --health-timeout 5s --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: sudo apt-get update && sudo apt-get install -y redis-tools
+      - run: npm install --ignore-scripts
+      - run: node --check server/device-pair.js && node --check anilist-account.js && node --check mal-account.js && node --check api/mal-data.js
+      - run: node --test tests/device-pairing.test.js tests/account-auth.test.js tests/cross-device-sync.test.js
+  browser-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: cd seanime-web && npm ci && npx rsbuild build && cd .. && node scripts/package-browser.mjs
