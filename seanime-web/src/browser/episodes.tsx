@@ -1432,8 +1432,8 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     return groups
   }
   function openExternal(e: StreamSource) {
-    if(requireHindi && (e as any).lang !== "hi"){setRequireHindi(false);setPlayerNotice("Selected fallback: "+(e.isDub?"English DUB":"Japanese SUB")+" · "+e.server)}
     setError(""); setAccessDenied(false); setPlayerNotice("")
+    if(requireHindi && (e as any).lang !== "hi"){forcedEmbed.current=e;setRequireHindi(false);setPlayerNotice("Selected fallback: "+((e as any).lang|| (e.isDub?"English DUB":"Japanese SUB"))+" · "+e.server)}
     setStreams(prev => (prev.some(x => x.url === e.url) ? prev : [...prev, e]))
     setActiveStream(e)
   }
