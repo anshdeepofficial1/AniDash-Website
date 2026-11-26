@@ -162,7 +162,7 @@
     return false;
   }
   async function initAccount() {
-    try { const r = await fetch("/api/device-pair/account", {cache:"no-store"}); if (r.ok) { const a = await r.json(); if (a.success && a.accounts?.anilist?.id) { paired = true; token = null; viewer = a.accounts.anilist; try { localStorage.removeItem(TOKEN_KEY); localStorage.removeItem(VIEWER_KEY); } catch (_) {} await backupWrite(null); inform(); return copy(viewer); } } } catch (_) {}
+    try { const r = await fetch("/api/device-pair/account", {cache:"no-store"}); if (r.ok) { const a = await r.json(); if (a.success) { paired = !!a.accounts?.anilist?.id; token = null; viewer = a.accounts?.anilist || null; try { localStorage.removeItem(TOKEN_KEY); localStorage.removeItem(VIEWER_KEY); } catch (_) {} await backupWrite(null); inform(); return copy(viewer); } } } catch (_) {}
     if (!token) {
       try { token = localStorage.getItem(TOKEN_KEY); } catch (_) {}
     }
@@ -188,6 +188,7 @@
     return viewer ? copy(viewer) : null;
   }
   async function beginLogin() {
+    if(paired) throw Error("Sign out of the paired device before using direct AniList login.");
     const settingsResult = await settings();
     if (!settingsResult.enabled || !/^\d+$/.test(settingsResult.clientId)) {
       throw new Error("AniList sign-in is not configured for this website yet.");
