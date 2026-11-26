@@ -4,5 +4,8 @@
   "type": "module",
   "engines": {
     "node": ">=20"
+  },
+  "dependencies": {
+    "qrcode": "1.5.4"
   }
 }
