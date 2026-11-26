@@ -4,7 +4,7 @@
   const STORAGE = "anidash.watch.mal.tokens.v1";
   const PENDING = "anidash.watch.mal.oauth.v1";
   const origin = () => location.origin || (location.protocol + "//" + location.host);
-  let session = null;
+  let session = null, paired = false;
   let viewer = null;
   let config = null;
   let entries = [];
@@ -66,7 +66,7 @@
   }
   async function captureRedirect() {
     const params = new URLSearchParams(location.search || "");
-    if (!params.has("code") && !params.has("error")) return false;
+    if (location.pathname === "/connect" || (!params.has("code") && !params.has("error"))) return false;
     let pending = null;
     try {
       pending = JSON.parse(sessionStorage.getItem(PENDING) || "null");
@@ -102,7 +102,7 @@
   async function data(action, args = {}, method = "GET", payload) {
     const params = new URLSearchParams({ action, ...args });
     const response = await fetch("/api/mal-data?" + params, {
-      method, headers: { Authorization: "Bearer " + await token(),
+      method, headers: { ...(paired ? {} : { Authorization: "Bearer " + await token() }),
         ...(payload ? { "Content-Type": "application/json" } : {}) },
       ...(payload ? { body: JSON.stringify(payload) } : {})
     });
@@ -112,6 +112,7 @@
   }
   async function init() {
     try {
+      try { const r=await fetch("/api/device-pair/account",{cache:"no-store"}); if(r.ok){const a=await r.json();if(a.success&&a.accounts?.myanimelist?.id){paired=true;session=null;try{localStorage.removeItem(STORAGE)}catch(_){}viewer=a.accounts.myanimelist;emit();return clone(viewer)}} }catch(_){}
       if (!readSession()) { emit(); return null; }
       viewer = await data("profile");
     } catch (_) { viewer = null; }
@@ -135,9 +136,9 @@
     return data("progress", { id: malId }, "PUT", { progress, status });
   }
   const currentUser = () => clone(viewer);
-  const authenticated = () => Boolean(viewer && readSession()?.access_token);
+  const authenticated = () => Boolean(viewer && (paired || readSession()?.access_token));
   const configured = () => Boolean(config?.enabled);
-  const logout = () => clear();
+  const logout = async () => {if(paired){const r=await fetch("/api/device-pair/logout",{method:"POST"});if(!r.ok)throw Error("Sign-out failed");paired=false}clear()};
   window.AniDashMal = {
     configuration, captureRedirect, beginLogin, init, currentUser, authenticated, configured,
     setHandler, list, updateProgress, logout
