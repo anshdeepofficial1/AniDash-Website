@@ -136,12 +136,15 @@
     if (!viewer) return null;
     return data("progress", { id: malId }, "PUT", { progress, status });
   }
+  const getEntry = id => clone(entries.find(e=>Number(e.node?.id)===Number(id))||null);
+  async function setStatus(id,status){return data("status",{id},"PUT",{status})}
+  async function deleteEntry(id){return data("delete",{id},"DELETE")}
   const currentUser = () => clone(viewer);
   const authenticated = () => Boolean(viewer && (paired || readSession()?.access_token));
   const configured = () => Boolean(config?.enabled);
   const logout = async () => {if(paired){const r=await fetch("/api/device-pair/logout",{method:"POST"});if(!r.ok)throw Error("Sign-out failed");paired=false}clear()};
   window.AniDashMal = {
     configuration, captureRedirect, beginLogin, init, currentUser, authenticated, configured,
-    setHandler, list, updateProgress, logout
+    setHandler, list, updateProgress, getEntry, setStatus, deleteEntry, isPaired:()=>paired, logout
   };
 })();
