@@ -273,7 +273,8 @@
     "deploymentEnabled": {
       "**": false,
       "main": true,
-      "migration/seanime-react-browser": true
+      "migration/seanime-react-browser": true,
+      "feature/extension-engine": true
     }
   },
   "rewrites": [

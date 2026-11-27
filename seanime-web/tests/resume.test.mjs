@@ -1,0 +1,4 @@
+import test from "node:test";import assert from "node:assert/strict";
+import {parseManualPosition,formatPosition,chooseResume} from "../src/browser/resume.ts";
+test("manual checkpoints retain exact seconds",()=>{assert.equal(parseManualPosition("14:37"),877);assert.equal(parseManualPosition("21:48"),1308);assert.equal(parseManualPosition("1:02:03"),3723);assert.equal(formatPosition(877),"14:37");for(const x of ["","-1","14:99","abc","1:2:3:4"])assert.equal(parseManualPosition(x),null)});
+test("newer deliberate rewind or episode change wins over old higher position",()=>{const local={episode:445,seconds:877,updatedAt:2000},remote={episode:446,seconds:100,updatedAt:1000};assert.equal(chooseResume(local,remote),local);assert.equal(chooseResume(local,{episode:445,seconds:300,updatedAt:3000}).seconds,300)});

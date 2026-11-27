@@ -1,3 +1,4 @@
+import { gatewayFetch } from "../server/gateway.js";
 import crypto from "node:crypto";
 
 const API_BASE = String(process.env.HIANIME_API_URL || "https://shonenx-aniwatch-instance.vercel.app/api/v2/hianime").replace(/\/$/, "");
@@ -13,12 +14,13 @@ const jsonHeaders = {
 
 function send(res, status, body, cacheControl) {
   Object.entries(jsonHeaders).forEach(([key, value]) => res.setHeader(key, value));
-  if (cacheControl) res.setHeader("Cache-Control", cacheControl);
+  if (status >= 400) res.setHeader("Cache-Control", "no-store");
+  else if (cacheControl) res.setHeader("Cache-Control", cacheControl);
   return res.status(status).json(body);
 }
 
 async function requestJson(url, timeout = 6000) {
-  const response = await fetch(url, {
+  const response = await gatewayFetch(url, {
     headers: { Accept: "application/json, text/plain, */*", "User-Agent": UA },
     signal: AbortSignal.timeout(timeout)
   });
@@ -27,7 +29,7 @@ async function requestJson(url, timeout = 6000) {
 }
 
 async function requestText(url, timeout = 6000) {
-  const response = await fetch(url, {
+  const response = await gatewayFetch(url, {
     headers: { Accept: "text/html,application/xhtml+xml,*/*", "User-Agent": UA, Referer: SITE_BASE + "/" },
     signal: AbortSignal.timeout(timeout)
   });
@@ -296,7 +298,9 @@ async function streams(req, animeId, episodeId, anilistId, serverName, category)
   const lang = category === "dub" ? "dub" : "sub";
   const actualEpisodeId = safeEpisodeId(animeId, episodeId);
   const server = String(serverName || "hd-1");
+  // An AniList ID is not a native HiAnime episode ID. Only use the native adapter for explicit native identifiers.
   try {
+    if (/^\d+$/.test(String(animeId)) || !episodeId) throw new Error("Native episode identifier is unavailable");
     const url = new URL(API_BASE + "/episode/sources");
     url.searchParams.set("animeEpisodeId", actualEpisodeId);
     url.searchParams.set("server", server);
@@ -317,7 +321,8 @@ async function streams(req, animeId, episodeId, anilistId, serverName, category)
 
   const mappedId = await resolveAniListId(animeId, anilistId);
   if (!mappedId) throw new Error("HiAnime source API is unavailable and the episode could not be mapped to AniList.");
-  const episodeNo = String(episodeId).match(/(\d+(?:\.\d+)?)(?!.*\d)/)?.[1] || "1";
+  const episodeNo = String(req.query.episode || "").trim();
+  if (!/^\d{1,5}(?:\.\d{1,3})?$/.test(episodeNo) || Number(episodeNo) <= 0) throw new Error("Explicit episode number is required for AniList-mapped playback");
   const requested = server.toLowerCase();
   const paths = [];
   if (requested.includes("hianime") || requested.includes("hd-2")) {

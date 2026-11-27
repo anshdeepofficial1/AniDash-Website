@@ -1,3 +1,4 @@
+import { gatewayFetch } from "../server/gateway.js";
 const DEFAULT_SITE_BASES = [
   // The hosts the AniDash app itself uses.
   "https://animepahe.pw",
@@ -25,7 +26,8 @@ const jsonHeaders = {
 
 function send(res, status, body, cacheControl) {
   Object.entries(jsonHeaders).forEach(([key, value]) => res.setHeader(key, value));
-  if (cacheControl) res.setHeader("Cache-Control", cacheControl);
+  if (status >= 400) res.setHeader("Cache-Control", "no-store");
+  else if (cacheControl) res.setHeader("Cache-Control", cacheControl);
   return res.status(status).json(body);
 }
 
@@ -42,7 +44,7 @@ function isAnikotoHost(url) {
 }
 
 async function requestText(url, headers = {}, timeout = 7000) {
-  const response = await fetch(url, {
+  const response = await gatewayFetch(url, {
     headers: {
       "User-Agent": API_USER_AGENT,
       Accept: "text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8",
@@ -106,7 +108,7 @@ async function anikotoApiRequest(path, params = {}, timeout = 6500) {
   Object.entries(params).forEach(([key, value]) => {
     if (value !== undefined && value !== null && value !== "") url.searchParams.set(key, String(value));
   });
-  const response = await fetch(url.toString(), {
+  const response = await gatewayFetch(url.toString(), {
     headers: { Accept: "application/json", "User-Agent": API_USER_AGENT },
     signal: AbortSignal.timeout(timeout)
   });
@@ -254,7 +256,7 @@ async function extractKwik(link, base) {
     }
     throw new Error("AniKoto returned a video host that is not in the Kwik allow-list");
   }
-  const response = await fetch(parsed.toString(), {
+  const response = await gatewayFetch(parsed.toString(), {
     headers: { "User-Agent": API_USER_AGENT, Accept: "text/html,*/*", Referer: "https://animepahe.pw/" },
     redirect: "follow",
     signal: AbortSignal.timeout(5000)

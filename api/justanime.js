@@ -1,3 +1,4 @@
+import { gatewayFetch, gatewayConfigured } from "../server/gateway.js";
 import { animetsuStreams } from "../server/animetsu.js";
 import { hindiHandler } from "../server/hindi.js";
 import { titleLogoHandler } from "../server/title-logo.js";
@@ -62,7 +63,7 @@ function allowedJustAnimePath(path) {
 }
 
 async function requestJson(url, timeout = 8500, signal) {
-  const response = await fetch(url, {
+  const response = await gatewayFetch(url, {
     headers: {
       Accept: "application/json, text/plain, */*",
       Origin: SITE,
@@ -242,7 +243,7 @@ async function episodes(req, animeId) {
 
 async function relayPath(path) {
   if (!allowedJustAnimePath(path)) throw new Error("Invalid JustAnime path");
-  const response = await fetch(API + path, {
+  const response = await gatewayFetch(API + path, {
     headers: {
       Accept: "application/json, text/plain, */*",
       Origin: SITE,
@@ -565,14 +566,41 @@ export default async function handler(req, res) {
       const report = await Promise.all(targets.map(async ([name, url]) => {
         const started = Date.now();
         try {
-          const r = await fetch(url, { headers: { Accept: "application/json, text/plain, */*", Origin: SITE, Referer: SITE + "/", "User-Agent": UA }, redirect: "follow", signal: AbortSignal.timeout(8000) });
+          const r = await gatewayFetch(url, { headers: { Accept: "application/json, text/plain, */*", Origin: SITE, Referer: SITE + "/", "User-Agent": UA }, redirect: "follow", signal: AbortSignal.timeout(8000) });
           const text = await r.text();
           return { name, url, status: r.status, ms: Date.now() - started, type: r.headers.get("content-type"), server: r.headers.get("server"), cfRay: r.headers.get("cf-ray"), body: text.replace(/\s+/g, " ").slice(0, 220) };
         } catch (error) {
           return { name, url, error: String(error?.cause?.code || error?.message || error), ms: Date.now() - started };
         }
       }));
-      return send(res, 200, { checkedAt: new Date().toISOString(), report }, "no-store");
+      return send(res, 200, { checkedAt: new Date().toISOString(), gateway: gatewayConfigured(), report }, "no-store");
+    }
+    if (action === "matrix") {
+      // Per-server truth table: does each JustAnime server return a stream for this episode, and is the first
+      // media URL actually fetchable with the headers the player would use? (HLS must start with #EXTM3U.)
+      const animeId = String(req.query.id || "21");
+      const episode = String(req.query.episode || "1");
+      if (!/^\d{1,12}$/.test(animeId) || !/^\d{1,5}$/.test(episode)) return send(res, 400, { error: "id and episode required" });
+      const cats = req.query.category === "dub" ? ["dub"] : req.query.category === "sub" ? ["sub"] : ["sub", "dub"];
+      const ids = ["momo", "onyx", "gigi", "nami", "calm", "revo", "zokoanime", "anineko"];
+      const rows = await Promise.all(cats.flatMap(category => ids.map(async server => {
+        const started = Date.now();
+        try {
+          const out = await streams(req, animeId, episode, server, category);
+          const src = out.sources[0];
+          let media = null;
+          try {
+            const u = new URL(src.originalUrl);
+            const r = await fetch(u, { headers: { "User-Agent": UA, Accept: "*/*", Referer: out.headers?.Referer || out.headers?.referer || "https://justanime.to/" }, signal: AbortSignal.timeout(7000) });
+            const head = (await r.text()).slice(0, 12);
+            media = { host: u.host, status: r.status, playable: r.ok && (!src.isM3U8 || head.startsWith("#EXTM3U")) };
+          } catch (e) { media = { error: String(e?.cause?.code || e?.message || e).slice(0, 80) }; }
+          return { server, category, ok: true, sources: out.sources.length, hls: !!src.isM3U8, subtitles: (out.tracks || []).length, media, ms: Date.now() - started };
+        } catch (e) {
+          return { server, category, ok: false, error: String(e?.message || e).slice(0, 160), ms: Date.now() - started };
+        }
+      })));
+      return send(res, 200, { checkedAt: new Date().toISOString(), gateway: gatewayConfigured(), animeId, episode, rows }, "no-store");
     }
     if (action === "animetsu") {
       const animeId = String(req.query.id || "");
