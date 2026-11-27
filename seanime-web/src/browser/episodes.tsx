@@ -1,4 +1,5 @@
 import { episodeSources } from "./sources"
+import { activePlaybackMeta } from "./playback-meta.mjs"
 import { useInstalledSources } from "./use-installed-sources"
 import { getEpisodeResume, localResume, persistPlayback, syncPlayback, flushPlaybackQueue, parseManualPosition, formatPosition } from "./resume"
 import { embedProgressOrigin, readEmbedCheckpoint, type EmbedCheckpoint } from "./embed-progress"
@@ -37,6 +38,7 @@ type Metadata = {
 }
 
 type StreamSource = {
+  lang?: string
   provider?: string
   url: string
   originalUrl?: string
@@ -486,12 +488,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     return false
   }, [markServerDead])
   // Which audio the viewer is really hearing, written next to the position so the Android app can show it.
-  const playbackMeta = (): { lang: string; src?: string } => {
-    const l = String((activeStream as any)?.lang || "")
-    const lang = l && l !== "en" ? l + "-dub" : audio === "dub" ? "en-dub" : "ja-sub"
-    const src = String(activeStream?.provider || activeStream?.serverId || activeStream?.server || "").toLowerCase().replace(/[^a-z0-9-]/g, "").slice(0, 24)
-    return { lang, ...(src ? { src } : {}) }
-  }
+  const playbackMeta = () => activePlaybackMeta(activeStream, audio)
   const [volume, setVolume] = React.useState(1)
   const [playbackRate, setPlaybackRate] = React.useState(1)
   const [autoplay, setAutoplay] = React.useState(initial.preferences?.playerAutoplay !== false)
@@ -1577,7 +1574,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
       .then(r => (r.ok ? (r.json() as Promise<{ embeds?: Array<{ url: string; name?: string; id?: string; lang?: string }> }>) : null))
       .then(d => {
         if (!live || !d?.embeds?.length) return
-        setLangEmbeds(d.embeds.map(e => ({ url: e.url, type: "embed", server: e.name || "Player", serverId: e.id, lang: e.lang || "hi" }) as unknown as StreamSource))
+        setLangEmbeds(d.embeds.map(e => ({ url: e.url, type: "embed", server: e.name || "Player", serverId: e.id, lang: e.lang || "hi", isDub: true }) as unknown as StreamSource))
       })
       .catch(() => {})
     return () => { live = false }
