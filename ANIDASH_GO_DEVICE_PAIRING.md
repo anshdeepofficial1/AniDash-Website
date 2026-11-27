@@ -4,11 +4,11 @@ Website counterpart of Android Settings → Devices. Only the feature branch is 
 
 ## Deployment prerequisites
 Configure these server-only environment variables for the intended Vercel environment:
-- UPSTASH_REDIS_REST_URL — HTTPS REST endpoint of a dedicated Redis database.
-- UPSTASH_REDIS_REST_TOKEN — Redis server credential.
+- KV_REST_API_URL and KV_REST_API_TOKEN — automatically supplied by Vercel's Upstash integration (use the writable token, not the read-only token).
+- Alternatively, set both UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN. A complete explicit pair takes precedence; credentials are never mixed across the two configurations.
 - DEVICE_PAIR_ENCRYPTION_KEY — exactly 32 cryptographically random bytes encoded as base64 (generate locally using `openssl rand -base64 32`). Keep stable; rotating invalidates sessions.
 
-The API fails closed (503) if storage or the key is absent. Do not expose environment variables via browser build prefixes. No request bodies or upstream credentials are logged by these functions. Do not configure external log drains or instrumentation to capture pairing request bodies, headers or query strings. Use a separate preview database/namespace and real HTTPS deployment; the QR's canonical target is https://anidashgo.vercel.app/connect?code=<PAIRING_CODE>.
+The API fails closed (503) if storage or the key is absent. Do not expose environment variables via browser build prefixes. No request bodies or upstream credentials are logged by these functions. Do not configure external log drains or instrumentation to capture pairing request bodies, headers or query strings. Prefer a separate preview database/namespace for isolation. A shared Redis database shares its quota and credentials; do not flush it. Use a real HTTPS deployment; the QR's canonical target is https://anidashgo.vercel.app/connect?code=<PAIRING_CODE>.
 
 ## Protocol
 - POST /api/device-pair/create (same-origin browser only): 201, code, local PNG QR data URI, expiresAt. Browser receives a separate HttpOnly binding cookie. Code is 128-bit random hex, manual entry is case-sensitive lowercase. 
