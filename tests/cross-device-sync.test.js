@@ -157,3 +157,36 @@ test("language/source meta goes on its own line and never disturbs the Android s
   const second=queries.filter(q=>q.query.includes("SaveMediaListEntry")).pop().variables.notes;
   assert.ok(!/shx-meta/.test(second)||/shx-meta:lang=hi-dub/.test(second));
 });
+
+
+test("active player metadata wins over requested audio and provider, and reaches Android notes",async()=>{
+  const {activePlaybackMeta}=await import("../seanime-web/src/browser/playback-meta.mjs");
+  const cases=[
+    [{serverId:"hi-ravok",provider:"hindi",lang:"hi",isDub:true},"sub",{lang:"hi-dub",src:"ravok"}],
+    [{serverId:"megaplay-sub",isDub:false},"dub",{lang:"ja-sub",src:"megaplay"}],
+    [{serverId:"anixo-dub",isDub:true},"sub",{lang:"en-dub",src:"anixo"}],
+    [{serverId:"onyx",provider:"justanime",isDub:true},"dub",{lang:"en-dub",src:"onyx"}],
+    [{serverId:"gigi",provider:"justanime"},"sub",{lang:"ja-sub",src:"gigi"}],
+    [{serverId:"momo",lang:"ja",isDub:false},"dub",{lang:"ja-sub",src:"momo"}],
+  ];
+  for(const [stream,requested,expected] of cases){
+    const meta=activePlaybackMeta(stream,requested);
+    assert.deepEqual(meta,expected);
+    const {client,queries}=aniHarness();await client.init();
+    await client.syncPosition(21,381,877,1440,false,0,meta);
+    const notes=queries.filter(q=>q.query.includes("SaveMediaListEntry")).pop().variables.notes;
+    assert.ok(notes.includes("shx:ep=381&sec=877&dur=1440\nshx-meta:lang="+expected.lang+"&src="+expected.src));
+    assert.ok(notes.includes("My personal note"));
+  }
+  assert.equal(activePlaybackMeta(null,"dub"),undefined);
+});
+
+test("native, embed-event, and manual checkpoints all forward active player metadata",()=>{
+  const player=readFileSync(new URL("../seanime-web/src/browser/episodes.tsx",import.meta.url),"utf8");
+  assert.match(player,/const playbackMeta = \(\) => activePlaybackMeta\(activeStream, audio\)/);
+  assert.match(player,/syncPlayback\(m,selected,value\.position,value\.duration,value\.ended,playbackMeta\(\)\)/);
+  assert.match(player,/syncPlayback\(m, selected, position, el\.duration, ended, playbackMeta\(\)\)/);
+  assert.match(player,/syncPlayback\(m,selected,seconds,duration,false,playbackMeta\(\)\)/);
+  const queue=readFileSync(new URL("../seanime-web/src/browser/resume.ts",import.meta.url),"utf8");
+  assert.match(queue,/syncPosition\(item\.mediaId,item\.episode,item\.position,item\.duration,item\.ended,item\.at,item\.meta\)/);
+});
