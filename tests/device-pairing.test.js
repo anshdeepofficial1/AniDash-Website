@@ -47,3 +47,17 @@ test("five minute pairing, separate browser binding, atomic redemption, server-o
   for(let i=0;i<9;i++){const r=await call("create",{method:"POST",ip:"198.51.100.9"});assert.equal(r.statusCode,i===8?429:201)}
  }finally{global.fetch=original}
 });
+
+import authConfig from "../api/auth-config.js";
+import { readFileSync } from "node:fs";
+test("pairing runs inside auth-config (Vercel Hobby 12-function limit) and every public path is rewritten", () => {
+  const rewrites = JSON.parse(readFileSync(new URL("../vercel.json", import.meta.url))).rewrites;
+  for (const a of ["create", "session", "approve", "status", "account", "anilist", "logout"]) {
+    assert.ok(rewrites.some(r => r.source === "/api/device-pair/" + a && r.destination === "/api/auth-config?pair=" + a), a);
+  }
+  const out = {}; const res = { setHeader() {}, status(c) { out.code = c; return this }, json(b) { out.body = b; return this }, end() {} };
+  authConfig({ method: "GET", query: { pair: "nope" }, headers: {} }, res);
+  assert.equal(out.code, 404);
+  authConfig({ method: "GET", query: {}, headers: {} }, res);
+  assert.equal(out.code, 200);
+});

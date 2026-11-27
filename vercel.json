@@ -296,6 +296,34 @@
   },
   "rewrites": [
     {
+      "source": "/api/device-pair/create",
+      "destination": "/api/auth-config?pair=create"
+    },
+    {
+      "source": "/api/device-pair/session",
+      "destination": "/api/auth-config?pair=session"
+    },
+    {
+      "source": "/api/device-pair/approve",
+      "destination": "/api/auth-config?pair=approve"
+    },
+    {
+      "source": "/api/device-pair/status",
+      "destination": "/api/auth-config?pair=status"
+    },
+    {
+      "source": "/api/device-pair/account",
+      "destination": "/api/auth-config?pair=account"
+    },
+    {
+      "source": "/api/device-pair/anilist",
+      "destination": "/api/auth-config?pair=anilist"
+    },
+    {
+      "source": "/api/device-pair/logout",
+      "destination": "/api/auth-config?pair=logout"
+    },
+    {
       "source": "/home",
       "destination": "/"
     },
