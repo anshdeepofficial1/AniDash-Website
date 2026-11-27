@@ -347,6 +347,8 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     initial.preferences?.preferredAudio === "sub" ? "sub" : "dub"
   )
   const [selectedServer, setSelectedServer] = React.useState<string>(DEFAULT_SERVER)
+  const [requireHindi,setRequireHindi]=React.useState(initial.preferences?.preferredAudio === "hindi" || initial.preferences?.pairedHindiEnabled === true)
+  const pairedSource = String(initial.preferences?.pairedSource || "").toLowerCase()
   const [serverMap, setServerMap] = React.useState<Record<string, { sub?: boolean; dub?: boolean }>>({})
   const [streams, setStreams] = React.useState<StreamSource[]>([])
   const [activeStream, setActiveStream] = React.useState<StreamSource | null>(null)
@@ -498,7 +500,8 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
   const subtitleInput = React.useRef<HTMLInputElement>(null)
   const uploadedUrl = React.useRef<string | null>(null)
   const controlsTimer = React.useRef<number | undefined>(undefined)
-  const selectedCaptionIndex = captionChoice === "auto" ? preferredEnglishTrack(captionOptions)?.index : captionOptions.find(t => t.id === captionChoice)?.index
+  const pairedCaption = String(initial.preferences?.pairedSubtitleLanguage||"").toLowerCase()
+  const selectedCaptionIndex = captionChoice === "auto" ? (captionOptions.find(t=>pairedCaption&&(t.language===pairedCaption||t.label.toLowerCase()===pairedCaption))||preferredEnglishTrack(captionOptions))?.index : captionOptions.find(t => t.id === captionChoice)?.index
   const captionLabel = captionOptions.find(t => t.index === selectedCaptionIndex)?.label || "Unavailable"
   const controlClass = "shrink-0 grid size-8 sm:size-10 place-items-center rounded-full text-white/90 hover:bg-white/10 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-white disabled:opacity-35 disabled:pointer-events-none transition"
   const menuRowClass = "w-full flex items-center justify-between gap-3 rounded-xl px-3 py-2.5 text-left text-sm hover:bg-white/10 focus-visible:outline focus-visible:outline-white transition"
@@ -604,6 +607,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
   // Fetch live streams from built-in streaming APIs
   React.useEffect(() => {
     if (!watchMode || !selected) return
+    if(requireHindi){setActiveStream(null);setStreams([]);setError("");setIsLoadingStream(true);return}
     let live = true
     setIsLoadingStream(true)
     setError("")
@@ -676,7 +680,9 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
       // One automatic second round: providers that were briefly unreachable often answer on the retry.
       for (let attempt = 0; attempt < 2 && live && !activated; attempt++) {
         if (attempt > 0) await new Promise(resolve => window.setTimeout(resolve, 1200))
-        const jobs = streamUrlsFor(entry.mediaId, mal, selected, audio, serverParam, [m.title?.english, m.title?.romaji].filter(Boolean) as string[], { year: m.seasonYear || m.startDate?.year, eps: m.episodes, fmt: m.format }).map(getJson)
+        const urls = streamUrlsFor(entry.mediaId, mal, selected, audio, serverParam, [m.title?.english, m.title?.romaji].filter(Boolean) as string[], { year: m.seasonYear || m.startDate?.year, eps: m.episodes, fmt: m.format });
+        if (["hianime","anikoto","justanime","animetsu"].includes(pairedSource)) urls.sort((a,b)=>Number(b.includes("/api/"+pairedSource+"?")||b.includes("action="+pairedSource+"&"))-Number(a.includes("/api/"+pairedSource+"?")||a.includes("action="+pairedSource+"&")))
+        const jobs=urls.map(getJson)
         // All providers run in parallel. The preferred server gets a short head start (so Momo stays the
         // default), but a slow or dead provider never holds playback back: whoever answers first plays.
         const tagged = jobs.map((job, index) => job.then(data => ({ index, data })))
@@ -718,7 +724,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
       live = false
       stillResolving.current = false
     }
-  }, [entry.mediaId, selected, audio, selectedServer, watchMode, resolveNonce])
+  }, [entry.mediaId, selected, audio, selectedServer, watchMode, resolveNonce,requireHindi,pairedSource])
 
   // Warm the next episode while this one plays, so "next" starts almost instantly.
   const prefetchedEpisode = React.useRef<number>(0)
@@ -837,6 +843,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         if (!live || !hls) return
         setHlsLevels(hls.levels.map((level, index) => ({ index, label: level.height ? level.height + "p" : Math.round(level.bitrate / 1000) + " kbps" })))
+        const target=Number(String(initial.preferences?.pairedQuality||"").match(/^(\d+)p$/i)?.[1]);if(target){const idx=hls.levels.findIndex(l=>l.height===target);if(idx>=0){hls.currentLevel=idx;setQualityLevel(idx)}else setPlayerNotice("Preferred "+target+"p unavailable; using Auto quality.")}
       })
       hls.on(Hls.Events.FRAG_BUFFERED, () => { if (live) updateBuffered(el) })
       hls.loadSource(streamUrl)
@@ -1396,12 +1403,14 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     fetch("/api/justanime?action=hindi&" + qs, { signal: AbortSignal.timeout(20000) })
       .then(r => (r.ok ? (r.json() as Promise<{ embeds?: Array<{ url: string; name?: string; id?: string; lang?: string }> }>) : null))
       .then(d => {
-        if (!live || !d?.embeds?.length) return
-        setLangEmbeds(d.embeds.map(e => ({ url: e.url, type: "embed", server: e.name || "Player", serverId: e.id, lang: e.lang || "hi" }) as unknown as StreamSource))
+        if (!live) return
+        const entries=(d?.embeds||[]).map(e => ({ url: e.url, type: "embed", server: e.name || "Player", serverId: e.id, lang: e.lang || "hi" }) as unknown as StreamSource)
+        setLangEmbeds(entries)
+        if(requireHindi&&watchMode){const hindi=entries.find(e=>(e as any).lang==="hi");if(hindi){setStreams([hindi]);setActiveStream(hindi);setError("");setPlayerNotice("Hindi source selected: "+hindi.server)}else setError("Hindi source unavailable. Choose SUB or DUB explicitly to continue.");setIsLoadingStream(false)}
       })
-      .catch(() => {})
+      .catch(() => {if(live&&requireHindi&&watchMode){setError("Hindi source unavailable. Choose SUB or DUB explicitly to continue.");setIsLoadingStream(false)}})
     return () => { live = false }
-  }, [m.id, selected])
+  }, [m.id, selected,requireHindi,watchMode])
   function externalGroups() {
     const ep = selected || 1
     const mal = m.idMal
@@ -1424,10 +1433,12 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
   }
   function openExternal(e: StreamSource) {
     setError(""); setAccessDenied(false); setPlayerNotice("")
+    if(requireHindi && (e as any).lang !== "hi"){forcedEmbed.current=e;setRequireHindi(false);setPlayerNotice("Selected fallback: "+((e as any).lang|| (e.isDub?"English DUB":"Japanese SUB"))+" · "+e.server)}
     setStreams(prev => (prev.some(x => x.url === e.url) ? prev : [...prev, e]))
     setActiveStream(e)
   }
   function changeAudio(a: "dub" | "sub") {
+    if(requireHindi){setRequireHindi(false);setPlayerNotice("Selected fallback: "+(a==="dub"?"English DUB":"Japanese SUB"))}
     if (watchMode) record(true)
     setAudio(a)
     const s = getStore()
@@ -1435,6 +1446,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
   }
 
   function pickServer(serverKey: string, channel: "sub" | "dub") {
+    if(requireHindi){setRequireHindi(false);setPlayerNotice("Selected fallback: "+(channel==="dub"?"English DUB":"Japanese SUB")+" · "+serverKey)}
     if (watchMode) record(true)
     setAudio(channel)
     setSelectedServer(serverKey)
@@ -2343,6 +2355,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
               <h2 className="text-base font-bold">Languages &amp; external players</h2>
               <p className="text-xs text-neutral-400 mt-1">These open the provider's own player, not the AniDash player.</p>
             </div>
+            {(requireHindi || pairedSource) && <p role="status" className="text-sm text-amber-300">{requireHindi ? "Hindi preferred · " : "Android source: "+pairedSource+" · "}Current source: {activeStream?.server || "not selected"}{!requireHindi && activeStream ? " · "+audio.toUpperCase() : ""}</p>}
             {externalGroups().map(g => (
               <div key={g.key} className="flex items-start gap-3">
                 <span className={`mt-1 w-24 shrink-0 rounded-md px-2 py-1 text-center text-[11px] font-bold ${g.tone === "amber" ? "bg-amber-500/15 text-amber-300" : "bg-sky-500/15 text-sky-300"}`}>{g.label}{g.note && <span className="block text-[9px] font-medium opacity-70">{g.note}</span>}</span>

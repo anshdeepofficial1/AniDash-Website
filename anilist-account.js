@@ -7,7 +7,7 @@
   const OAUTH_STATE_KEY = "anidash.watch.anilist.oauth-state";
   const VIEWER_KEY = "anidash.watch.anilist.viewer";
   const BACKUP_DB = "anidash-account", BACKUP_STORE = "session", BACKUP_KEY = "anilist";
-  let token = null;
+  let token = null, paired = false;
   let viewer = null;
   let config = null;
   let entries = new Map();
@@ -116,13 +116,13 @@
     return config;
   }
   async function request(query, variables) {
-    if (!token) throw new Error("Sign in with AniList first.");
-    const response = await fetch(API, {
+    if (!token && !paired) throw new Error("Sign in with AniList first.");
+    const response = await fetch(paired ? "/api/device-pair/anilist" : API, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "Accept": "application/json",
-        Authorization: "Bearer " + token
+        ...(paired ? {} : { Authorization: "Bearer " + token })
       },
       body: JSON.stringify({ query, variables: variables || {} }),
       ...(typeof AbortSignal !== "undefined" && AbortSignal.timeout ? {signal:AbortSignal.timeout(12000)} : {})
@@ -138,7 +138,7 @@
   }
   let initPending = null;
   async function init() {
-    if (viewer && token) return copy(viewer);
+    if (viewer && (token || paired)) return copy(viewer);
     if(initPending)return initPending;
     const run=initAccount(); initPending=run; try{return await run}finally{if(initPending===run)initPending=null}
   }
@@ -162,6 +162,7 @@
     return false;
   }
   async function initAccount() {
+    try { const r = await fetch("/api/device-pair/account", {cache:"no-store"}); if (r.ok) { const a = await r.json(); if (a.success) { paired = !!a.accounts?.anilist?.id; token = null; viewer = a.accounts?.anilist || null; try { localStorage.removeItem(TOKEN_KEY); localStorage.removeItem(VIEWER_KEY); } catch (_) {} await backupWrite(null); inform(); return copy(viewer); } } } catch (_) {}
     if (!token) {
       try { token = localStorage.getItem(TOKEN_KEY); } catch (_) {}
     }
@@ -187,6 +188,7 @@
     return viewer ? copy(viewer) : null;
   }
   async function beginLogin() {
+    if(paired) throw Error("Sign out of the paired device before using direct AniList login.");
     const settingsResult = await settings();
     if (!settingsResult.enabled || !/^\d+$/.test(settingsResult.clientId)) {
       throw new Error("AniList sign-in is not configured for this website yet.");
@@ -202,10 +204,10 @@
     });
     location.assign("https://anilist.co/api/v2/oauth/authorize?" + params.toString());
   }
-  function logout() { clearToken(); }
+  async function logout() { if (paired) { const r = await fetch("/api/device-pair/logout", {method:"POST"}); if (!r.ok) throw Error("Sign-out failed"); paired = false; } clearToken(); }
   function currentUser() { return copy(viewer); }
   function configured() { return config?.enabled === true; }
-  function authenticated() { return !!viewer && !!token; }
+  function authenticated() { return !!viewer && (!!token || paired); }
   function getEntry(mediaId, type = "ANIME") {
     return copy((type === "MANGA" ? mangaEntries : entries).get(Number(mediaId)) || null);
   }
