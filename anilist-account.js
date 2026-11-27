@@ -217,12 +217,22 @@
       return null;
     return { episode, seconds, duration };
   }
-  function formatWatchNotes(existing, episode, seconds, duration) {
+  // Optional second line "shx-meta:lang=hi-dub&src=ravok". It is separate from the shx: tag, so the Android
+  // regex and its replace-first formatter never touch it; older app versions simply ignore it.
+  function metaLine(meta) {
+    const lang = /^[a-z]{2,3}-(?:dub|sub)$/.test(String(meta?.lang || "")) ? meta.lang : "";
+    const src = /^[a-z0-9-]{1,24}$/i.test(String(meta?.src || "")) ? meta.src : "";
+    return lang ? "shx-meta:lang=" + lang + (src ? "&src=" + src : "") : "";
+  }
+  function formatWatchNotes(existing, episode, seconds, duration, meta) {
     const tag = "shx:ep=" + episode + "&sec=" + Math.max(0, Math.floor(seconds)) +
       (duration > 0 ? "&dur=" + Math.floor(duration) : "");
     const current = String(existing || "");
     const regex = /shx:ep=\d+&sec=\d+(?:&dur=\d+)?/;
-    return regex.test(current) ? current.replace(regex, tag) : current.trim() ? tag + "\n" + current : tag;
+    let out = regex.test(current) ? current.replace(regex, tag) : current.trim() ? tag + "\n" + current : tag;
+    const line = metaLine(meta);
+    if (line) out = out.replace(/\n?shx-meta:[^\n]*/g, "").replace(tag, tag + "\n" + line);
+    return out;
   }
   function resumeFromEntry(entry, totalEpisodes) {
     if (!entry) return null;
@@ -314,7 +324,7 @@
     if (data?.SaveMediaListEntry) entries.set(id, { ...existing, ...data.SaveMediaListEntry });
     return copy(data?.SaveMediaListEntry || null);
   }
-  async function syncPosition(mediaId, episode, seconds, duration, ended = false, observedAt = 0) {
+  async function syncPosition(mediaId, episode, seconds, duration, ended = false, observedAt = 0, meta = null) {
     if (!authenticated()) return null;
     const id = Number(mediaId);
     const ep = Math.max(1, Math.floor(Number(episode) || 1));
@@ -332,7 +342,7 @@
       if(observedAt && Number(entry?.updatedAt||0)*1000 > observedAt) return copy(entry);
       // Android uses the number of fully watched episodes, never increment on a partial episode.
       const progress = Math.max(Number(entry?.progress || 0), ended ? ep : ep - 1);
-      const noteText = formatWatchNotes(entry?.notes, ep, ended && dur > 0 ? dur : sec, dur);
+      const noteText = formatWatchNotes(entry?.notes, ep, ended && dur > 0 ? dur : sec, dur, meta);
       const status = entry?.status === "COMPLETED" ? "COMPLETED" :
         (ended && entry?.media?.episodes && ep >= Number(entry.media.episodes) ? "COMPLETED" : "CURRENT");
       const data = await request(

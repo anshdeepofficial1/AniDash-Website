@@ -142,3 +142,18 @@ test("MAL invalid OAuth state is rejected without calling token exchange",async(
 test("first playback sync fetches existing Android notes before writing",async()=>{const {client,queries}=aniHarness();await client.init();await client.syncPosition(21,381,345,1440,false);const mutation=queries.find(q=>q.query.includes("SaveMediaListEntry"));assert.equal(mutation.variables.progress,380);assert.match(mutation.variables.notes,/shx:ep=381&sec=345&dur=1440/);assert.match(mutation.variables.notes,/My personal note/);});
 
 test("offline checkpoint never overwrites a newer remote entry",async()=>{const {client,queries}=aniHarness();await client.init();await client.list();const result=await client.syncPosition(21,381,111,1440,false,999000);assert.equal(result.notes,cloudEntry.notes);assert.equal(queries.filter(x=>x.query.includes("SaveMediaListEntry")).length,0)});
+
+test("language/source meta goes on its own line and never disturbs the Android shx tag",async()=>{
+  const {client,queries}=aniHarness();await client.init();
+  await client.syncPosition(21,381,345,1440,false,0,{lang:"hi-dub",src:"ravok"});
+  const first=queries.filter(q=>q.query.includes("SaveMediaListEntry")).pop().variables.notes;
+  assert.match(first,/^shx:ep=381&sec=345&dur=1440\nshx-meta:lang=hi-dub&src=ravok/m);
+  // Android's own regex/formatter (replace-first on the shx tag) must leave the meta line intact and parse the same values.
+  const androidRegex=/shx:ep=(\d+)&sec=(\d+)(?:&dur=(\d+))?/;
+  const m=androidRegex.exec(first);assert.deepEqual([m[1],m[2],m[3]],["381","345","1440"]);
+  assert.equal(first.replace(androidRegex,"shx:ep=382&sec=10&dur=1440").includes("shx-meta:lang=hi-dub"),true);
+  // junk meta is dropped
+  await client.syncPosition(21,381,350,1440,false,0,{lang:"x\ny",src:"bad src!"});
+  const second=queries.filter(q=>q.query.includes("SaveMediaListEntry")).pop().variables.notes;
+  assert.ok(!/shx-meta/.test(second)||/shx-meta:lang=hi-dub/.test(second));
+});

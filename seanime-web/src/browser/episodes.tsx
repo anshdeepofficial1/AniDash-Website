@@ -9,6 +9,7 @@ import { Anime_Entry } from "@/api/generated/types"
 import { Button } from "@/components/ui/button"
 import { getArcs } from "./arcs"
 import * as Engine from "./engine"
+import { loadServerPref, rememberNative, rememberEmbed, preferredNative, pickEmbed } from "./server-pref"
 import {
   LuPlay,
   LuPause,
@@ -386,7 +387,9 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
   const [audio, setAudio] = React.useState<"dub" | "sub">(
     initial.preferences?.preferredAudio === "sub" ? "sub" : "dub"
   )
-  const [selectedServer, setSelectedServer] = React.useState<string>(DEFAULT_SERVER)
+  // The viewer's last explicit server choice is the default for every episode, refresh and session.
+  const [selectedServer, setSelectedServer] = React.useState<string>(() => preferredNative(initial.preferences?.preferredAudio === "sub" ? "sub" : "dub", k => (JUSTANIME_SERVERS as readonly string[]).includes(k), DEFAULT_SERVER))
+  const userPickedThisEpisode = React.useRef(false)
   const installedBrowserSources = useInstalledSources()
   const customSourcePrefix = "local-source:"
   const isCustomSource = selectedServer.startsWith(customSourcePrefix)
@@ -482,6 +485,13 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     if (waitingForMoreSources.current) { setError(""); setPlayerNotice(playbackStarted.current ? "Waiting for another source…" : ""); setBuffering(true); return true }
     return false
   }, [markServerDead])
+  // Which audio the viewer is really hearing, written next to the position so the Android app can show it.
+  const playbackMeta = (): { lang: string; src?: string } => {
+    const l = String((activeStream as any)?.lang || "")
+    const lang = l && l !== "en" ? l + "-dub" : audio === "dub" ? "en-dub" : "ja-sub"
+    const src = String(activeStream?.provider || activeStream?.serverId || activeStream?.server || "").toLowerCase().replace(/[^a-z0-9-]/g, "").slice(0, 24)
+    return { lang, ...(src ? { src } : {}) }
+  }
   const [volume, setVolume] = React.useState(1)
   const [playbackRate, setPlaybackRate] = React.useState(1)
   const [autoplay, setAutoplay] = React.useState(initial.preferences?.playerAutoplay !== false)
@@ -705,7 +715,9 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
       const mal = m.idMal || ""
       let activated = false
       const attempted = new Map<string,string>()
-      const forced = forcedEmbed.current
+      // A saved embed-player choice (e.g. a Hindi or MegaPlay server) is applied to this episode when it exists.
+      const savedEmbed = forcedEmbed.current ? null : pickEmbed(loadServerPref(), audio, externalGroups().flatMap(g => g.items).filter(x => !String(x.serverId || "").match(/^(megaplay|megavid|anixo)-/) || Engine.isEnabled("embed-" + String(x.serverId).split("-")[0])) as any[]) as StreamSource | null
+      const forced = forcedEmbed.current || savedEmbed
       forcedEmbed.current = null
       if (forced) {
         // The viewer picked an embed player from the other language row.
@@ -1432,7 +1444,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
       if(force||value.ended||Date.now()-lastSynced.current>=10000){
         checkpoint.savedAt=checkpoint.at
         lastSynced.current=Date.now()
-        void syncPlayback(m,selected,value.position,value.duration,value.ended).then(ok=>setSyncState(ok?"Synced with AniList":"Saved locally · cloud sync pending or not signed in")).catch(()=>setSyncState("Saved locally · cloud sync pending"))
+        void syncPlayback(m,selected,value.position,value.duration,value.ended,playbackMeta()).then(ok=>setSyncState(ok?"Synced with AniList":"Saved locally · cloud sync pending or not signed in")).catch(()=>setSyncState("Saved locally · cloud sync pending"))
       }
       return
     }
@@ -1450,7 +1462,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
       lastSynced.current = Date.now()
       syncBusy.current = true
       setSyncState("Saving progress…")
-      void syncPlayback(m, selected, position, el.duration, ended)
+      void syncPlayback(m, selected, position, el.duration, ended, playbackMeta())
         .then(ok => setSyncState(ok ? "Synced with AniList" : "Saved locally · cloud sync pending or not signed in"))
         .catch(() => {
           lastSynced.current = 0
@@ -1550,7 +1562,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     embedResumeGate.current={ready:true,target:seconds,accepted:true};setEmbedResumePending(false)
     persistPlayback(m,selected,seconds,duration,false)
     setManualMessage("Checkpoint saved locally. Syncing…")
-    try{const ok=await syncPlayback(m,selected,seconds,duration,false);setManualMessage(ok?"Checkpoint synced with AniList. Seek to this time on the other player.":"Checkpoint saved locally; cloud sync pending or not signed in.")}catch{setManualMessage("Checkpoint saved locally; cloud sync pending.")}
+    try{const ok=await syncPlayback(m,selected,seconds,duration,false,playbackMeta());setManualMessage(ok?"Checkpoint synced with AniList. Seek to this time on the other player.":"Checkpoint saved locally; cloud sync pending or not signed in.")}catch{setManualMessage("Checkpoint saved locally; cloud sync pending.")}
   }
 
   // Language players (animehindi.fun and similar) are loaded per episode and shown in their own section.
@@ -1570,6 +1582,14 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
       .catch(() => {})
     return () => { live = false }
   }, [m.id, selected])
+  React.useEffect(() => { userPickedThisEpisode.current = false }, [entry.mediaId, selected])
+  // Language players load after the native sources; apply the saved one as soon as it is available,
+  // unless the viewer already picked something for this episode.
+  React.useEffect(() => {
+    if (!watchMode || !langEmbeds.length || userPickedThisEpisode.current || activeStream?.type === "embed") return
+    const hit = pickEmbed(loadServerPref(), audio, langEmbeds as any[]) as StreamSource | null
+    if (hit) openExternal(hit, false)
+  }, [langEmbeds, watchMode])
   function externalGroups() {
     const ep = selected || 1
     const mal = m.idMal
@@ -1590,7 +1610,11 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     for (const [code, items] of byLang) groups.push({ key: "lang-" + code, label: LANG_NAMES[code] || code.toUpperCase(), tone: "amber", items })
     return groups
   }
-  function openExternal(e: StreamSource) {
+  function openExternal(e: StreamSource, remember = true) {
+    if (remember) {
+      userPickedThisEpisode.current = true
+      rememberEmbed({ serverId: e.serverId, name: e.server, lang: String((e as any).lang || "en"), audio: e.isDub ? "dub" : (e as any).lang && (e as any).lang !== "en" ? audio : "sub" })
+    }
     record(true)
     setError(""); setAccessDenied(false); setPlayerNotice("")
     setStreams(prev => (prev.some(x => x.url === e.url) ? prev : [...prev, e]))
@@ -1605,6 +1629,8 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
   }
 
   function pickServer(serverKey: string, channel: "sub" | "dub") {
+    userPickedThisEpisode.current = true
+    rememberNative(channel, serverKey)
     if (watchMode) record(true)
     setAudio(channel)
     setSelectedServer(serverKey)

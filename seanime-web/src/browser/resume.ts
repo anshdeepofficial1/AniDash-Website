@@ -2,7 +2,7 @@ const KEY="anidash.watch.web.v1"
 const account=()=> (window as any).AniDashAccount
 const owner=()=>String(account()?.currentUser?.()?.id||"")
 const QUEUE="anidash.position.queue.v1"
-type Pending={owner:string;mediaId:number;episode:number;position:number;duration:number;ended:boolean;at:number}
+type Pending={owner:string;mediaId:number;episode:number;position:number;duration:number;ended:boolean;at:number;meta?:{lang:string;src?:string}}
 function readQueue():Pending[]{try{const q=JSON.parse(localStorage.getItem(QUEUE)||"[]");return Array.isArray(q)?q:[]}catch{return []}}
 function writeQueue(q:Pending[]){try{localStorage.setItem(QUEUE,JSON.stringify(q.slice(-100)))}catch{}}
 export function parseManualPosition(value:string):number|null{const parts=value.trim().split(":");if(parts.length<1||parts.length>3||parts.some(x=>!/^\d{1,6}$/.test(x)))return null;const nums=parts.map(Number);if(nums.slice(1).some(n=>n>=60))return null;const total=nums.reduce((a,b)=>a*60+b,0);return total<=86400?total:null}
@@ -26,15 +26,15 @@ export async function flushPlaybackQueue():Promise<boolean>{
  const a=account(),user=owner();if(!a?.authenticated?.()||!user)return false
  const task=(async()=>{let ok=true;for(const item of readQueue().filter(x=>x.owner===user)){
    if(owner()!==user||!a.authenticated())return false
-   try{const result=await a.syncPosition(item.mediaId,item.episode,item.position,item.duration,item.ended,item.at);if(!result){ok=false;continue}
+   try{const result=await a.syncPosition(item.mediaId,item.episode,item.position,item.duration,item.ended,item.at,item.meta);if(!result){ok=false;continue}
      writeQueue(readQueue().filter(x=>!(x.owner===user&&x.mediaId===item.mediaId&&x.at===item.at)))
    }catch{ok=false;break}
  }window.dispatchEvent(new Event("anidash-watch-progress"));return ok})()
  flushing=task;try{return await task}finally{if(flushing===task)flushing=null}
 }
-export async function syncPlayback(m:any,episode:number,position:number,duration:number,ended=false){
+export async function syncPlayback(m:any,episode:number,position:number,duration:number,ended=false,meta?:{lang:string;src?:string}){
  const a=account(),user=owner();if(!a?.authenticated?.()||!user)return false
- const item:Pending={owner:user,mediaId:m.id,episode,position,duration,ended,at:Date.now()}
+ const item:Pending={owner:user,mediaId:m.id,episode,position,duration,ended,at:Date.now(),...(meta?{meta}:{})}
  writeQueue([...readQueue().filter(x=>x.owner!==user||x.mediaId!==m.id),item])
  if(flushing)await flushing
  const ok=await flushPlaybackQueue()
