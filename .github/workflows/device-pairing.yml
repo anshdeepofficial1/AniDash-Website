@@ -20,7 +20,7 @@ jobs:
           node-version: 20
       - run: sudo apt-get update && sudo apt-get install -y redis-tools
       - run: npm install --ignore-scripts
-      - run: node --check server/device-pair.js && node --check anilist-account.js && node --check mal-account.js && node --check api/mal-data.js
+      - run: node --check server/device-pair.js && node --check api/auth-config.js && node --check anilist-account.js && node --check mal-account.js && node --check api/mal-data.js
       - run: node --test tests/device-pairing.test.js tests/account-auth.test.js tests/cross-device-sync.test.js
   browser-build:
     runs-on: ubuntu-latest
