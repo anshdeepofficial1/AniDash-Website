@@ -10,13 +10,14 @@ const token="server-only-"+randomBytes(30).toString("hex");
 function fakeResponse(){return {headers:{},statusCode:0,setHeader(k,v){this.headers[k]=v},status(n){this.statusCode=n;return this},json(x){this.data=x;return this}}}
 async function call(action,{method="GET",code,body,cookie="",ip="198.51.100.1",ua="Mozilla/5.0 (Windows NT 10.0) Chrome/142.0"}={}){const res=fakeResponse();await endpoint(action)({method,query:{code},body,headers:{host:"anidashgo.vercel.app",origin,cookie,"x-vercel-forwarded-for":ip,"user-agent":ua}},res);return res}
 const approval=code=>({code,accounts:{anilist:{accessToken:token,userId:"123",username:"Example"}},sync:{schemaVersion:1,preferences:{nativeSource:"hianime",player:{preferredAudioLanguage:"dub"},downloads:{preferredQuality:"1080p"}}},client:{platform:"android"}});
-test("five minute pairing, separate browser binding, atomic redemption, server-only credentials, denial and rate limit",async()=>{
+for (const [urlKey,tokenKey] of [["UPSTASH_REDIS_REST_URL","UPSTASH_REDIS_REST_TOKEN"],["KV_REST_API_URL","KV_REST_API_TOKEN"]]) test("five minute pairing, atomic redemption, server-only credentials, denial and rate limit ("+urlKey+")",async()=>{
  process.env.DEVICE_PAIR_ENCRYPTION_KEY=randomBytes(32).toString("base64");
- process.env.UPSTASH_REDIS_REST_URL="https://redis.test";
- process.env.UPSTASH_REDIS_REST_TOKEN="test";
+ for(const k of ["UPSTASH_REDIS_REST_URL","UPSTASH_REDIS_REST_TOKEN","KV_REST_API_URL","KV_REST_API_TOKEN"])delete process.env[k];
+ process.env[urlKey]="https://redis.test";
+ process.env[tokenKey]="test";
  const original=global.fetch;
  global.fetch=async(url,opts={})=>{
-  if(url==="https://redis.test"){const cmd=JSON.parse(opts.body);return Response.json({result:redis(...cmd)})}
+  if(url==="https://redis.test"){assert.equal(opts.headers.Authorization,"Bearer test");const cmd=JSON.parse(opts.body);return Response.json({result:redis(...cmd)})}
   if(url==="https://graphql.anilist.co"){assert.equal(opts.headers.Authorization,"Bearer "+token);return Response.json({data:{Viewer:{id:123,name:"Example"}}})}
   throw Error("Unexpected upstream");
  };
