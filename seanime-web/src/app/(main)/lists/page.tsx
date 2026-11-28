@@ -1,3 +1,5 @@
+import { BrowserCustomLists } from "@/browser/custom-lists"
+import { useServerStatus } from "@/app/(main)/_hooks/use-server-status"
 import { CustomLibraryBanner } from "@/app/(main)/_features/anime-library/_containers/custom-library-banner"
 import { AnilistCollectionLists } from "@/app/(main)/lists/_containers/anilist-collection-lists"
 import { PageWrapper } from "@/components/shared/page-wrapper"
@@ -5,6 +7,7 @@ import React from "react"
 
 
 export default function Home() {
+    const status=useServerStatus()
 
     return (
         <>
@@ -13,6 +16,7 @@ export default function Home() {
                 className="p-4 sm:p-8 pt-4 relative"
                 data-anilist-page
             >
+                {status?.os==="browser"&&<BrowserCustomLists />}
                 <AnilistCollectionLists />
             </PageWrapper>
         </>
