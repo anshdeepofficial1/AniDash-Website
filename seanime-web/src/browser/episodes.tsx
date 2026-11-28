@@ -1,3 +1,5 @@
+import { episodeLoader, prepareEpisode } from "./next-episode"
+import { list } from "./transport"
 import { cachedEpisodeMetadata, cachedEpisodePage, loadEpisodePage, type Metadata } from "./episode-metadata-cache"
 import { getEpisodeResume, localResume, persistPlayback, syncPlayback } from "./resume"
 import React from "react"
@@ -391,6 +393,14 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
   const [autoplay, setAutoplay] = React.useState(initial.preferences?.playerAutoplay !== false)
   const [autoSkip, setAutoSkip] = React.useState(initial.preferences?.playerAutoSkip !== false)
   const [autoNext, setAutoNext] = React.useState(initial.preferences?.playerAutoNext !== false)
+  const [nextReady,setNextReady]=React.useState(false)
+  const [nextCount,setNextCount]=React.useState(3)
+  const [nextCanceled,setNextCanceled]=React.useState(false)
+  const [nextFailed,setNextFailed]=React.useState(false)
+  const [episodeEnded,setEpisodeEnded]=React.useState(false)
+  const [suggestions,setSuggestions]=React.useState<any[]>([])
+  const warmNext=React.useRef<{episode:number;audio:string;server:string;data:any}|null>(null)
+  const transitioned=React.useRef(false)
   const [segments, setSegments] = React.useState<SkipSegments>(EMPTY_SEGMENTS)
   const skippedSegments = React.useRef(new Set<string>())
   const intro = withinDuration(segments.intro, duration)
@@ -488,6 +498,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     setStreams([])
     setTracks([])
     setSegments(EMPTY_SEGMENTS)
+    setNextReady(false);setNextCount(3);setNextCanceled(false);setNextFailed(false);setEpisodeEnded(false);setSuggestions([]);transitioned.current=false
     setSelected(next)
     setNavigatorPage(Math.max(1, Math.ceil((next || 1) / 100)))
     setNavigatorJump("")
@@ -624,6 +635,8 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
         }
       }
 
+      const prepared=warmNext.current
+      if(!activated&&prepared?.episode===selected&&prepared.audio===audio&&prepared.server===selectedServer){add(prepared.data);warmNext.current=null}
       streamErrors.clear()
       // One automatic second round: providers that were briefly unreachable often answer on the retry.
       for (let attempt = 0; attempt < 2 && live && !activated; attempt++) {
@@ -674,16 +687,57 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     }
   }, [entry.mediaId, selected, audio, selectedServer, watchMode, resolveNonce,requireHindi,pairedSource])
 
-  // Warm the next episode while this one plays, so "next" starts almost instantly.
-  const prefetchedEpisode = React.useRef<number>(0)
-  React.useEffect(() => {
-    if (!watchMode || !selected || selected >= total || !isPlaying || currentTime < 20) return
-    const nextEpisode = selected + 1
-    const key = entry.mediaId * 100000 + nextEpisode
-    if (prefetchedEpisode.current === key) return
-    prefetchedEpisode.current = key
-    streamUrlsFor(entry.mediaId, m.idMal || "", nextEpisode, audio, selectedServer || DEFAULT_SERVER, [m.title?.english, m.title?.romaji].filter(Boolean) as string[], { year: m.seasonYear || m.startDate?.year, eps: m.episodes, fmt: m.format }).forEach(url => { void cachedJson(url) })
-  }, [watchMode, selected, total, isPlaying, currentTime >= 20, entry.mediaId, audio, selectedServer])
+  // Resolve URLs early, then actually load the next episode near the end.
+  const nearEnd=duration>0&&(duration-currentTime<=30||!!outro&&currentTime>=outro.start)
+  const warmWindow=duration>0&&(duration-currentTime<=65||!!outro&&currentTime>=Math.max(0,outro.start-35))
+  React.useEffect(()=>{
+    if(!watchMode||!selected||selected>=total||requireHindi||activeStream?.type==="embed"||!autoNext||currentTime<20)return
+    const urls=streamUrlsFor(entry.mediaId,m.idMal||"",selected+1,audio,selectedServer||DEFAULT_SERVER,[m.title?.english,m.title?.romaji].filter(Boolean) as string[],{year:m.seasonYear||m.startDate?.year,eps:m.episodes,fmt:m.format})
+    urls.forEach(url=>void cachedJson(url))
+  },[watchMode,selected,total,audio,selectedServer,requireHindi,autoNext,currentTime>=20,activeStream?.type])
+  React.useEffect(()=>{
+    if(!watchMode||!warmWindow||selected>=total||!autoNext||requireHindi||activeStream?.type==="embed")return
+    const controller=new AbortController()
+    setNextReady(false);setNextFailed(false)
+    const urls=streamUrlsFor(entry.mediaId,m.idMal||"",selected+1,audio,selectedServer||DEFAULT_SERVER,[m.title?.english,m.title?.romaji].filter(Boolean) as string[],{year:m.seasonYear||m.startDate?.year,eps:m.episodes,fmt:m.format})
+    async function prepare(){
+      const pending=urls.map((url,index)=>cachedJson(url).then(data=>({index,data})))
+      const remaining=new Set(pending.map((_,i)=>i))
+      while(remaining.size&&!controller.signal.aborted){
+        const {index,data}=await Promise.race([...remaining].map(i=>pending[i]));remaining.delete(index)
+        const candidates=(data?.sources||[]).filter((src:StreamSource)=>src.url&&src.type!=="embed")
+        for(const source of candidates.slice(0,2)){
+          if(controller.signal.aborted)return
+          if(await prepareEpisode(source,controller.signal)){
+            if(controller.signal.aborted)return
+            warmNext.current={episode:selected+1,audio,server:selectedServer,data:{...data,sources:[source,...candidates.filter((s:StreamSource)=>s.url!==source.url)]}}
+            setNextReady(true);return
+          }
+        }
+      }
+      if(!controller.signal.aborted)setNextFailed(true)
+    }
+    void prepare()
+    return()=>controller.abort()
+  },[watchMode,warmWindow,selected,total,audio,selectedServer,autoNext,requireHindi,activeStream?.type])
+  const showNext=watchMode&&autoNext&&selected<total&&!nextCanceled&&!requireHindi&&activeStream?.type!=="embed"&&(nearEnd||episodeEnded)
+  React.useEffect(()=>{
+    if(!showNext||!nextReady||(!isPlaying&&!episodeEnded)||transitioned.current){setNextCount(3);return}
+    setNextCount(3)
+    const start=Date.now()
+    const interval=window.setInterval(()=>{
+      const left=Math.max(0,3-Math.floor((Date.now()-start)/1000))
+      setNextCount(left)
+      if(left===0&&!transitioned.current){transitioned.current=true;clearInterval(interval);record(true,true);openEpisode(selected+1,true)}
+    },100)
+    return()=>clearInterval(interval)
+  },[showNext,nextReady,isPlaying,episodeEnded,selected])
+  React.useEffect(()=>{
+    if(!watchMode||selected!==total||m.status!=="FINISHED"||(!warmWindow&&!episodeEnded))return
+    let live=true
+    void list({perPage:12,sort:["TRENDING_DESC"],genres:m.genres?.slice(0,1),status:["FINISHED","RELEASING"]}).then(result=>{if(live)setSuggestions((result?.Page?.media||[]).filter((media:any)=>media.id!==m.id).slice(0,4))}).catch(()=>{})
+    return()=>{live=false}
+  },[watchMode,selected,total,m.id,m.status,warmWindow,episodeEnded])
 
   // Playback & HLS setup
   React.useEffect(() => {
@@ -778,6 +832,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
 
     if (isHls && Hls.isSupported()) {
       hls = new Hls({
+        loader: episodeLoader(false),
         enableWorker: true,
         lowLatencyMode: false,
         manifestLoadingMaxRetry: 2,
@@ -2007,7 +2062,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
                   if (autoSkip && playbackStarted.current && el.currentTime > 0 && el.readyState >= 2 && !el.paused && !el.seeking && !isLoadingStream) {
                     const segment = availableSegments.find(item =>
                       el.currentTime >= item.start && el.currentTime < item.end && !skippedSegments.current.has(item.kind))
-                    if (segment) skipSegment(segment)
+                    if (segment && !(segment.kind==="outro"&&autoNext&&selected<total&&!nextCanceled)) skipSegment(segment)
                   }
                   record()
                 }
@@ -2017,7 +2072,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
                 if (mountedMediaEpisode.current !== selected) return
                 setIsPlaying(false)
                 record(true, true)
-                if (autoNext && selected < total) openEpisode(selected + 1, true)
+                setEpisodeEnded(true)
               }}
               onError={() => {
                 if (mountedMediaEpisode.current !== selected || mediaAccessDenied.current) return
@@ -2037,6 +2092,12 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
                   onError={() => setCaptionMessage("A subtitle track could not be read by the browser.")} />
               ))}
             </video>
+            {showNext&&<div role="status" className="absolute bottom-16 right-3 sm:bottom-20 sm:right-6 z-[35] w-[min(90%,340px)] rounded-xl border border-white/20 bg-neutral-950/95 p-3 text-white shadow-2xl cursor-auto">
+              <div className="flex items-center gap-3">{(metadata[selected+1]?.image||m.bannerImage)&&<img src={metadata[selected+1]?.image||m.bannerImage} alt="" className="h-14 w-24 shrink-0 rounded object-cover"/>}<div className="min-w-0"><p className="text-xs font-medium text-neutral-400">Up next · Episode {selected+1}</p><p className="text-sm font-semibold">{nextReady?(isPlaying||episodeEnded?"Your next episode is starting in "+nextCount+" seconds":"Next episode ready"):nextFailed?"Next episode needs another attempt":"Preparing your next episode…"}</p></div></div>
+              <div className="mt-3 flex gap-2"><button type="button" className="flex-1 rounded-md bg-white py-2 text-xs font-semibold text-black" onClick={()=>{if(transitioned.current)return;transitioned.current=true;record(true,true);openEpisode(selected+1,true)}}>Play now</button><button type="button" className="rounded-md border border-white/30 px-3 py-2 text-xs" onClick={()=>setNextCanceled(true)}>Cancel</button></div>
+              {nextReady&&<div className="mt-2 h-1 overflow-hidden rounded bg-white/20"><div className="h-full bg-white transition-all" style={{width:(nextCount/3*100)+"%"}}/></div>}
+            </div>}
+            {episodeEnded&&selected===total&&m.status==="FINISHED"&&suggestions.length>0&&<div className="absolute inset-0 z-[35] flex flex-col justify-center gap-3 overflow-y-auto bg-black/90 p-4 text-white sm:p-8"><div><p className="text-xs text-neutral-400">Series completed</p><h2 className="text-lg font-bold sm:text-2xl">Watch something next</h2></div><div className="grid grid-cols-2 gap-2 sm:grid-cols-4">{suggestions.map(item=><button type="button" key={item.id} onClick={()=>router.push("/entry?id="+item.id)} className="min-w-0 text-left"><img src={item.bannerImage||item.coverImage?.large} alt="" className="aspect-video w-full rounded-lg object-cover"/><p className="mt-1 line-clamp-2 text-xs font-semibold">{item.title?.english||item.title?.userPreferred||item.title?.romaji}</p></button>)}</div><button type="button" className="self-start rounded border px-3 py-1 text-xs" onClick={()=>setEpisodeEnded(false)}>Dismiss</button></div>}
             {(controlsVisible || playerMenu) && (
               <div className="absolute inset-x-0 top-0 z-20 flex items-start justify-between gap-3 bg-gradient-to-b from-black/85 to-transparent px-3 pb-10 pt-3 sm:px-6 sm:pt-5 pointer-events-none">
                 <div className="min-w-0 text-white drop-shadow-md">
@@ -2201,6 +2262,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
                 <span className="rounded-md bg-white/10 px-2 py-1 text-[11px] text-neutral-300">{audio === "dub" ? "English DUB" : "Japanese SUB"}</span>
               </div>
 
+              <div className="flex flex-wrap items-center gap-2 text-xs text-neutral-400"><span className="rounded-md border border-neutral-700 px-2 py-1">Current source: {activeStream?.server||"Not selected"}</span>{pairedSource&&<span>Android preference: {pairedSource}</span>}{requireHindi&&<span>Hindi preferred</span>}</div>
               {/* SUB Channel Row */}
               <div className="flex items-center gap-3">
                 <div className="flex items-center gap-1.5 text-xs font-bold text-neutral-300 w-14 shrink-0">
@@ -2303,7 +2365,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
               <h2 className="text-base font-bold">Languages &amp; external players</h2>
               <p className="text-xs text-neutral-400 mt-1">These open the provider's own player, not the AniDash player.</p>
             </div>
-            {(requireHindi || pairedSource) && <p role="status" className="text-sm text-amber-300">{requireHindi ? "Hindi preferred · " : "Android source: "+pairedSource+" · "}Current source: {activeStream?.server || "not selected"}{!requireHindi && activeStream ? " · "+audio.toUpperCase() : ""}</p>}
+
             {externalGroups().map(g => (
               <div key={g.key} className="flex items-start gap-3">
                 <span className={`mt-1 w-24 shrink-0 rounded-md px-2 py-1 text-center text-[11px] font-bold ${g.tone === "amber" ? "bg-amber-500/15 text-amber-300" : "bg-sky-500/15 text-sky-300"}`}>{g.label}{g.note && <span className="block text-[9px] font-medium opacity-70">{g.note}</span>}</span>
