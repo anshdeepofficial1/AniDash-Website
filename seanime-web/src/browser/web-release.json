@@ -1,8 +1,20 @@
 {
-  "version": "2.2.0",
+  "version": "2.2.1",
   "channel": "stable",
   "date": "2026-11-28",
   "releases": [
+    {
+      "version": "2.2.1",
+      "date": "2026-11-28",
+      "title": "Navigation, hover and calendar fixes",
+      "changes": [
+        "Dedicated ranked sections with heading arrows instead of inline expansion.",
+        "Seven-day unique recent releases with broader family-cartoon filtering.",
+        "Viewport-safe hover cards, visible list controls and five-second trailer delay.",
+        "Boundary-aware carousel arrows and clickable original PNG-derived AniDash branding.",
+        "Monthly release calendar with date selection and AM/PM times."
+      ]
+    },
     {
       "version": "2.2.0",
       "date": "2026-11-28",
