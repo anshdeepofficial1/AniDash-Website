@@ -85,3 +85,5 @@ export async function browserRecentReleases(){
  return [...latest.values()].sort((a,b)=>b.airingAt-a.airingAt)
 }
 
+
+export async function browserMangaDetails(id:number){if(!Number.isSafeInteger(id)||id<=0)throw Error("Invalid manga ID");const data=await gql("query($id:Int){Media(id:$id,type:MANGA,isAdult:false){"+mangaFields+"}}",{id});return data.Media}
