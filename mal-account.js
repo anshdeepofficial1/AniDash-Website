@@ -143,7 +143,7 @@
   const currentUser = () => clone(viewer);
   const authenticated = () => Boolean(viewer && (paired || readSession()?.access_token));
   const configured = () => Boolean(config?.enabled);
-  const logout = async () => {if(paired){const r=await fetch("/api/device-pair/logout",{method:"POST"});if(!r.ok)throw Error("Sign-out failed");paired=false}clear()};
+  const logout = async () => {if(paired){const r=await fetch("/api/device-pair/logout",{method:"POST"});if(!r.ok)throw Error("Sign-out failed");paired=false;window.AniDashAccount?.stopPairedHeartbeat?.()}clear()};
   window.AniDashMal = {
     configuration, captureRedirect, beginLogin, init, currentUser, authenticated, configured,
     setHandler, list, updateProgress, getEntry, setStatus, deleteEntry, isPaired:()=>paired, logout
