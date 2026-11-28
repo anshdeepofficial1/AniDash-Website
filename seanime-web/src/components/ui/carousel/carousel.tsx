@@ -206,6 +206,7 @@ export const Carousel = React.forwardRef<HTMLDivElement, React.HTMLAttributes<HT
 
         return () => {
             api?.off("select", onSelect)
+            api?.off("reInit", onSelect)
         }
     }, [api, onSelect])
 
@@ -326,16 +327,10 @@ export function CarouselButtons(props: CarouselButtonsProps) {
         ...rest
     } = props
 
-    const { scrollSnaps } = useDotButton()
+    const { canScrollPrev, canScrollNext, orientation } = useCarousel()
+    if(orientation==="vertical")return <>{(canScrollPrev||canScrollNext)&&<div className={cn("flex gap-2 absolute top-[-2rem] right-0",containerClass)}>{canScrollPrev&&<CarouselPrevious aria-label="Scroll backward"/>}{canScrollNext&&<CarouselNext aria-label="Scroll forward"/>}</div>}</>
+    return <>{canScrollPrev&&<div className="absolute left-1 top-1/2 -translate-y-1/2 z-[16]"><CarouselPrevious aria-label="Scroll left" className="bg-black/75 text-white shadow-lg"/></div>}{canScrollNext&&<div className="absolute right-1 top-1/2 -translate-y-1/2 z-[16]"><CarouselNext aria-label="Scroll right" className="bg-black/75 text-white shadow-lg"/></div>}</>
 
-    return (
-        <>
-            {scrollSnaps.length > 30 && <div className={cn("flex gap-2 absolute top-[-2rem] right-0", containerClass)}>
-                <CarouselPrevious />
-                <CarouselNext />
-            </div>}
-        </>
-    )
 }
 
 
@@ -399,7 +394,7 @@ export const CarouselPrevious = React.forwardRef<HTMLButtonElement, CarouselButt
         <IconButton
             ref={ref}
             intent={intent}
-            className={CarouselAnatomy.button({ orientation, placement: "previous" })}
+            className={cn(CarouselAnatomy.button({ orientation, placement: "previous" }),className)}
             disabled={!canScrollPrev}
             onClick={scrollPrev}
             icon={<svg
@@ -432,7 +427,7 @@ export const CarouselNext = React.forwardRef<HTMLButtonElement, CarouselButtonPr
         <IconButton
             ref={ref}
             intent={intent}
-            className={CarouselAnatomy.button({ orientation, placement: "next" })}
+            className={cn(CarouselAnatomy.button({ orientation, placement: "next" }),className)}
             disabled={!canScrollNext}
             onClick={scrollNext}
             icon={<svg
