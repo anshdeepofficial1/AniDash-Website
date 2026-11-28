@@ -1,8 +1,18 @@
 {
-  "version": "2.3.1",
+  "version": "2.3.2",
   "channel": "stable",
   "date": "2026-11-28",
   "releases": [
+    {
+      "version": "2.3.2",
+      "date": "2026-11-28",
+      "title": "Mobile settings and manga chapter reader",
+      "changes": [
+        "Responsive settings layout with compact section selector and constrained device cards.",
+        "Title-linked chapter library with CBZ import, chapter selection, continuous scrolling and page mode.",
+        "Reading position saved locally with chapter navigation and completion controls."
+      ]
+    },
     {
       "version": "2.3.1",
       "date": "2026-11-28",
