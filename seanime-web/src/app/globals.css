@@ -1343,3 +1343,6 @@ media-preview-chapter-display {
         }
     }
 }
+
+/* Keep browser header tools visible without duplicating sidebar navigation. */
+[data-top-navbar]:has([aria-label^="Notifications"]){overflow:visible!important;min-height:64px;background:var(--background);}
