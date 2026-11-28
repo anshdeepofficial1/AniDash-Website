@@ -193,14 +193,6 @@ export function MediaEntryCard<T extends "anime" | "manga">(props: MediaEntryCar
         })
     }, [mediaId, ANIME_LINK, setPlayNext, router, serverStatus?.os, media, listData?.progress])
 
-    const onPopupMouseEnter = React.useCallback(() => {
-        setActionPopupHover(mediaId)
-    }, [mediaId, setActionPopupHover])
-
-    const onPopupMouseLeave = React.useCallback(() => {
-        setActionPopupHover(undefined)
-    }, [setActionPopupHover])
-
     const { setPreviewModalMediaId } = useMediaPreviewModal()
     const { openDirInLibraryExplorer } = useLibraryExplorer()
 
@@ -218,9 +210,10 @@ export function MediaEntryCard<T extends "anime" | "manga">(props: MediaEntryCar
             closePopupTimerRef.current = undefined
         }
         setShouldRenderPopup(true)
+        setActionPopupHover(mediaId)
         warmCardEntry()
         if(type==="anime"&&serverStatus?.os==="browser")prefetchEpisodeMetadata(media,cardResume(media,listData?.progress||0,listData?.status)?.episode||1)
-    }, [warmCardEntry,type,serverStatus?.os,media,listData?.progress,listData?.status])
+    }, [warmCardEntry,type,serverStatus?.os,media,listData?.progress,listData?.status,mediaId,setActionPopupHover])
 
     const handleCardMouseLeave = React.useCallback(() => {
         if (closePopupTimerRef.current) {
@@ -228,9 +221,10 @@ export function MediaEntryCard<T extends "anime" | "manga">(props: MediaEntryCar
         }
         closePopupTimerRef.current = window.setTimeout(() => {
             setShouldRenderPopup(false)
+            setActionPopupHover(previous=>previous===mediaId?undefined:previous)
             closePopupTimerRef.current = undefined
-        }, 35)
-    }, [])
+        }, 160)
+    }, [mediaId,setActionPopupHover])
 
     React.useEffect(() => {
         return () => {
@@ -302,8 +296,8 @@ export function MediaEntryCard<T extends "anime" | "manga">(props: MediaEntryCar
 
                     {/*ACTION POPUP*/}
                     <MediaEntryCardHoverPopup
-                        onMouseEnter={onPopupMouseEnter}
-                        onMouseLeave={onPopupMouseLeave}
+                        onPointerEnter={handleCardMouseEnter}
+                        onPointerLeave={handleCardMouseLeave}
                         coverImage={media.bannerImage || media.coverImage?.extraLarge || ""}
                         shouldRenderPopup={shouldRenderPopup}
                     >
@@ -375,6 +369,7 @@ export function MediaEntryCard<T extends "anime" | "manga">(props: MediaEntryCar
                                 </SeaLink>}
                             </div>
 
+                            {type==="anime"&&serverStatus?.os==="browser"&&!hideAnilistEntryEditButton&&<BrowserListPicker media={media} status={listData?.status}/>}
                             {type === "anime" && (
                                 <AnimeEntryCardNextAiring nextAiring={(media as AL_BaseAnime).nextAiringEpisode} />
                             )}
@@ -387,7 +382,7 @@ export function MediaEntryCard<T extends "anime" | "manga">(props: MediaEntryCar
                                 </p>}
 
 
-                            {type==="anime"&&serverStatus?.os==="browser"&&<div className="space-y-2 pt-1 text-xs text-[--muted]"><div className="flex flex-wrap gap-1">{(media.genres||[]).slice(0,3).map(genre=><span key={genre} className="rounded-full border px-2 py-0.5">{genre}</span>)}</div>{media.description&&<p className="line-clamp-3 leading-relaxed">{String(media.description).replace(/<[^>]*>/g,"").replace(/&amp;/g,"&")}</p>}<BrowserListPicker media={media} status={listData?.status}/></div>}
+                            {type==="anime"&&serverStatus?.os==="browser"&&<div className="space-y-1.5 pt-1 text-xs text-[--muted]"><div className="flex flex-wrap gap-1">{(media.genres||[]).slice(0,3).map(genre=><span key={genre} className="rounded-full border px-2 py-0.5">{genre}</span>)}</div>{media.description&&<p className="line-clamp-2 leading-relaxed">{String(media.description).replace(/<[^>]*>/g,"").replace(/&amp;/g,"&")}</p>}</div>}
                             {/*{hoveringTitle && <div>*/}
                             {/*    <p*/}
                             {/*        data-media-entry-card-hover-popup-title-section-year-season*/}
