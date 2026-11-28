@@ -1,3 +1,4 @@
+import { cachedEpisodeMetadata, cachedEpisodePage, loadEpisodePage, type Metadata } from "./episode-metadata-cache"
 import { getEpisodeResume, localResume, persistPlayback, syncPlayback } from "./resume"
 import React from "react"
 import { useRouter } from "@/lib/navigation"
@@ -13,7 +14,7 @@ import {
   LuChevronLeft,
   LuChevronRight,
   LuList,
-  LuLayoutGrid,
+  LuGrid2X2,
   LuCaptions,
   LuVolume2,
   LuVolumeX,
@@ -22,14 +23,7 @@ import {
   LuUpload
 } from "react-icons/lu"
 
-type Metadata = {
-  number: number
-  title: string
-  image?: string
-  aired?: string
-  filler?: boolean
-  recap?: boolean
-}
+
 
 type StreamSource = {
   url: string
@@ -286,53 +280,7 @@ function formatSeconds(secs: number) {
   return `${m}:${s.toString().padStart(2, "0")}`
 }
 
-const metadataCache = new Map<string, Metadata[]>()
-const metadataPending = new Map<string, Promise<Metadata[]>>()
-const metadataStoragePrefix = "anidash.episodes.v2:"
-function cachedEpisodePage(id: number, page: number): Metadata[] | undefined {
-  const key = id + ":" + page
-  const memory = metadataCache.get(key)
-  if (memory) return memory
-  try {
-    const item = JSON.parse(localStorage.getItem(metadataStoragePrefix + key) || "null")
-    if (item && Date.now() - item.at < 7 * 86400000 && Array.isArray(item.episodes)) {
-      metadataCache.set(key, item.episodes)
-      return item.episodes
-    }
-  } catch {}
-}
-function loadEpisodePage(id: number, mal: number, page: number, fast = true, force = false): Promise<Metadata[]> {
-  const key = id + ":" + page
-  const old = cachedEpisodePage(id, page)
-  if (old?.length && !force) return Promise.resolve(old)
-  const pending = metadataPending.get(key)
-  if (pending) return pending
-  const request = fetch("/api/episode-metadata?anilist=" + id + "&id=" + mal + "&page=" + page + (fast ? "&fast=1" : ""), { signal: AbortSignal.timeout(12000) })
-    .then(async response => {
-      if (!response.ok) throw Error("Metadata unavailable")
-      const items = (await response.json()).episodes
-      if (!Array.isArray(items) || !items.length) throw Error("Episode metadata empty")
-      const byNumber = new Map<number, Metadata>((old || []).map(item => [item.number, item]))
-      for (const item of items as Metadata[]) {
-        const prior = byNumber.get(item.number)
-        byNumber.set(item.number, { ...prior, ...item, title: item.title || prior?.title || "", image: item.image || prior?.image })
-      }
-      const merged = [...byNumber.values()]
-      if (metadataCache.size >= 120) metadataCache.delete(metadataCache.keys().next().value!)
-      metadataCache.set(key, merged)
-      try {
-        localStorage.setItem(metadataStoragePrefix + key, JSON.stringify({ at: Date.now(), episodes: merged }))
-        const keys = Object.keys(localStorage).filter(k => k.startsWith(metadataStoragePrefix))
-        while (keys.length > 50) localStorage.removeItem(keys.shift()!)
-      } catch {}
-      return merged
-    }).finally(() => metadataPending.delete(key))
-  metadataPending.set(key, request)
-  return request
-}
-function cachedEpisodeMetadata(id: number, pages: number[]) {
-  return Object.fromEntries(pages.flatMap(page => cachedEpisodePage(id, page) || []).map(item => [item.number, item])) as Record<number, Metadata>
-}
+
 
 export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; watchEpisode?: number }) {
   const router = useRouter()
@@ -1723,7 +1671,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
                   saveStore({ ...s, preferences: { ...s.preferences, episodeViewMode: "grid" } })
                 }}
               >
-                <LuLayoutGrid /> Grid
+                <LuGrid2X2 className="size-4" /> Grid
               </Button>
               <Button
                 size="sm"
@@ -1734,7 +1682,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
                   saveStore({ ...s, preferences: { ...s.preferences, episodeViewMode: "list" } })
                 }}
               >
-                <LuList /> List
+                <LuList className="size-4" /> List
               </Button>
             </div>
           </div>
@@ -2440,7 +2388,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
                   <div className="flex items-center justify-between gap-2">
                     <div><h2 className="text-base font-bold">Episodes</h2><p className="text-xs text-neutral-400 mt-1">{total} released · Episode {selected} selected</p></div>
                     <div className="flex rounded-lg border border-neutral-700 p-0.5">
-                      <button type="button" title="Episode numbers" aria-label="Episode numbers" aria-pressed={navigatorMode === "numbers"} onClick={() => setNavigatorMode("numbers")} className={`grid size-8 place-items-center rounded-md ${navigatorMode === "numbers" ? "bg-white text-black" : "text-neutral-400 hover:text-white"}`}><LuLayoutGrid className="size-4" /></button>
+                      <button type="button" title="Episode numbers" aria-label="Episode numbers" aria-pressed={navigatorMode === "numbers"} onClick={() => setNavigatorMode("numbers")} className={`grid size-8 place-items-center rounded-md ${navigatorMode === "numbers" ? "bg-white text-black" : "text-neutral-400 hover:text-white"}`}><LuGrid2X2 className="size-4" /></button>
                       <button type="button" title="Episode details" aria-label="Episode details" aria-pressed={navigatorMode === "details"} onClick={() => setNavigatorMode("details")} className={`grid size-8 place-items-center rounded-md ${navigatorMode === "details" ? "bg-white text-black" : "text-neutral-400 hover:text-white"}`}><LuList className="size-4" /></button>
                     </div>
                   </div>
