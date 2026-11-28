@@ -397,9 +397,10 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
   const [nextCount,setNextCount]=React.useState(3)
   const [nextCanceled,setNextCanceled]=React.useState(false)
   const [nextFailed,setNextFailed]=React.useState(false)
+  const [warmRevision,setWarmRevision]=React.useState(0)
   const [episodeEnded,setEpisodeEnded]=React.useState(false)
   const [suggestions,setSuggestions]=React.useState<any[]>([])
-  const warmNext=React.useRef<{episode:number;audio:string;server:string;data:any}|null>(null)
+  const warmNext=React.useRef<{episode:number;audio:string;server:string;data:any;at:number}|null>(null)
   const transitioned=React.useRef(false)
   const [segments, setSegments] = React.useState<SkipSegments>(EMPTY_SEGMENTS)
   const skippedSegments = React.useRef(new Set<string>())
@@ -636,10 +637,10 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
       }
 
       const prepared=warmNext.current
-      if(!activated&&prepared?.episode===selected&&prepared.audio===audio&&prepared.server===selectedServer){add(prepared.data);warmNext.current=null}
+      if(!activated&&prepared?.episode===selected&&prepared.audio===audio&&prepared.server===selectedServer&&Date.now()-prepared.at<45000){add(prepared.data);warmNext.current=null}
       streamErrors.clear()
       // One automatic second round: providers that were briefly unreachable often answer on the retry.
-      for (let attempt = 0; attempt < 2 && live && !activated; attempt++) {
+      for (let attempt = 0; attempt < 2 && live && (attempt === 0 || !activated); attempt++) {
         if (attempt > 0) await new Promise(resolve => window.setTimeout(resolve, 1200))
         const urls = streamUrlsFor(entry.mediaId, mal, selected, audio, serverParam, [m.title?.english, m.title?.romaji].filter(Boolean) as string[], { year: m.seasonYear || m.startDate?.year, eps: m.episodes, fmt: m.format });
         if (["hianime","anikoto","justanime","animetsu"].includes(pairedSource)) urls.sort((a,b)=>Number(b.includes("/api/"+pairedSource+"?")||b.includes("action="+pairedSource+"&"))-Number(a.includes("/api/"+pairedSource+"?")||a.includes("action="+pairedSource+"&")))
@@ -710,7 +711,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
           if(controller.signal.aborted)return
           if(await prepareEpisode(source,controller.signal)){
             if(controller.signal.aborted)return
-            warmNext.current={episode:selected+1,audio,server:selectedServer,data:{...data,sources:[source,...candidates.filter((s:StreamSource)=>s.url!==source.url)]}}
+            warmNext.current={episode:selected+1,audio,server:selectedServer,at:Date.now(),data:{...data,sources:[source,...candidates.filter((s:StreamSource)=>s.url!==source.url)]}}
             setNextReady(true);return
           }
         }
@@ -719,7 +720,8 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
     }
     void prepare()
     return()=>controller.abort()
-  },[watchMode,warmWindow,selected,total,audio,selectedServer,autoNext,requireHindi,activeStream?.type])
+  },[watchMode,warmWindow,selected,total,audio,selectedServer,autoNext,requireHindi,activeStream?.type,warmRevision])
+  React.useEffect(()=>{if(!nextReady)return;const timer=window.setTimeout(()=>{setNextReady(false);setWarmRevision(v=>v+1)},Math.max(0,38000-(Date.now()-(warmNext.current?.at||Date.now()))));return()=>clearTimeout(timer)},[nextReady,selected,audio,selectedServer])
   const showNext=watchMode&&autoNext&&selected<total&&!nextCanceled&&!requireHindi&&activeStream?.type!=="embed"&&(nearEnd||episodeEnded)
   React.useEffect(()=>{
     if(!showNext||!nextReady||(!isPlaying&&!episodeEnded)||transitioned.current){setNextCount(3);return}
@@ -2094,7 +2096,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
             </video>
             {showNext&&<div role="status" className="absolute bottom-16 right-3 sm:bottom-20 sm:right-6 z-[35] w-[min(90%,340px)] rounded-xl border border-white/20 bg-neutral-950/95 p-3 text-white shadow-2xl cursor-auto">
               <div className="flex items-center gap-3">{(metadata[selected+1]?.image||m.bannerImage)&&<img src={metadata[selected+1]?.image||m.bannerImage} alt="" className="h-14 w-24 shrink-0 rounded object-cover"/>}<div className="min-w-0"><p className="text-xs font-medium text-neutral-400">Up next · Episode {selected+1}</p><p className="text-sm font-semibold">{nextReady?(isPlaying||episodeEnded?"Your next episode is starting in "+nextCount+" seconds":"Next episode ready"):nextFailed?"Next episode needs another attempt":"Preparing your next episode…"}</p></div></div>
-              <div className="mt-3 flex gap-2"><button type="button" className="flex-1 rounded-md bg-white py-2 text-xs font-semibold text-black" onClick={()=>{if(transitioned.current)return;transitioned.current=true;record(true,true);openEpisode(selected+1,true)}}>Play now</button><button type="button" className="rounded-md border border-white/30 px-3 py-2 text-xs" onClick={()=>setNextCanceled(true)}>Cancel</button></div>
+              <div className="mt-3 flex gap-2"><button type="button" className="flex-1 rounded-md bg-white py-2 text-xs font-semibold text-black" onClick={()=>{if(transitioned.current)return;transitioned.current=true;record(true,true);openEpisode(selected+1,true)}}>Play now</button>{nextFailed&&<button type="button" className="rounded-md border border-white/30 px-2 py-2 text-xs" onClick={()=>setWarmRevision(v=>v+1)}>Retry</button>}<button type="button" className="rounded-md border border-white/30 px-3 py-2 text-xs" onClick={()=>setNextCanceled(true)}>Cancel</button></div>
               {nextReady&&<div className="mt-2 h-1 overflow-hidden rounded bg-white/20"><div className="h-full bg-white transition-all" style={{width:(nextCount/3*100)+"%"}}/></div>}
             </div>}
             {episodeEnded&&selected===total&&m.status==="FINISHED"&&suggestions.length>0&&<div className="absolute inset-0 z-[35] flex flex-col justify-center gap-3 overflow-y-auto bg-black/90 p-4 text-white sm:p-8"><div><p className="text-xs text-neutral-400">Series completed</p><h2 className="text-lg font-bold sm:text-2xl">Watch something next</h2></div><div className="grid grid-cols-2 gap-2 sm:grid-cols-4">{suggestions.map(item=><button type="button" key={item.id} onClick={()=>router.push("/entry?id="+item.id)} className="min-w-0 text-left"><img src={item.bannerImage||item.coverImage?.large} alt="" className="aspect-video w-full rounded-lg object-cover"/><p className="mt-1 line-clamp-2 text-xs font-semibold">{item.title?.english||item.title?.userPreferred||item.title?.romaji}</p></button>)}</div><button type="button" className="self-start rounded border px-3 py-1 text-xs" onClick={()=>setEpisodeEnded(false)}>Dismiss</button></div>}
