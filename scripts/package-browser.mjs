@@ -25,3 +25,6 @@ function chunk(name,data){const tag=Buffer.from(name),out=Buffer.alloc(12+data.l
 const hdr=Buffer.alloc(13);hdr.writeUInt32BE(dw,0);hdr.writeUInt32BE(dh,4);hdr[8]=8;hdr[9]=6;
 await writeFile("seanime-web/out/anidash-watermark.png",Buffer.concat([png.subarray(0,8),chunk("IHDR",hdr),chunk("IDAT",deflateSync(scan)),chunk("IEND",Buffer.alloc(0))]));
 console.log("Transparent AniDash watermark generated:",dw+"x"+dh);
+
+// Generate the public website pages and release manifest after bundling.
+await import("./package-site-info.mjs");

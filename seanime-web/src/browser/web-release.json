@@ -1,0 +1,18 @@
+{
+  "version": "2.1.0",
+  "channel": "stable",
+  "date": "2026-11-28",
+  "releases": [
+    {
+      "version": "2.1.0",
+      "date": "2026-11-28",
+      "title": "Settings, release information and site transparency",
+      "changes": [
+        "Responsive settings layout and clearer account connection states.",
+        "Ordered website playback updates and tracker confirmation.",
+        "Public About, Releases, Support, Privacy and Terms pages.",
+        "Website version checking, sitemap and discoverability metadata."
+      ]
+    }
+  ]
+}
