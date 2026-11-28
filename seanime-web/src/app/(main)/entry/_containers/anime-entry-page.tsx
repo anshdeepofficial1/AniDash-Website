@@ -136,12 +136,13 @@ export function AnimeEntryPage() {
         if (!animeEntry) return
         try {
             if (animeEntry?.media?.title?.userPreferred) {
-                document.title = `${animeEntry?.media?.title?.userPreferred} | AniDash`
+                document.title = `${animeEntry?.media?.title?.userPreferred} | AniDash Go`
             }
             // switchedView.current = false
         }
         catch {
         }
+        return () => { document.title = "AniDash Go" }
     }, [animeEntry])
 
     const mediaIdRef = React.useRef(mediaId)
