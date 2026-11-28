@@ -25,16 +25,16 @@ function ActionRow({title,description,label,onClick,busy}:{title:string;descript
  return <div className="flex flex-wrap items-center gap-3 rounded-xl border px-3 py-3 sm:px-4"><div className="min-w-0 flex-1"><p className="font-medium">{title}</p><p className="mt-1 text-sm text-[--muted]">{description}</p></div><button className={secondary+" w-full sm:w-auto"} type="button" disabled={busy} onClick={onClick}><LuRefreshCw className={busy?"animate-spin":""} size={16}/>{busy?"Checking…":label}</button></div>
 }
 export default function Page(){
- const [prefs,setPrefs]=React.useState(browserPreferences),[user,setUser]=React.useState<any>(null),[malUser,setMalUser]=React.useState<any>(null),[message,setMessage]=React.useState(""),[busy,setBusy]=React.useState<"api"|"update"|null>(null)
+ const [prefs,setPrefs]=React.useState(browserPreferences),[user,setUser]=React.useState<any>(null),[malUser,setMalUser]=React.useState<any>(null),[message,setMessage]=React.useState(""),[messageFor,setMessageFor]=React.useState<"api"|"update"|null>(null),[busy,setBusy]=React.useState<"api"|"update"|null>(null)
  const [accountReady,setAccountReady]=React.useState(false),[paired,setPaired]=React.useState(false),[accountMessage,setAccountMessage]=React.useState("")
  const status=useServerStatus()
  React.useEffect(()=>{let alive=true;async function load(){const a=account(),mal=(window as any).AniDashMal;try{await Promise.allSettled([a?.init(),mal?.init()]);if(!alive)return;setUser(a?.currentUser()||null);setMalUser(mal?.currentUser()||null);try{const r=await fetch("/api/device-pair/account",{cache:"no-store"});if(alive&&r.ok){const v=await r.json();if(alive)setPaired(v.success===true)}}catch{}}finally{if(alive)setAccountReady(true)}}void load();return()=>{alive=false}},[])
  function pref(k:string,v:any){setBrowserPreference(k,v);setPrefs(browserPreferences())}
- async function check(){setBusy("update");setMessage("");try{const r=await fetch("https://api.github.com/repos/anshdeepofficial1/AniDash-Website/releases/latest");if(r.status===404){setMessage("No tagged web release is published. View the latest changes on GitHub.");return}if(!r.ok)throw Error("GitHub is temporarily unavailable");const x=await r.json();setMessage("Latest published web release: "+x.tag_name)}catch(e){setMessage((e as Error).message)}finally{setBusy(null)}}
- async function testApi(){setBusy("api");setMessage("");try{await list({perPage:1,sort:["TRENDING_DESC"]});setMessage("AniList metadata request succeeded.")}catch(e){setMessage((e as Error).message)}finally{setBusy(null)}}
+ async function check(){setBusy("update");setMessageFor("update");setMessage("");try{const r=await fetch("https://api.github.com/repos/anshdeepofficial1/AniDash-Website/releases/latest");if(r.status===404){setMessage("No tagged web release is published. View the latest changes on GitHub.");return}if(!r.ok)throw Error("GitHub is temporarily unavailable");const x=await r.json();setMessage("Latest published web release: "+x.tag_name)}catch(e){setMessage((e as Error).message)}finally{setBusy(null)}}
+ async function testApi(){setBusy("api");setMessageFor("api");setMessage("");try{await list({perPage:1,sort:["TRENDING_DESC"]});setMessage("AniList metadata request succeeded.")}catch(e){setMessage((e as Error).message)}finally{setBusy(null)}}
  async function signOut(){try{if(paired){const r=await fetch("/api/device-pair/logout",{method:"POST"});if(!r.ok)throw Error("Sign-out failed")}else if(user){await account()?.logout()}else{await (window as any).AniDashMal?.logout()}location.reload()}catch(e){setAccountMessage((e as Error).message)}}
  return <PageWrapper className="mx-auto max-w-6xl space-y-6 p-4 pb-28 sm:p-8">
- <header className="flex items-center gap-4"><div className="flex size-14 shrink-0 items-center justify-center rounded-2xl border bg-[--subtle]"><LuSettings size={27}/></div><div><p className="text-xs font-semibold uppercase tracking-widest text-[--muted]">AniDash Go</p><h1 className="text-3xl font-bold tracking-tight">Settings</h1><p className="mt-1 text-sm text-[--muted]">Manage your account, content and preferences.</p></div></header>
+ <header className="flex items-center gap-4"><div className="flex size-14 shrink-0 items-center justify-center rounded-2xl border bg-[--subtle]"><LuSettings size={27}/></div><div><p className="text-xs font-semibold uppercase tracking-widest text-[--muted]">AniDash Go</p><h1 className="text-3xl font-bold tracking-tight">AniDash Go settings</h1><p className="mt-1 text-sm text-[--muted]">Manage your account, content and preferences.</p></div></header>
  <div className="grid min-w-0 gap-5 lg:grid-cols-[220px_minmax(0,1fr)]">
  <nav aria-label="Settings sections" className="flex gap-2 overflow-x-auto pb-2 lg:sticky lg:top-24 lg:h-fit lg:flex-col lg:rounded-2xl lg:border lg:bg-[--paper] lg:p-3">{sections.map(({id,label,icon:Icon})=><a key={id} href={"#"+id} className="flex shrink-0 items-center gap-2 rounded-xl border px-3 py-2.5 text-sm font-medium transition hover:bg-[--subtle] lg:border-transparent"><Icon size={18}/>{label}</a>)}</nav>
  <main className="min-w-0 space-y-5">
@@ -44,6 +44,7 @@ export default function Page(){
    <div className="min-w-0 flex-1"><h3 className="break-words font-semibold">{user?.name||malUser?.name||(accountReady?"Guest profile":"Loading profile…")}</h3><p className="mt-1 text-sm text-[--muted]">{paired?"Signed in through AniDash Android":user||malUser?"Your tracker account is connected.":"Your local library is saved in this browser."}</p></div>
    {accountReady&&(paired||user||malUser)?<button type="button" className={danger+" w-full sm:w-auto"} onClick={()=>void signOut()}><LuLogOut size={17}/> Sign out</button>:accountReady?<button type="button" className={primary+" w-full sm:w-auto"} onClick={async()=>{try{if(!account())throw Error("AniList account module is unavailable");await account().beginLogin()}catch(e){setAccountMessage((e as Error).message)}}}>Connect AniList</button>:null}
   </div>
+  {accountReady&&!paired&&!user&&malUser&&<button type="button" className={primary} onClick={async()=>{try{if(!account())throw Error("AniList account module is unavailable");await account().beginLogin()}catch(e){setAccountMessage((e as Error).message)}}}>Connect AniList</button>}
   {(user||malUser)&&<div className="flex flex-wrap gap-2">{user&&<span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-3 py-1.5 text-xs font-medium text-emerald-400"><LuCheck/> AniList connected</span>}{malUser&&<span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-3 py-1.5 text-xs font-medium text-emerald-400"><LuCheck/> MyAnimeList connected</span>}</div>}
   {accountMessage&&<p role="alert" className="text-sm text-red-400">{accountMessage}</p>}
   <DevicePairing/>
@@ -57,16 +58,16 @@ export default function Page(){
  </Section>
  <Section id="tracking" title="Tracking & release schedule" description="Stay up to date with upcoming episodes." icon={LuCalendar}>
   <LinkRow title="Release calendar" description="My List and all upcoming episodes." href="/schedule" icon={LuCalendar}/>
-  <ActionRow title="AniList connection" description="Check whether the metadata service is responding." label="Test connection" busy={busy==="api"} onClick={()=>void testApi()}/>
-  {message&&busy!=="update"&&message.startsWith("AniList")&&<p role="status" className="rounded-xl border p-3 text-sm">{message}</p>}
+  <ActionRow title="AniList connection" description="Check whether the metadata service is responding." label="Test connection" busy={busy!==null} onClick={()=>void testApi()}/>
+  {message&&messageFor==="api"&&<p role="status" className="rounded-xl border p-3 text-sm">{message}</p>}
  </Section>
  <Section id="support" title="Support & updates" description="Get help, report problems and check what's new." icon={LuLifeBuoy}>
   <LinkRow title="Report an issue / feedback" description="Share a bug report or suggestion." href={repo+"/issues/new/choose"} external/>
   <LinkRow title="Community issues" href={repo+"/issues"} external/>
-  <ActionRow title="Website updates" description="Check the latest published web release." label="Check for updates" busy={busy==="update"} onClick={()=>void check()}/>
+  <ActionRow title="Website updates" description="Check the latest published web release." label="Check for updates" busy={busy!==null} onClick={()=>void check()}/>
   <LinkRow title="Web releases" href={repo+"/releases"} external/>
   <LinkRow title="Latest website changes" href={repo+"/commits/main"} external/>
-  {message&&!message.startsWith("AniList")&&<p role="status" className="rounded-xl border p-3 text-sm">{message}</p>}
+  {message&&messageFor==="update"&&<p role="status" className="rounded-xl border p-3 text-sm">{message}</p>}
  </Section>
  <Section id="about" title="About AniDash Go" description="Anime & manga web companion." icon={LuInfo}>
   <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border bg-[--subtle]/30 p-4"><div><p className="font-semibold">AniDash Go</p><p className="text-sm text-[--muted]">Developed by Anshdeep Singh</p></div><span className="rounded-full border px-3 py-1 text-xs font-medium">Version {status?.version||"2.0.0"}</span></div>
