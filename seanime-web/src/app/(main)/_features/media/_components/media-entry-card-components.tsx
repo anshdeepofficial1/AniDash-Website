@@ -716,7 +716,7 @@ export const MediaEntryCardHoverPopupBanner = memo(({
                     ref={iframeRef}
                     title="Anime trailer"
                     {...({ credentialless: "true" } as any)}
-                    src={`https://www.youtube-nocookie.com/embed/${trailerId}?autoplay=1&controls=1&mute=1&playsinline=1&disablekb=1&loop=1&vq=medium&playlist=${trailerId}&cc_lang_pref=ja&enablejsapi=true`}
+                    src={`https://www.youtube-nocookie.com/embed/${trailerId}?autoplay=1&controls=1&mute=1&playsinline=1&disablekb=1&loop=1&vq=medium&playlist=${trailerId}&cc_lang_pref=ja&enablejsapi=true&origin=${encodeURIComponent(window.location.origin)}`}
                     className={cn(
                         "aspect-video w-full absolute left-0 h-full top-0",
                     )}
@@ -725,7 +725,7 @@ export const MediaEntryCardHoverPopupBanner = memo(({
                     // loop
                     allow="autoplay; encrypted-media; fullscreen"
                     // muted
-                    onLoad={() => setTimeout(() => setTrailerLoaded(true), 1000)}
+                    onLoad={() => setTrailerLoaded(true)}
                     onError={() => setTrailerEnabled(false)}
                 />}
             </div>}
@@ -733,7 +733,7 @@ export const MediaEntryCardHoverPopupBanner = memo(({
             {<div
                 data-media-entry-card-hover-popup-banner-gradient
                 className={cn(
-                    "w-full absolute -bottom-1 h-[80%] from-10% bg-gradient-to-t from-[--media-card-popup-background] to-transparent z-[2]",
+                    "pointer-events-none w-full absolute -bottom-1 h-[40%] from-10% bg-gradient-to-t from-[--media-card-popup-background] to-transparent z-[2]",
                     ts.enableMediaCardBlurredBackground && "from-[--background] from-0% opacity-60",
                 )}
             />}
