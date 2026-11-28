@@ -1,3 +1,4 @@
+import { prefetchEpisodeMetadata } from "@/browser/episode-metadata-cache"
 import { buildSeaQuery } from "@/api/client/requests"
 import { API_ENDPOINTS } from "@/api/generated/endpoints"
 import { Anime_Entry, Manga_Entry, Nullish } from "@/api/generated/types"
@@ -189,6 +190,8 @@ async function runEntryPreload(target: EntryPreloadTarget) {
                 staleTime: ENTRY_PRELOAD_STALE_TIME,
                 gcTime: ENTRY_PRELOAD_GC_TIME,
             })
+            const entry=preloaderQueryClient.getQueryData<Anime_Entry>(getAnimeEntryQueryKey(target.id))
+            if(entry?.media&&typeof window!=="undefined"&&window.location.protocol==="https:")prefetchEpisodeMetadata(entry.media)
         } else {
             await preloaderQueryClient.prefetchQuery<Manga_Entry | undefined>({
                 queryKey: getMangaEntryQueryKey(target.id),
