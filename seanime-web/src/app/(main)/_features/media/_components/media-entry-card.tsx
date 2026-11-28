@@ -19,6 +19,7 @@ import { SeaContextMenu } from "@/app/(main)/_features/context-menu/sea-context-
 import { useLibraryExplorer } from "@/app/(main)/_features/library-explorer/library-explorer.atoms"
 import {
     __mediaEntryCard_hoveredPopupId,
+    __mediaEntryCard_hoveredInstance,
     AnimeEntryCardNextAiring,
     MediaEntryCardBody,
     MediaEntryCardContainer,
@@ -196,7 +197,11 @@ export function MediaEntryCard<T extends "anime" | "manga">(props: MediaEntryCar
     const { setPreviewModalMediaId } = useMediaPreviewModal()
     const { openDirInLibraryExplorer } = useLibraryExplorer()
 
-    const [shouldRenderPopup, setShouldRenderPopup] = useState(false)
+    const instance=React.useId()
+    const activeInstance=useAtomValue(__mediaEntryCard_hoveredInstance)
+    const setActiveInstance=useSetAtom(__mediaEntryCard_hoveredInstance)
+    const shouldRenderPopup=activeInstance===instance
+    const openPopupTimerRef=React.useRef<number|undefined>(undefined)
     const closePopupTimerRef = React.useRef<number | undefined>(undefined)
 
     const warmCardEntry = React.useCallback(() => {
@@ -209,30 +214,33 @@ export function MediaEntryCard<T extends "anime" | "manga">(props: MediaEntryCar
             window.clearTimeout(closePopupTimerRef.current)
             closePopupTimerRef.current = undefined
         }
-        setShouldRenderPopup(true)
-        setActionPopupHover(mediaId)
+        if(activeInstance===instance)return
+        if(openPopupTimerRef.current)window.clearTimeout(openPopupTimerRef.current)
+        openPopupTimerRef.current=window.setTimeout(()=>{openPopupTimerRef.current=undefined;setActiveInstance(instance);setActionPopupHover(mediaId)},280)
         warmCardEntry()
         if(type==="anime"&&serverStatus?.os==="browser")prefetchEpisodeMetadata(media,cardResume(media,listData?.progress||0,listData?.status)?.episode||1)
-    }, [warmCardEntry,type,serverStatus?.os,media,listData?.progress,listData?.status,mediaId,setActionPopupHover])
+    }, [warmCardEntry,type,serverStatus?.os,media,listData?.progress,listData?.status,mediaId,setActionPopupHover,activeInstance,instance,setActiveInstance])
 
     const handleCardMouseLeave = React.useCallback(() => {
+        if(openPopupTimerRef.current){window.clearTimeout(openPopupTimerRef.current);openPopupTimerRef.current=undefined}
         if (closePopupTimerRef.current) {
             window.clearTimeout(closePopupTimerRef.current)
         }
         closePopupTimerRef.current = window.setTimeout(() => {
-            setShouldRenderPopup(false)
-            setActionPopupHover(previous=>previous===mediaId?undefined:previous)
+            setActiveInstance(previous=>previous===instance?undefined:previous)
             closePopupTimerRef.current = undefined
         }, 160)
     }, [mediaId,setActionPopupHover])
 
     React.useEffect(() => {
         return () => {
+            if(openPopupTimerRef.current)window.clearTimeout(openPopupTimerRef.current)
+            setActiveInstance(previous=>previous===instance?undefined:previous)
             if (closePopupTimerRef.current) {
                 window.clearTimeout(closePopupTimerRef.current)
             }
         }
-    }, [])
+    }, [instance,setActiveInstance])
 
     const handlePreviewClick = React.useCallback(() => {
         if (serverStatus?.os === "browser") {router.push(link);return}
