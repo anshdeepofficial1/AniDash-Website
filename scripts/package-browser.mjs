@@ -1,5 +1,5 @@
 import {cp} from "node:fs/promises";
-for(const p of ["icons","library-storage.js","anilist-account.js","mal-account.js","manifest.webmanifest"]) await cp(p,"seanime-web/out/"+p,{recursive:true});
+for(const p of ["icons","library-storage.js","cbz-reader.js","anilist-account.js","mal-account.js","manifest.webmanifest"]) await cp(p,"seanime-web/out/"+p,{recursive:true});
 
 /* Produce a cropped transparent PNG from the actual white-on-black AniDash logo.
    Node built-ins only; leave original app icons unchanged. */

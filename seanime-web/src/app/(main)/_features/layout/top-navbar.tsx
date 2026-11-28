@@ -1,3 +1,4 @@
+import { WebHeader } from "@/browser/web-header"
 import { LayoutHeaderBackground } from "@/app/(main)/_features/layout/_components/layout-header-background"
 import { TopMenu } from "@/app/(main)/_features/navigation/top-menu"
 import { OfflineTopMenu } from "@/app/(main)/_features/offline/_components/offline-top-menu"
@@ -32,6 +33,7 @@ export function TopNavbar(props: TopNavbarProps) {
     const isOffline = serverStatus?.isOffline
     const ts = useThemeSettings()
 
+    if(serverStatus?.os==="browser"&&!isOffline)return <header data-top-navbar className="relative z-[80] flex min-h-16 items-center border-b border-white/10 px-4 sm:px-6"><WebHeader/></header>
     return (
         <>
             <div

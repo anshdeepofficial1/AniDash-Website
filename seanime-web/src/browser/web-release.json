@@ -1,8 +1,20 @@
 {
-  "version": "2.2.1",
+  "version": "2.3.0",
   "channel": "stable",
   "date": "2026-11-28",
   "releases": [
+    {
+      "version": "2.3.0",
+      "date": "2026-11-28",
+      "title": "Next episode handoff and Anime/Manga navigation",
+      "changes": [
+        "Prepare upcoming video and show a three-second countdown after readiness; suggest other anime after a finished series.",
+        "Keep source information in audio and server settings.",
+        "One animated hover preview at a time with intentional-hover delay.",
+        "Top-right profile and notification inbox with tracked releases and website updates.",
+        "Anime/Manga switcher and a dedicated manga catalogue, search, reading list and local CBZ reader."
+      ]
+    },
     {
       "version": "2.2.1",
       "date": "2026-11-28",

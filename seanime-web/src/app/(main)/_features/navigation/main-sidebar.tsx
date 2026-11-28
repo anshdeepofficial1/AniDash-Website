@@ -1,3 +1,5 @@
+import { LuSearch } from "react-icons/lu"
+import { ModeSwitcher } from "@/browser/web-header"
 import { useRefreshAnimeCollection } from "@/api/hooks/anilist.hooks"
 import { useLogout } from "@/api/hooks/auth.hooks"
 import { useGetExtensionUpdateData as useGetExtensionUpdateData, usePluginWithIssuesCount } from "@/api/hooks/extensions.hooks"
@@ -213,7 +215,7 @@ function SidebarNavigation({ isCollapsed, containerRef }: { isCollapsed: boolean
                 intent="alert-solid"
             >{missingEpisodeCount}</Badge> : undefined,
         },
-        ...serverStatus?.settings?.library?.enableManga ? [{
+        ...serverStatus?.settings?.library?.enableManga && serverStatus?.os!=="browser" ? [{
             id: "manga",
             iconType: LuBookOpen,
             name: "Manga",
@@ -404,9 +406,7 @@ function SidebarNavigation({ isCollapsed, containerRef }: { isCollapsed: boolean
     return (
         <div>
             <div className="mb-4 flex w-full justify-center px-3 pt-4">
-                <button type="button" aria-label="AniDash Go — Home" title="Home" onClick={()=>{ctx.setOpen(false);router.push("/")}} className="grid h-12 w-full cursor-pointer place-items-center rounded-lg focus-visible:ring-2 focus-visible:ring-brand-500">
-                    <img src="/anidash-watermark.png" alt="AniDash Go" className="h-10 w-12 object-contain" />
-                </button>
+                <ModeSwitcher onNavigate={()=>ctx.setOpen(false)}/>
             </div>
             <VerticalMenu
                 className="px-4"
@@ -415,7 +415,7 @@ function SidebarNavigation({ isCollapsed, containerRef }: { isCollapsed: boolean
                 itemChevronClass="hidden"
                 itemIconClass="transition-transform group-data-[state=open]/verticalMenu_parentItem:rotate-90"
                 items={[
-                    ...displayedPinnedItems,
+                    ...(serverStatus?.os==="browser"&&pathname.startsWith("/manga")?[{id:"manga-home",iconType:IoHomeOutline,name:"Manga Home",href:"/manga",isCurrent:pathname==="/manga"},{id:"manga-discover",iconType:LuCompass,name:"Explore Manga",href:"/manga?view=discover",isCurrent:false},{id:"manga-search",iconType:LuSearch,name:"Search Manga",href:"/manga?view=search",isCurrent:false},{id:"manga-list",iconType:LuBookOpen,name:"My Manga",href:"/manga?view=library",isCurrent:false}]:displayedPinnedItems),
                     ...displayedPluginItems,
                     ...unpinnedMenuItems,
                     {
@@ -556,12 +556,6 @@ function SidebarFooter({ isCollapsed, onLogout }: { isCollapsed: boolean, onLogo
                                 {updateData?.length || pluginWithIssuesCount || 1}
                             </Badge>
                             : undefined,
-                    },
-                    {
-                        iconType: FiLogIn,
-                        name: "Profile",
-                        href: "/settings?tab=profile",
-                        isCurrent: false,
                     },
                     {
                         iconType: LuSettings,

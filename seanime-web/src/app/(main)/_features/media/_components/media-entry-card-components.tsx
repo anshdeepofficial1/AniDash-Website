@@ -195,8 +195,8 @@ export const MediaEntryCardHoverPopup = React.memo((props: MediaEntryCardHoverPo
  },[shouldRenderPopup])
  React.useLayoutEffect(()=>{if(!position||!panel.current)return;const rect=panel.current.getBoundingClientRect();if(rect.bottom>window.innerHeight-12)setPosition(p=>p?{...p,top:Math.max(12,window.innerHeight-rect.height-12)}:p)},[position])
  return <><span ref={anchor} aria-hidden="true" className="pointer-events-none absolute inset-0"/>{shouldRenderPopup&&position&&createPortal(
-  <div {...rest} ref={panel} data-media-entry-card-hover-popup data-state="open" style={position} className={cn("fixed z-[1000] rounded-xl border border-white/15 bg-[--media-card-popup-background] shadow-2xl overflow-y-auto overscroll-contain text-[--foreground] group/media-entry-card-popup",className)}>
-   <div data-media-entry-card-hover-popup-content className="flex w-full flex-col gap-2 p-3">{children}</div>
+  <div {...rest} ref={panel} data-media-entry-card-hover-popup data-state="open" style={{...position,animation:"anidashHoverIn 180ms cubic-bezier(.2,.8,.2,1) both"}} className={cn("fixed z-[1000] rounded-xl border border-white/15 bg-[--media-card-popup-background] shadow-2xl overflow-y-auto overscroll-contain text-[--foreground] group/media-entry-card-popup",className)}>
+   <style>{`@keyframes anidashHoverIn{from{opacity:0;transform:scale(.96) translateY(5px)}to{opacity:1;transform:scale(1) translateY(0)}} @media(prefers-reduced-motion:reduce){[data-media-entry-card-hover-popup]{animation:none!important}}`}</style><div data-media-entry-card-hover-popup-content className="flex w-full flex-col gap-2 p-3">{children}</div>
   </div>,document.body)}</>
 })
 
@@ -528,6 +528,7 @@ export function MediaEntryCardTitleSection(props: MediaEntryCardTitleSectionProp
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 export const __mediaEntryCard_hoveredPopupId = atom<number | undefined>(undefined)
+export const __mediaEntryCard_hoveredInstance = atom<string | undefined>(undefined)
 
 export const MediaEntryCardHoverPopupBanner = memo(({
     trailerId,

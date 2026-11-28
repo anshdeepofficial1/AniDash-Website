@@ -1,3 +1,4 @@
+import { useServerStatus } from "@/app/(main)/_hooks/use-server-status"
 import { useGetMangaEntry, useGetMangaEntryDetails } from "@/api/hooks/manga.hooks"
 import { MediaEntryCharactersSection } from "@/app/(main)/_features/media/_components/media-entry-characters-section"
 import { MediaEntryPageLoadingDisplay } from "@/app/(main)/_features/media/_components/media-entry-page-loading-display"
@@ -12,7 +13,9 @@ import { useRouter, useSearchParams } from "@/lib/navigation"
 import React from "react"
 
 
-export default function Page() {
+export default function Page(){const server=useServerStatus();return server?.os==="browser"?<BrowserEntryRedirect/>:<NativeMangaEntry/>}
+function BrowserEntryRedirect(){const router=useRouter(),params=useSearchParams();const id=params.get("id");React.useEffect(()=>{router.replace(id?"/manga?view=detail&id="+id:"/manga")},[id]);return <PageWrapper>Loading manga…</PageWrapper>}
+function NativeMangaEntry() {
     const router = useRouter()
     const pathname = usePathname()
     const searchParams = useSearchParams()
