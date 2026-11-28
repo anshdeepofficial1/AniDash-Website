@@ -1,3 +1,4 @@
+import { LuVolume2, LuVolumeX } from "react-icons/lu"
 import { AL_BaseManga_Title } from "@/api/generated/types"
 import { AL_BaseAnime_Title } from "@/api/generated/types"
 import { AL_BaseAnime_NextAiringEpisode, AL_MediaListStatus, AL_MediaStatus } from "@/api/generated/types"
@@ -194,11 +195,11 @@ export const MediaEntryCardHoverPopup = React.memo((props: MediaEntryCardHoverPo
                 "group-hover/media-entry-card:opacity-100 group-hover/media-entry-card:scale-100",
                 "group-focus-visible/media-entry-card:opacity-100 group-focus-visible/media-entry-card:scale-100",
                 "focus-visible:opacity-100 focus-visible:scale-100",
-                "h-[105%] w-[100%] -top-[5%] rounded-[0.7rem] transition ease-in-out",
+                "min-h-full w-[118%] max-w-[360px] -top-[5%] -left-[9%] rounded-xl shadow-2xl transition ease-in-out",
                 "transform-gpu will-change-[opacity,transform] [contain:layout_paint_style]",
                 "focus-visible:ring-2 ring-brand-400 focus-visible:outline-0",
                 "hidden lg:block", // Hide on small screens
-                markBorderRenderingArtifacts && "w-[103%] -left-[1.5%]",
+                markBorderRenderingArtifacts && "ring-1 ring-white/10",
             )}
             {...rest}
         >
@@ -240,7 +241,7 @@ export const MediaEntryCardHoverPopup = React.memo((props: MediaEntryCardHoverPo
                         className="w-full absolute top-0 h-[50%] opacity-60 bg-gradient-to-b from-30% from-[--background] to-transparent z-[2] rounded-[--radius]"
                     />}
 
-                    <div data-media-entry-card-hover-popup-content className="p-2 h-full w-full flex flex-col justify-between relative z-[2]">
+                    <div data-media-entry-card-hover-popup-content className="p-3 min-h-full w-full flex flex-col gap-3 relative z-[2]">
                         {children}
                     </div>
                 </>
@@ -267,7 +268,7 @@ export function MediaEntryCardHoverPopupBody(props: MediaEntryCardHoverPopupBody
         <div
             data-media-entry-card-hover-popup-body
             className={cn(
-                "space-y-1 select-none",
+                "space-y-2 select-none",
                 className,
             )}
             {...rest}
@@ -615,6 +616,8 @@ export const MediaEntryCardHoverPopupBanner = memo(({
 }) => {
 
     const [trailerLoaded, setTrailerLoaded] = React.useState(false)
+    const [muted,setMuted]=React.useState(true)
+    const iframeRef=React.useRef<HTMLIFrameElement>(null)
     const [actionPopupHoverId] = useAtom(__mediaEntryCard_hoveredPopupId)
     const actionPopupHover = actionPopupHoverId === mediaId
     const [trailerEnabled, setTrailerEnabled] = React.useState(!!trailerId && !disableAnimeCardTrailers && showTrailer)
@@ -625,7 +628,9 @@ export const MediaEntryCardHoverPopupBanner = memo(({
         setTrailerEnabled(!!trailerId && !disableAnimeCardTrailers && showTrailer)
     }, [!!trailerId, !disableAnimeCardTrailers, showTrailer])
 
-    return <SeaLink
+    React.useEffect(()=>{if(!actionPopupHover){setMuted(true);setTrailerLoaded(false)}},[actionPopupHover,trailerId])
+    function toggleSound(){const next=!muted;iframeRef.current?.contentWindow?.postMessage(JSON.stringify({event:"command",func:next?"mute":"unMute",args:[]}),"https://www.youtube-nocookie.com");setMuted(next)}
+    return <div className="relative"><SeaLink
         tabIndex={-1}
         href={!onClick ? link : undefined}
         bypassEntryPreloadBudget={bypassEntryPreloadBudget}
@@ -634,7 +639,7 @@ export const MediaEntryCardHoverPopupBanner = memo(({
     >
         <div
             data-media-entry-card-hover-popup-banner-container
-            className={cn("aspect-[4/2] relative rounded-t-[--radius] mb-2 cursor-pointer overflow-hidden isolate",
+            className={cn("aspect-video relative rounded-t-[--radius] mb-2 cursor-pointer overflow-hidden isolate bg-black",
                 ts.enableMediaCardBlurredBackground && "rounded-[--radius]")}
         >
             {(showProgressBar && progress && listStatus && progressTotal && progress !== progressTotal) &&
@@ -708,15 +713,17 @@ export const MediaEntryCardHoverPopupBanner = memo(({
                 />}
                 {!__isElectronDesktop__ && <iframe
                     data-media-entry-card-hover-popup-banner-trailer
+                    ref={iframeRef}
+                    title="Anime trailer"
                     {...({ credentialless: "true" } as any)}
-                    src={`https://www.youtube-nocookie.com/embed/${trailerId}?autoplay=1&controls=0&mute=1&disablekb=1&loop=1&vq=medium&playlist=${trailerId}&cc_lang_pref=ja&enablejsapi=true`}
+                    src={`https://www.youtube-nocookie.com/embed/${trailerId}?autoplay=1&controls=1&mute=1&playsinline=1&disablekb=1&loop=1&vq=medium&playlist=${trailerId}&cc_lang_pref=ja&enablejsapi=true`}
                     className={cn(
-                        "aspect-video w-full absolute left-0 h-[calc(100%+120px)] top-[50%] -translate-y-1/2",
+                        "aspect-video w-full absolute left-0 h-full top-0",
                     )}
                     // playsInline
                     // preload="none"
                     // loop
-                    allow="autoplay"
+                    allow="autoplay; encrypted-media; fullscreen"
                     // muted
                     onLoad={() => setTimeout(() => setTrailerLoaded(true), 1000)}
                     onError={() => setTrailerEnabled(false)}
@@ -731,5 +738,5 @@ export const MediaEntryCardHoverPopupBanner = memo(({
                 )}
             />}
         </div>
-    </SeaLink>
+    </SeaLink>{!__isElectronDesktop__&&trailerEnabled&&actionPopupHover&&trailerLoaded&&<button type="button" aria-label={muted?"Unmute trailer":"Mute trailer"} title={muted?"Unmute trailer":"Mute trailer"} onClick={e=>{e.preventDefault();e.stopPropagation();toggleSound()}} className="absolute right-2 top-10 z-20 grid size-8 place-items-center rounded-full bg-black/75 text-white">{muted?<LuVolumeX/>:<LuVolume2/>}</button>}</div>
 })
