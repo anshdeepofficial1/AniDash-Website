@@ -1,8 +1,16 @@
 {
-  "version": "2.3.0",
+  "version": "2.3.1",
   "channel": "stable",
   "date": "2026-11-28",
   "releases": [
+    {
+      "version": "2.3.1",
+      "date": "2026-11-28",
+      "title": "Navigation hotfix",
+      "changes": [
+        "Fix undefined mobile navigation icon and replace the old Profile tab with Settings."
+      ]
+    },
     {
       "version": "2.3.0",
       "date": "2026-11-28",
