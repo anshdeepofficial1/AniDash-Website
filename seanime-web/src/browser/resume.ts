@@ -13,4 +13,22 @@ export async function browserContinueWatching(force=false){const s=readWatchStat
 }
 export async function getEpisodeResume(m:any,episode:number){let local=localResume(m),remote=null;const a=account();if(a){try{if(!a.authenticated?.())await a.init();if(a.authenticated?.()){try{await a.list(true)}catch{}remote=remoteResume(a.getEntry(m.id))}}catch{}}const best=chooseResume(local,remote);return best?.episode===episode?best.seconds:0}
 export function persistPlayback(m:any,episode:number,position:number,duration:number,ended=false){const s=readWatchState();const h={media:m,episode,position,duration,ended,updatedAt:Date.now()};saveWatchState({...s,history:{...s.history,[m.id]:h},watchlist:{...s.watchlist,[m.id]:m},libraryStatuses:{...s.libraryStatuses,[m.id]:ended&&released(m)===episode&&m.status==="FINISHED"?"COMPLETED":"CURRENT"}});return h}
-export async function syncPlayback(m:any,episode:number,position:number,duration:number,ended=false){const a=account();let synced=false;if(a?.authenticated?.()){await a.syncPosition(m.id,episode,position,duration,ended);synced=true}const mal=(window as any).AniDashMal;if(m.idMal&&mal?.isPaired?.()&&mal.authenticated()){await mal.list();const existing=mal.getEntry(m.idMal)?.list_status;const progress=Math.max(Number(existing?.num_episodes_watched)||0,ended?episode:episode-1);await mal.updateProgress(m.idMal,progress,progress>=released(m)&&m.status==="FINISHED"?"completed":"watching");synced=true}if(synced)window.dispatchEvent(new Event("anidash-watch-progress"));return synced}
+// Keep writes in playback order, including forced end-of-episode saves.
+const pendingSync = new Map<number, Promise<boolean>>()
+export function syncPlayback(m:any,episode:number,position:number,duration:number,ended=false):Promise<boolean>{
+ const id=Number(m.id)
+ const prior=pendingSync.get(id)||Promise.resolve(false)
+ const task=prior.catch(()=>false).then(async()=>{
+  const a=account(),mal=(window as any).AniDashMal
+  const writes:Promise<boolean>[]=[]
+  if(a?.authenticated?.())writes.push((async()=>{const result=await a.syncPosition(id,episode,position,duration,ended);if(!result)throw Error("AniList did not confirm playback progress");return true})())
+  if(m.idMal&&mal?.authenticated?.())writes.push((async()=>{await mal.list();const existing=mal.getEntry(m.idMal)?.list_status;const progress=Math.max(Number(existing?.num_episodes_watched)||0,ended?episode:episode-1);const result=await mal.updateProgress(m.idMal,progress,progress>=released(m)&&m.status==="FINISHED"?"completed":"watching");if(!result)throw Error("MyAnimeList did not confirm playback progress");return true})())
+  const results=await Promise.allSettled(writes)
+  const synced=results.some(r=>r.status==="fulfilled"&&r.value)
+  if(synced)window.dispatchEvent(new Event("anidash-watch-progress"))
+  if(results.some(r=>r.status==="rejected"))throw Error("One or more tracker updates failed")
+  return synced
+ }).finally(()=>{if(pendingSync.get(id)===task)pendingSync.delete(id)})
+ pendingSync.set(id,task)
+ return task
+}
