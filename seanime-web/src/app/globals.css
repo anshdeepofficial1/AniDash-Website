@@ -1354,3 +1354,21 @@ body.cbz-active{overflow:hidden}.cbz-reader{position:fixed;inset:0;background:#0
 [data-anidash-settings]{min-width:0;max-width:100%;overflow-wrap:anywhere}
 [data-anidash-settings] img,[data-anidash-settings] input,[data-anidash-settings] select,[data-anidash-settings] button{max-width:100%}
 @media(max-width:1023px){[data-main-layout-content]:has([data-anidash-settings]){width:100%;min-width:0;max-width:100%;overflow-x:clip}[data-anidash-settings] h1{font-size:1.75rem}[data-anidash-settings] select{font-size:16px}[data-anidash-settings] section[aria-label="Devices"]{padding:10px}[data-anidash-settings] details summary strong{min-width:0;overflow-wrap:anywhere}[data-anidash-settings] dl{grid-template-columns:minmax(0,1fr)}}
+
+/* Settings: constrain every containing layout, not the browser zoom. */
+@media (max-width: 1023px) {
+  .UI-AppLayoutContent__root:has([data-anidash-settings]),
+  .anidash-main-content:has([data-anidash-settings]),
+  [data-main-layout-container]:has([data-anidash-settings]),
+  [data-main-layout-content]:has([data-anidash-settings]),
+  [data-page-wrapper-container]:has([data-anidash-settings]) {
+    width:100%; min-width:0!important; max-width:100%!important; box-sizing:border-box;
+  }
+  [data-anidash-settings] {width:100%;max-width:100%;min-width:0;padding:12px;box-sizing:border-box;overflow-x:clip;}
+  [data-anidash-settings] *,[data-anidash-settings] *::before,[data-anidash-settings] *::after {box-sizing:border-box;}
+  [data-anidash-settings] main,[data-anidash-settings] section,[data-anidash-settings] aside,[data-anidash-settings] dl,[data-anidash-settings] details {min-width:0;max-width:100%;}
+  [data-anidash-settings] input,[data-anidash-settings] select {font-size:16px;}
+  [data-anidash-settings] summary {flex-wrap:wrap;}
+  [data-anidash-settings] summary strong {flex:1 1 120px;min-width:0;}
+  [data-anidash-settings] button {white-space:normal;overflow-wrap:anywhere;}
+}
