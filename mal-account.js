@@ -108,6 +108,7 @@
       ...(payload ? { body: JSON.stringify(payload) } : {})
     });
     const output = await response.json();
+    if (paired && response.status === 401 && response.headers?.get?.("X-AniDash-Paired-Session") === "ended") { paired=false;clear();if(typeof location.replace==="function")location.replace("/settings?tab=profile"); }
     if (!response.ok) throw new Error(output.error || "MyAnimeList API unavailable");
     return output;
   }
