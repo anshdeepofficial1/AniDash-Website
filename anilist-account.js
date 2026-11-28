@@ -78,9 +78,13 @@
     inform();
   }
   // Only monitor browser sessions established through pairing; direct OAuth is unchanged.
-  let pairedHeartbeat = null, heartbeatBusy = false;
-  function pairedSessionEnded() {
+  let pairedHeartbeat = null, heartbeatBusy = false, heartbeatCheck = null;
+  function stopPairedHeartbeat() {
     if (pairedHeartbeat !== null) { clearInterval(pairedHeartbeat); pairedHeartbeat = null; }
+    if (heartbeatCheck) { window.removeEventListener("focus",heartbeatCheck); document.removeEventListener("visibilitychange",heartbeatCheck); heartbeatCheck=null; }
+  }
+  function pairedSessionEnded() {
+    stopPairedHeartbeat();
     paired = false; clearToken();
     // Reloading clears both tracker clients and takes the browser to the login controls.
     if (typeof location.replace === "function") location.replace("/settings?tab=profile");
@@ -88,13 +92,14 @@
   function startPairedHeartbeat() {
     if (pairedHeartbeat !== null || typeof document === "undefined" || typeof window.setInterval !== "function") return;
     const check = async () => {
-      if (heartbeatBusy || document.visibilityState === "hidden") return;
+      if (pairedHeartbeat === null || heartbeatBusy || document.visibilityState === "hidden") return;
       heartbeatBusy = true;
       try {
         const r = await fetch("/api/device-pair/account", {cache:"no-store"});
         if (r.status === 401) pairedSessionEnded();
       } catch (_) {} finally { heartbeatBusy = false; }
     };
+    heartbeatCheck = check;
     pairedHeartbeat = window.setInterval(check, 300000);
     window.addEventListener("focus", check);
     document.addEventListener("visibilitychange", check);
@@ -227,7 +232,7 @@
     });
     location.assign("https://anilist.co/api/v2/oauth/authorize?" + params.toString());
   }
-  async function logout() { if (paired) { const r = await fetch("/api/device-pair/logout", {method:"POST"}); if (!r.ok) throw Error("Sign-out failed"); paired = false; } clearToken(); }
+  async function logout() { if (paired) { const r = await fetch("/api/device-pair/logout", {method:"POST"}); if (!r.ok) throw Error("Sign-out failed"); paired = false; stopPairedHeartbeat(); } clearToken(); }
   function currentUser() { return copy(viewer); }
   function configured() { return config?.enabled === true; }
   function authenticated() { return !!viewer && (!!token || paired); }
@@ -438,7 +443,7 @@
   }
 
   window.AniDashAccount = {
-    captureRedirect, setHandler, settings, init, beginLogin, logout,
+    captureRedirect, setHandler, settings, init, beginLogin, logout, stopPairedHeartbeat,
     currentUser, configured, authenticated, list, listManga, favorites, isFavorite, toggleFavorite,
     parseWatchNotes, formatWatchNotes, resumeFromEntry, syncPosition, setStatus, saveManga,
     getEntry, saveToList, deletePlanning, deleteEntry
