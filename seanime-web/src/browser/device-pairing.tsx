@@ -2,7 +2,7 @@ import React from "react"
 import { browserPreferences, setBrowserPreference } from "@/browser/transport"
 
 type Pair = {code:string;qr:string;expiresAt:string}
-export function DevicePairing(){
+export function DevicePairing({connection = 'checking'}: {connection?: 'checking'|'guest'|'account'|'paired'|'unavailable'}){
  const [pair,setPair]=React.useState<Pair|null>(null),[message,setMessage]=React.useState(""),[busy,setBusy]=React.useState(false)
  const [left,setLeft]=React.useState(0)
  async function start(){
@@ -49,8 +49,11 @@ export function DevicePairing(){
  },[pair])
  const prefs=browserPreferences()
  return <div className="space-y-3">
-  <button type="button" disabled={busy||!!pair} className="block rounded-lg border px-4 py-3 hover:bg-[--subtle]" onClick={start}>{busy?"Creating code…":"Connect with AniDash"}</button>
-  {pair&&<section className="rounded-xl border p-4 space-y-3" aria-label="Device pairing">
+  {connection==="guest"&&<button type="button" disabled={busy||!!pair} className="rounded-xl bg-brand-500 px-5 py-3 font-semibold text-white hover:opacity-90 disabled:opacity-50" onClick={start}>{busy?"Creating code…":"Connect with AniDash"}</button>}
+  {connection==="paired"&&<div className="flex items-center gap-3 rounded-xl border border-emerald-500/25 bg-emerald-500/5 p-4"><span className="size-2.5 shrink-0 rounded-full bg-emerald-500"/><div><strong>Connected from AniDash</strong><p className="text-sm text-[--muted]">This browser is linked to your Android app.</p></div></div>}
+  {connection==="checking"&&<p className="text-sm text-[--muted]" role="status">Checking device connection…</p>}
+  {connection==="unavailable"&&<p className="text-sm text-[--muted]" role="status">Connection status unavailable. Refresh to try again.</p>}
+  {pair&&connection==='guest'&&<section className="rounded-xl border p-4 space-y-3" aria-label="Device pairing">
    <p>On AniDash Android, open Settings → Devices. Scan this QR or enter the code, then confirm this device.</p>
    <img width={280} height={280} className="max-w-full rounded-lg" src={pair.qr} alt="Scan this pairing QR in AniDash"/>
    <p>Manual pairing code</p><code className="block break-all select-all font-mono">{pair.code}</code>
@@ -59,8 +62,8 @@ export function DevicePairing(){
    <button type="button" className="rounded-lg border px-3 py-2" onClick={()=>{setPair(null);setMessage("Pairing cancelled on this browser. The code expires automatically.")}}>Cancel</button>
   </section>}
   {message&&<p role="status">{message}</p>}
-  <Devices/>
-  {prefs.pairedSource&&<p className="text-sm text-[--muted]">Android source preference: {prefs.pairedSource}. Browser availability may differ; review the selected source in the player.</p>}
+  {connection==='paired'&&<Devices/>}
+  {connection==='paired'&&prefs.pairedSource&&<p className="text-sm text-[--muted]">Android source preference: {prefs.pairedSource}. Browser availability may differ; review the selected source in the player.</p>}
  </div>
 }
 
@@ -94,7 +97,7 @@ function Devices(){
  }
  if(devices===null&&!error)return null
  return <section aria-label="Devices" className="space-y-3 rounded-xl border p-4">
-  <div className="flex flex-wrap items-center justify-between gap-2"><div><h3 className="text-lg font-semibold">Devices</h3><p className="text-sm text-[--muted]">Manage browsers connected through AniDash.</p></div><button type="button" className="rounded-lg border px-3 py-2 text-sm" disabled={loading} onClick={()=>void load()}>{loading?"Refreshing…":"Refresh"}</button></div>
+  <div className="flex flex-wrap items-center justify-between gap-2"><div><h3 className="text-lg font-semibold">Devices</h3><p className="text-sm text-[--muted]">Review active browser sessions and remove access when needed.</p></div><button type="button" className="rounded-lg border px-3 py-2 text-sm font-medium hover:bg-[--subtle]" disabled={loading} onClick={()=>void load()}>{loading?"Refreshing…":"Refresh"}</button></div>
   {error&&<p role="alert" className="text-sm text-red-400">{error}</p>}
   {devices?.length===0&&<p className="text-sm text-[--muted]">No active paired devices.</p>}
   {devices?.map(d=><article key={d.id} className="rounded-lg border p-3 space-y-2">
