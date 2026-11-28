@@ -28,7 +28,7 @@ export function episodeLoader(warm:boolean):any{
 export function prepareEpisode(source:{url:string;isM3U8?:boolean;type?:string},signal:AbortSignal):Promise<boolean>{
  return new Promise(resolve=>{
   if(signal.aborted||source.type==="embed"){resolve(false);return}
-  const el=document.createElement("video");el.muted=true;el.preload="auto";el.playsInline=true
+  const el=document.createElement("video");el.muted=true;el.preload="auto";el.playsInline=true;el.style.cssText="position:fixed;width:1px;height:1px;opacity:0;pointer-events:none";document.body.appendChild(el)
   let hls:Hls|undefined,done=false
   const timer=window.setTimeout(()=>finish(false),12000)
   function finish(ok:boolean){if(done)return;done=true;clearTimeout(timer);signal.removeEventListener("abort",cancel);el.removeEventListener("canplay",ready);el.removeEventListener("error",fail);hls?.destroy();el.removeAttribute("src");el.load();el.remove();resolve(ok)}
@@ -36,7 +36,6 @@ export function prepareEpisode(source:{url:string;isM3U8?:boolean;type?:string},
   signal.addEventListener("abort",cancel,{once:true});el.addEventListener("canplay",ready,{once:true});el.addEventListener("error",fail,{once:true})
   const isHls=source.isM3U8===true||/m3u8|mpegurl|hls/i.test(source.url+" "+(source.type||""))
   if(isHls&&Hls.isSupported()){hls=new Hls({loader:episodeLoader(true),maxBufferLength:8,maxMaxBufferLength:12,autoStartLoad:true});hls.on(Hls.Events.ERROR,(_,data)=>{if(data.fatal)finish(false)});hls.loadSource(source.url);hls.attachMedia(el)}
-  else el.src=source.url
-  el.load()
+  else {el.src=source.url;el.load()}
  })
 }
