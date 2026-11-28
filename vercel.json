@@ -292,7 +292,8 @@
       "main": true,
       "migration/seanime-react-browser": true,
       "feature/device-pairing": true,
-      "feature/paired-device-management": true
+      "feature/paired-device-management": true,
+      "feature/settings-polish": true
     }
   },
   "rewrites": [
