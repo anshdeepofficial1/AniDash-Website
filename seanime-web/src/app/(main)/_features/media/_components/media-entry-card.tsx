@@ -1,3 +1,6 @@
+import { cardResume } from "@/browser/resume"
+import { prefetchEpisodeMetadata } from "@/browser/episode-metadata-cache"
+import { BrowserListPicker } from "@/browser/custom-lists"
 import {
     AL_BaseAnime,
     AL_BaseManga,
@@ -176,10 +179,12 @@ export function MediaEntryCard<T extends "anime" | "manga">(props: MediaEntryCar
 
     const progressTotal = type === "anime" ? (media as AL_BaseAnime)?.episodes : (media as AL_BaseManga)?.chapters
 
+    const browserResume=type==="anime"&&serverStatus?.os==="browser"?cardResume(media,listData?.progress||0,listData?.status):null
     const { setPlayNext } = usePlayNext()
     const handleWatchButtonClicked = React.useCallback(() => {
         if (serverStatus?.os === "browser") {
-            const next = Math.min((media as AL_BaseAnime)?.episodes || Number.MAX_SAFE_INTEGER, Math.max(1, (listData?.progress || 0) + 1));
+            const resume=cardResume(media,listData?.progress||0,listData?.status)
+            const next = Math.min((media as AL_BaseAnime)?.episodes || Number.MAX_SAFE_INTEGER, resume?.episode || Math.max(1, (listData?.progress || 0) + 1));
             router.push(`/entry?id=${mediaId}&episode=${media.format === "MOVIE" ? 1 : next}`)
             return
         }
@@ -214,7 +219,8 @@ export function MediaEntryCard<T extends "anime" | "manga">(props: MediaEntryCar
         }
         setShouldRenderPopup(true)
         warmCardEntry()
-    }, [warmCardEntry])
+        if(type==="anime"&&serverStatus?.os==="browser")prefetchEpisodeMetadata(media,cardResume(media,listData?.progress||0,listData?.status)?.episode||1)
+    }, [warmCardEntry,type,serverStatus?.os,media,listData?.progress,listData?.status])
 
     const handleCardMouseLeave = React.useCallback(() => {
         if (closePopupTimerRef.current) {
@@ -269,7 +275,7 @@ export function MediaEntryCard<T extends "anime" | "manga">(props: MediaEntryCar
             <SeaContextMenu
                 content={<ContextMenuGroup>
                     {(type === "anime" && serverStatus?.os === "browser")
-                        ? <BrowserAnimeMenuItems media={media} listStatus={listData?.status} />
+                        ? <BrowserAnimeMenuItems media={media} listStatus={listData?.status} resume={browserResume||undefined} />
                         : <ContextMenuLabel className="text-[--muted] line-clamp-1 py-0 my-2">
                             {media.title?.userPreferred}
                         </ContextMenuLabel>}
@@ -346,9 +352,7 @@ export function MediaEntryCard<T extends "anime" | "manga">(props: MediaEntryCar
                                     tabIndex={-1}
                                     onClick={handleWatchButtonClicked}
                                 >
-                                    {!!listData?.progress && (listData?.status === "CURRENT" || listData?.status === "PAUSED")
-                                        ? "Continue"
-                                        : "Watch"}
+                                    {browserResume ? `Continue · Ep ${browserResume.episode}` : !!listData?.progress && (listData?.status === "CURRENT" || listData?.status === "PAUSED") ? "Continue" : "Watch"}
                                 </Button>}
 
                                 {type === "manga" && <SeaLink
@@ -383,6 +387,7 @@ export function MediaEntryCard<T extends "anime" | "manga">(props: MediaEntryCar
                                 </p>}
 
 
+                            {type==="anime"&&serverStatus?.os==="browser"&&<div className="space-y-2 pt-1 text-xs text-[--muted]"><div className="flex flex-wrap gap-1">{(media.genres||[]).slice(0,3).map(genre=><span key={genre} className="rounded-full border px-2 py-0.5">{genre}</span>)}</div>{media.description&&<p className="line-clamp-3 leading-relaxed">{String(media.description).replace(/<[^>]*>/g,"").replace(/&amp;/g,"&")}</p>}<BrowserListPicker media={media} status={listData?.status}/></div>}
                             {/*{hoveringTitle && <div>*/}
                             {/*    <p*/}
                             {/*        data-media-entry-card-hover-popup-title-section-year-season*/}
@@ -400,7 +405,7 @@ export function MediaEntryCard<T extends "anime" | "manga">(props: MediaEntryCar
                             {(type === "anime" && !!libraryData) &&
                                 <ToggleLockFilesButton mediaId={media.id} allFilesLocked={libraryData.allFilesLocked} />}
 
-                            {!hideAnilistEntryEditButton && <AnilistMediaEntryModal listData={listData} media={media} type={type} forceModal />}
+                            {!hideAnilistEntryEditButton && !(type==="anime"&&serverStatus?.os==="browser") && <AnilistMediaEntryModal listData={listData} media={media} type={type} forceModal />}
 
                             {withAudienceScore &&
                                 <MediaEntryAudienceScore
