@@ -108,6 +108,7 @@
       ...(payload ? { body: JSON.stringify(payload) } : {})
     });
     const output = await response.json();
+    if (paired && response.status === 401 && response.headers?.get?.("X-AniDash-Paired-Session") === "ended") { paired=false;clear();if(typeof location.replace==="function")location.replace("/settings?tab=profile"); }
     if (!response.ok) throw new Error(output.error || "MyAnimeList API unavailable");
     return output;
   }
@@ -142,7 +143,7 @@
   const currentUser = () => clone(viewer);
   const authenticated = () => Boolean(viewer && (paired || readSession()?.access_token));
   const configured = () => Boolean(config?.enabled);
-  const logout = async () => {if(paired){const r=await fetch("/api/device-pair/logout",{method:"POST"});if(!r.ok)throw Error("Sign-out failed");paired=false}clear()};
+  const logout = async () => {if(paired){const r=await fetch("/api/device-pair/logout",{method:"POST"});if(!r.ok)throw Error("Sign-out failed");paired=false;window.AniDashAccount?.stopPairedHeartbeat?.()}clear()};
   window.AniDashMal = {
     configuration, captureRedirect, beginLogin, init, currentUser, authenticated, configured,
     setHandler, list, updateProgress, getEntry, setStatus, deleteEntry, isPaired:()=>paired, logout

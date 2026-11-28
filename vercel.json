@@ -291,10 +291,23 @@
       "**": false,
       "main": true,
       "migration/seanime-react-browser": true,
-      "feature/device-pairing": true
+      "feature/device-pairing": true,
+      "feature/paired-device-management": true
     }
   },
   "rewrites": [
+    {
+      "source": "/api/device-pair/devices/:deviceId",
+      "destination": "/api/auth-config?pair=device-revoke&deviceId=:deviceId"
+    },
+    {
+      "source": "/api/device-pair/devices",
+      "destination": "/api/auth-config?pair=devices"
+    },
+    {
+      "source": "/api/device-pair/management",
+      "destination": "/api/auth-config?pair=management"
+    },
     {
       "source": "/api/device-pair/create",
       "destination": "/api/auth-config?pair=create"

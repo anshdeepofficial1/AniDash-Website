@@ -1,7 +1,7 @@
 import { endpoint } from "../server/device-pair.js";
 // This function also hosts the device-pairing protocol: Vercel Hobby allows only 12 functions per deployment.
 // vercel.json rewrites /api/device-pair/<action> to /api/auth-config?pair=<action>, so public URLs are unchanged.
-const PAIR = Object.fromEntries(["create", "session", "approve", "status", "account", "anilist", "logout"].map(a => [a, endpoint(a)]));
+const PAIR = Object.fromEntries(["create", "session", "approve", "status", "account", "anilist", "logout", "devices", "device-revoke", "management"].map(a => [a, endpoint(a)]));
 
 // AniList client IDs are public. Never return an OAuth client secret.
 export default function handler(req, res) {

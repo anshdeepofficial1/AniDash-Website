@@ -77,6 +77,33 @@
     backupWrite(null);
     inform();
   }
+  // Only monitor browser sessions established through pairing; direct OAuth is unchanged.
+  let pairedHeartbeat = null, heartbeatBusy = false, heartbeatCheck = null;
+  function stopPairedHeartbeat() {
+    if (pairedHeartbeat !== null) { clearInterval(pairedHeartbeat); pairedHeartbeat = null; }
+    if (heartbeatCheck) { window.removeEventListener("focus",heartbeatCheck); document.removeEventListener("visibilitychange",heartbeatCheck); heartbeatCheck=null; }
+  }
+  function pairedSessionEnded() {
+    stopPairedHeartbeat();
+    paired = false; clearToken();
+    // Reloading clears both tracker clients and takes the browser to the login controls.
+    if (typeof location.replace === "function") location.replace("/settings?tab=profile");
+  }
+  function startPairedHeartbeat() {
+    if (pairedHeartbeat !== null || typeof document === "undefined" || typeof window.setInterval !== "function") return;
+    const check = async () => {
+      if (pairedHeartbeat === null || heartbeatBusy || document.visibilityState === "hidden") return;
+      heartbeatBusy = true;
+      try {
+        const r = await fetch("/api/device-pair/account", {cache:"no-store"});
+        if (r.status === 401) pairedSessionEnded();
+      } catch (_) {} finally { heartbeatBusy = false; }
+    };
+    heartbeatCheck = check;
+    pairedHeartbeat = window.setInterval(check, 300000);
+    window.addEventListener("focus", check);
+    document.addEventListener("visibilitychange", check);
+  }
   function redirectParams() {
     const hash = String(location.hash || "");
     if (!/^#(?:\/?|\?)access_token=/.test(hash)) return null;
@@ -128,6 +155,7 @@
       ...(typeof AbortSignal !== "undefined" && AbortSignal.timeout ? {signal:AbortSignal.timeout(12000)} : {})
     });
     const body = await response.json();
+    if (paired && response.status === 401 && response.headers?.get?.("X-AniDash-Paired-Session") === "ended") pairedSessionEnded();
     if (response.status === 401 || /invalid token/i.test(body?.errors?.[0]?.message || "")) {
       const err = new Error("Your AniList session expired. Please sign in again.");
       err.authRejected = true;
@@ -162,7 +190,7 @@
     return false;
   }
   async function initAccount() {
-    try { const r = await fetch("/api/device-pair/account", {cache:"no-store"}); if (r.ok) { const a = await r.json(); if (a.success) { paired = !!a.accounts?.anilist?.id; token = null; viewer = a.accounts?.anilist || null; try { localStorage.removeItem(TOKEN_KEY); localStorage.removeItem(VIEWER_KEY); } catch (_) {} await backupWrite(null); inform(); return copy(viewer); } } } catch (_) {}
+    try { const r = await fetch("/api/device-pair/account", {cache:"no-store"}); if (r.status === 401 && r.headers?.get?.("X-AniDash-Paired-Session") === "ended") { pairedSessionEnded(); return null; } if (r.ok) { const a = await r.json(); if (a.success) { startPairedHeartbeat(); paired = !!a.accounts?.anilist?.id; token = null; viewer = a.accounts?.anilist || null; try { localStorage.removeItem(TOKEN_KEY); localStorage.removeItem(VIEWER_KEY); } catch (_) {} await backupWrite(null); inform(); return copy(viewer); } } } catch (_) {}
     if (!token) {
       try { token = localStorage.getItem(TOKEN_KEY); } catch (_) {}
     }
@@ -204,7 +232,7 @@
     });
     location.assign("https://anilist.co/api/v2/oauth/authorize?" + params.toString());
   }
-  async function logout() { if (paired) { const r = await fetch("/api/device-pair/logout", {method:"POST"}); if (!r.ok) throw Error("Sign-out failed"); paired = false; } clearToken(); }
+  async function logout() { if (paired) { const r = await fetch("/api/device-pair/logout", {method:"POST"}); if (!r.ok) throw Error("Sign-out failed"); paired = false; stopPairedHeartbeat(); } clearToken(); }
   function currentUser() { return copy(viewer); }
   function configured() { return config?.enabled === true; }
   function authenticated() { return !!viewer && (!!token || paired); }
@@ -415,7 +443,7 @@
   }
 
   window.AniDashAccount = {
-    captureRedirect, setHandler, settings, init, beginLogin, logout,
+    captureRedirect, setHandler, settings, init, beginLogin, logout, stopPairedHeartbeat,
     currentUser, configured, authenticated, list, listManga, favorites, isFavorite, toggleFavorite,
     parseWatchNotes, formatWatchNotes, resumeFromEntry, syncPosition, setStatus, saveManga,
     getEntry, saveToList, deletePlanning, deleteEntry
