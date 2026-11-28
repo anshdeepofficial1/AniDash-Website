@@ -1,3 +1,4 @@
+import { RankedShelf } from "@/browser/ranked-shelf"
 import { BrowserContinueWatching } from "@/browser/continue-watching"
 import { AL_ListRecentAnime_Page_AiringSchedules, Anime_ScheduleItem, Models_HomeItem } from "@/api/generated/types"
 import { useAnilistListAnime, useAnilistListRecentAiringAnime } from "@/api/hooks/anilist.hooks"
@@ -887,6 +888,7 @@ function AnimeCarousel(props: { libraryCollectionProps: HandleLibraryCollectionP
     return (
         <PageWrapper className="space-y-0 px-4" ref={ref}>
             <h2>{options?.name || "Anime Carousel"}</h2>
+            {options?.sorting==="TRENDING_DESC"&&<RankedShelf label="Trending" items={(data?.Page?.media?.filter(Boolean)||[]).map(media=>({media}))}/>}
             {(!isLoading && !data && isInView) ? <InvalidHomeItem item={item} /> : <Carousel
                 className="w-full max-w-full"
                 gap="xl"

@@ -1,3 +1,5 @@
+import { BrowserListPicker } from "@/browser/custom-lists"
+import { useServerStatus } from "@/app/(main)/_hooks/use-server-status"
 import { AL_BaseAnime, AL_BaseManga, AL_MediaStatus, Anime_EntryListData, Manga_EntryListData, Nullish } from "@/api/generated/types"
 import { TRANSPARENT_SIDEBAR_BANNER_IMG_STYLE } from "@/app/(main)/_features/custom-ui/styles"
 import { AnilistMediaEntryModal } from "@/app/(main)/_features/media/_containers/anilist-media-entry-modal"
@@ -316,6 +318,7 @@ type MediaPageHeaderEntryDetailsProps = {
 
 export function MediaPageHeaderEntryDetails(props: MediaPageHeaderEntryDetailsProps) {
 
+    const webStatus=useServerStatus()
     const {
         children,
         coverImage,
@@ -420,7 +423,7 @@ export function MediaPageHeaderEntryDetails(props: MediaPageHeaderEntryDetailsPr
                                 episodes={progressTotal}
                             />
 
-                            <AnilistMediaEntryModal listData={listData} media={media} type={type} />
+                            {webStatus?.os==="browser"&&type==="anime"?<div className="min-w-[170px]"><BrowserListPicker media={media} status={listData?.status}/></div>:<AnilistMediaEntryModal listData={listData} media={media} type={type} />}
 
                             {(listData?.status || listData?.repeat) &&
                                 <div

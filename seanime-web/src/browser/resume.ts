@@ -32,3 +32,14 @@ export function syncPlayback(m:any,episode:number,position:number,duration:numbe
  pendingSync.set(id,task)
  return task
 }
+
+/** Resolve the same episode used by Continue Watching, from local and loaded tracker state. */
+export function cardResume(m:any, progress=0, status?:string){
+ const a=account()
+ const remote=a?.authenticated?.()?remoteResume(a.getEntry?.(m.id)):null
+ const local=localResume(m)
+ const best=chooseResume(local,remote)
+ if(best)return best
+ if(["CURRENT","PAUSED","REPEATING"].includes(status||"")&&(!released(m)||progress<released(m)))return {episode:Math.max(1,progress+1),seconds:0,duration:0,updatedAt:0,media:m,cloud:false}
+ return null
+}
