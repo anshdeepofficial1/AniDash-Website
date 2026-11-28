@@ -1,4 +1,3 @@
-import { RankedShelf } from "@/browser/ranked-shelf"
 import { AL_BaseAnime, AL_BaseManga } from "@/api/generated/types"
 import { MediaEntryCard } from "@/app/(main)/_features/media/_components/media-entry-card"
 import { MediaEntryCardSkeleton } from "@/app/(main)/_features/media/_components/media-entry-card-skeleton"
@@ -103,7 +102,6 @@ export function DiscoverTrending() {
             autoScroll
         >
             <GenreSelector />
-            <RankedShelf label="Trending" items={(data?.Page?.media?.filter(Boolean)||[]).map(media=>({media}))}/>
             {/*<CarouselMasks />*/}
             <CarouselDotButtons />
             <CarouselContent className="px-6">

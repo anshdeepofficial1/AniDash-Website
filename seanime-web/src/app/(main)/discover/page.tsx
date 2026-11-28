@@ -1,3 +1,4 @@
+import { RankedSection, SectionArrow } from "@/browser/ranked-shelf"
 import { PluginWebviewSlot } from "@/app/(main)/_features/plugin/webview/plugin-webviews"
 import { useServerStatus } from "@/app/(main)/_hooks/use-server-status"
 import { DiscoverPageHeader } from "@/app/(main)/discover/_components/discover-page-header"
@@ -33,6 +34,8 @@ export default function Page() {
         }
     }, [searchParams])
 
+    const section=searchParams.get("section")
+    if(section==="trending"||section==="recent")return <RankedSection section={section}/>
     return (
         <>
             <DiscoverPageHeader />
@@ -107,7 +110,7 @@ export default function Page() {
                         data-discover-page-anime-container
                     >
                         <div className="space-y-2 z-[5] relative" data-discover-page-anime-trending-container>
-                            <h2>Trending Right Now</h2>
+                            <div className="flex items-center gap-2"><h2>Trending Right Now</h2><SectionArrow section="trending"/></div>
                             <DiscoverTrending />
                         </div>
                         <RecentReleases />

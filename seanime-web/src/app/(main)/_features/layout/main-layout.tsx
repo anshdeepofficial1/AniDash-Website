@@ -51,6 +51,8 @@ const NativePlayerLazyWrapper = React.lazy(() => import("@/app/(main)/_features/
 export const MainLayout = ({ children }: { children: React.ReactNode }) => {
     useAnimeLibraryCollectionLoader()
     useAnimeCollectionLoader()
+    const path=usePathname()
+    React.useLayoutEffect(()=>{if(path!=="/entry"&&!path.startsWith("/manga/entry")&&!path.startsWith("/watch/"))document.title="AniDash Go"},[path])
     return (
         <>
             <MediaPreviewModal />

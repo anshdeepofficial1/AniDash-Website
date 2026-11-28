@@ -403,27 +403,10 @@ function SidebarNavigation({ isCollapsed, containerRef }: { isCollapsed: boolean
 
     return (
         <div>
-            <div
-                className={cn(
-                    "mb-4 p-4 pb-0 flex justify-center w-full",
-                    __isDesktop__ && "mt-2",
-                )}
-            >
-                <img
-                    src="/seanime-logo.png"
-                    alt="AniDash"
-                    data-anidash-original-logo
-                    className="w-10 h-10 object-contain transition-all duration-300"
-                />
-                {/* The cropped asset is produced by package-browser after Rsbuild.
-                    Use a runtime img URL rather than a CSS loader import. */}
-                <img
-                    src="/anidash-watermark.png"
-                    alt="AniDash"
-                    data-anidash-tablet-logo
-                    className="hidden w-12 h-9 object-contain"
-                    loading="lazy"
-                />
+            <div className="mb-4 flex w-full justify-center px-3 pt-4">
+                <button type="button" aria-label="AniDash Go — Home" title="Home" onClick={()=>{ctx.setOpen(false);router.push("/")}} className="grid h-12 w-full cursor-pointer place-items-center rounded-lg focus-visible:ring-2 focus-visible:ring-brand-500">
+                    <img src="/anidash-watermark.png" alt="AniDash Go" className="h-10 w-12 object-contain" />
+                </button>
             </div>
             <VerticalMenu
                 className="px-4"

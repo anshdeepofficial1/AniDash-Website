@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query"
 import { useRouter } from "@/lib/navigation"
 import { useServerStatus } from "@/app/(main)/_hooks/use-server-status"
 import { browserContinueWatching } from "./resume"
-import { LuPlay, LuX } from "react-icons/lu"
+import { LuPlay, LuX, LuChevronLeft, LuChevronRight } from "react-icons/lu"
 import { SeaContextMenu } from "@/app/(main)/_features/context-menu/sea-context-menu"
 import { BrowserAnimeMenuItems } from "@/app/(main)/_features/media/_components/media-card-menu"
 import { ContextMenuTrigger } from "@/components/ui/context-menu"
@@ -72,6 +72,9 @@ function ContinueWatchingCard({ resume, onRemove }: { resume: any, onRemove: () 
   )
 }
 export function BrowserContinueWatching() {
+  const rail=React.useRef<HTMLDivElement>(null)
+  const [edges,setEdges]=React.useState({left:false,right:false})
+  const updateEdges=React.useCallback(()=>{const el=rail.current;if(el)setEdges({left:el.scrollLeft>2,right:el.scrollLeft+el.clientWidth<el.scrollWidth-2})},[])
   const status = useServerStatus()
   const [revision, setRevision] = React.useState(0)
   const userId = status?.user?.viewer?.id || 0
@@ -82,11 +85,13 @@ export function BrowserContinueWatching() {
     events.forEach(event => window.addEventListener(event, refresh))
     return () => events.forEach(event => window.removeEventListener(event, refresh))
   }, [])
+  React.useEffect(()=>{const el=rail.current;if(!el)return;updateEdges();const observer=new ResizeObserver(updateEdges);observer.observe(el);el.addEventListener("scroll",updateEdges,{passive:true});return()=>{observer.disconnect();el.removeEventListener("scroll",updateEdges)}},[q.data,updateEdges])
+  const move=(direction:number)=>{const el=rail.current;if(el)el.scrollBy({left:direction*Math.max(220,el.clientWidth*.8),behavior:"smooth"})}
   if (q.isPending) return <section className="relative z-[5] px-4 py-5"><h2 className="text-xl font-semibold">Continue Watching</h2><p className="text-sm text-[--muted]">Loading watch progress…</p></section>
   if (q.isError) return <section className="relative z-[5] px-4 py-5"><h2>Continue Watching</h2><p>Could not sync your watch list. <button onClick={() => q.refetch()} className="underline">Retry</button></p></section>
   if (!q.data?.length) return null
   return <section className="relative z-[5] px-4 sm:px-6 py-5 space-y-3" data-anidash-continue-watching>
     <div className="flex items-center justify-between"><h2 className="text-xl font-semibold">Continue Watching</h2><button className="text-xs text-[--muted] underline" onClick={() => q.refetch()}>Refresh</button></div>
-    <div className="flex overflow-x-auto gap-3 pb-2">{q.data.map(r => <ContinueWatchingCard key={r.media.id + ":" + r.episode} resume={r} onRemove={() => setRevision(v => v + 1)} />)}</div>
+    <div className="relative"><div ref={rail} className="flex overflow-x-auto gap-3 pb-2">{q.data.map(r => <ContinueWatchingCard key={r.media.id + ":" + r.episode} resume={r} onRemove={() => setRevision(v => v + 1)} />)}</div>{edges.left&&<button type="button" aria-label="Scroll left" onClick={()=>move(-1)} className="absolute left-1 top-1/2 -translate-y-1/2 z-20 grid size-10 place-items-center rounded-full bg-black/80 text-white"><LuChevronLeft/></button>}{edges.right&&<button type="button" aria-label="Scroll right" onClick={()=>move(1)} className="absolute right-1 top-1/2 -translate-y-1/2 z-20 grid size-10 place-items-center rounded-full bg-black/80 text-white"><LuChevronRight/></button>}</div>
   </section>
 }
