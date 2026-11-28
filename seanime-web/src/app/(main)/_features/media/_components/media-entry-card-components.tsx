@@ -1,3 +1,4 @@
+import { createPortal } from "react-dom"
 import { LuVolume2, LuVolumeX } from "react-icons/lu"
 import { AL_BaseManga_Title } from "@/api/generated/types"
 import { AL_BaseAnime_Title } from "@/api/generated/types"
@@ -171,83 +172,32 @@ type MediaEntryCardHoverPopupProps = {
 } & React.HTMLAttributes<HTMLDivElement>
 
 export const MediaEntryCardHoverPopup = React.memo((props: MediaEntryCardHoverPopupProps) => {
-
-    const {
-        children,
-        className,
-        coverImage,
-        shouldRenderPopup,
-        ...rest
-    } = props
-
-    const ts = useThemeSettings()
-    // const markBorderRenderingArtifacts = useAtomValue(__ui_fixBorderRenderingArtifacts)
-    const markBorderRenderingArtifacts = true
-
-    return (
-        <div
-            data-media-entry-card-hover-popup
-            data-state={shouldRenderPopup ? "open" : "closed"}
-            className={cn(
-                "group/media-entry-card-popup",
-                !ts.enableMediaCardBlurredBackground ? "bg-[--media-card-popup-background]" : "bg-gray-950/90 backdrop-blur-sm",
-                "absolute z-[15] opacity-0 scale-100 border border-[rgb(255_255_255_/_5%)] duration-150",
-                "group-hover/media-entry-card:opacity-100 group-hover/media-entry-card:scale-100",
-                "group-focus-visible/media-entry-card:opacity-100 group-focus-visible/media-entry-card:scale-100",
-                "focus-visible:opacity-100 focus-visible:scale-100",
-                "min-h-full w-[118%] max-w-[360px] -top-[5%] -left-[9%] rounded-xl shadow-2xl transition ease-in-out",
-                "transform-gpu will-change-[opacity,transform] [contain:layout_paint_style]",
-                "focus-visible:ring-2 ring-brand-400 focus-visible:outline-0",
-                "hidden lg:block", // Hide on small screens
-                markBorderRenderingArtifacts && "ring-1 ring-white/10",
-            )}
-            {...rest}
-        >
-            {/*<GlowingEffect*/}
-            {/*    spread={50}*/}
-            {/*    glow={true}*/}
-            {/*    disabled={false}*/}
-            {/*    proximity={100}*/}
-            {/*    inactiveZone={0.01}*/}
-            {/*    // movementDuration={4}*/}
-            {/*    className="opacity-15"*/}
-            {/*/>*/}
-            {/*{(ts.enableMediaCardBlurredBackground && !!coverImage) &&*/}
-            {/*    <div*/}
-            {/*        data-media-entry-card-hover-popup-image-container*/}
-            {/*        className="absolute top-0 left-0 w-full h-full rounded-[--radius] overflow-hidden"*/}
-            {/*    >*/}
-            {/*        <SeaImage*/}
-            {/*            data-media-entry-card-hover-popup-image*/}
-            {/*            src={getImageUrl(coverImage || "")}*/}
-            {/*            alt={"cover image"}*/}
-            {/*            fill*/}
-            {/*            placeholder={imageShimmer(700, 475)}*/}
-            {/*            quality={100}*/}
-            {/*            sizes="20rem"*/}
-            {/*            className="object-cover object-center transition opacity-20"*/}
-            {/*        />*/}
-
-            {/*        <div*/}
-            {/*            data-media-entry-card-hover-popup-image-blur-overlay*/}
-            {/*            className="absolute top-0 w-full h-full backdrop-blur-xl z-[0]"*/}
-            {/*        ></div>*/}
-            {/*    </div>}*/}
-
-            {shouldRenderPopup && (
-                <>
-                    {ts.enableMediaCardBlurredBackground && <div
-                        data-media-entry-card-hover-popup-image-blur-gradient
-                        className="w-full absolute top-0 h-[50%] opacity-60 bg-gradient-to-b from-30% from-[--background] to-transparent z-[2] rounded-[--radius]"
-                    />}
-
-                    <div data-media-entry-card-hover-popup-content className="p-3 min-h-full w-full flex flex-col gap-3 relative z-[2]">
-                        {children}
-                    </div>
-                </>
-            )}
-        </div>
-    )
+ const {children,className,coverImage,shouldRenderPopup,...rest}=props
+ const anchor=React.useRef<HTMLSpanElement>(null)
+ const panel=React.useRef<HTMLDivElement>(null)
+ const [position,setPosition]=React.useState<{left:number;top:number;width:number;maxHeight:number}|null>(null)
+ React.useLayoutEffect(()=>{
+  if(!shouldRenderPopup||!window.matchMedia("(min-width: 1024px) and (hover: hover)").matches){setPosition(null);return}
+  function place(){
+   const card=anchor.current?.closest("[data-media-entry-card-container]")||anchor.current?.parentElement
+   if(!card)return
+   const rect=card.getBoundingClientRect(), margin=12, maxHeight=Math.max(200,window.innerHeight-2*margin)
+   const width=Math.min(Math.max(rect.width+24,290),350,window.innerWidth-2*margin)
+   const height=Math.min(panel.current?.scrollHeight||430,maxHeight)
+   setPosition({left:Math.max(margin,Math.min(rect.left+(rect.width-width)/2,window.innerWidth-width-margin)),top:Math.max(margin,Math.min(rect.top,window.innerHeight-height-margin)),width,maxHeight})
+  }
+  place()
+  const observer=new ResizeObserver(place)
+  if(anchor.current?.parentElement)observer.observe(anchor.current.parentElement)
+  window.addEventListener("resize",place)
+  window.addEventListener("scroll",place,true)
+  return()=>{observer.disconnect();window.removeEventListener("resize",place);window.removeEventListener("scroll",place,true)}
+ },[shouldRenderPopup])
+ React.useLayoutEffect(()=>{if(!position||!panel.current)return;const rect=panel.current.getBoundingClientRect();if(rect.bottom>window.innerHeight-12)setPosition(p=>p?{...p,top:Math.max(12,window.innerHeight-rect.height-12)}:p)},[position])
+ return <><span ref={anchor} aria-hidden="true" className="pointer-events-none absolute inset-0"/>{shouldRenderPopup&&position&&createPortal(
+  <div {...rest} ref={panel} data-media-entry-card-hover-popup data-state="open" style={position} className={cn("fixed z-[1000] rounded-xl border border-white/15 bg-[--media-card-popup-background] shadow-2xl overflow-y-auto overscroll-contain text-[--foreground] group/media-entry-card-popup",className)}>
+   <div data-media-entry-card-hover-popup-content className="flex w-full flex-col gap-2 p-3">{children}</div>
+  </div>,document.body)}</>
 })
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -628,7 +578,13 @@ export const MediaEntryCardHoverPopupBanner = memo(({
         setTrailerEnabled(!!trailerId && !disableAnimeCardTrailers && showTrailer)
     }, [!!trailerId, !disableAnimeCardTrailers, showTrailer])
 
-    React.useEffect(()=>{if(!actionPopupHover){setMuted(true);setTrailerLoaded(false)}},[actionPopupHover,trailerId])
+    const [trailerReady,setTrailerReady]=React.useState(false)
+    React.useEffect(()=>{
+        setTrailerReady(false);setMuted(true);setTrailerLoaded(false)
+        if(!actionPopupHover||!trailerEnabled)return
+        const timer=window.setTimeout(()=>setTrailerReady(true),5000)
+        return()=>window.clearTimeout(timer)
+    },[actionPopupHover,trailerEnabled,trailerId])
     function toggleSound(){const next=!muted;iframeRef.current?.contentWindow?.postMessage(JSON.stringify({event:"command",func:next?"mute":"unMute",args:[]}),"https://www.youtube-nocookie.com");setMuted(next)}
     return <div className="relative"><SeaLink
         tabIndex={-1}
@@ -698,11 +654,11 @@ export const MediaEntryCardHoverPopupBanner = memo(({
                 />
             </div>
 
-            {(trailerEnabled && actionPopupHover) && <div
+            {(trailerEnabled && actionPopupHover && trailerReady) && <div
                 data-media-entry-card-hover-popup-banner-trailer-container
                 className={cn(
                     "absolute w-full h-full overflow-hidden rounded-[--radius]",
-                    !trailerLoaded && "hidden",
+                    !trailerLoaded && "opacity-0 pointer-events-none",
                 )}
             >
                 {__isElectronDesktop__ && <ElectronYoutubeEmbed
@@ -738,5 +694,5 @@ export const MediaEntryCardHoverPopupBanner = memo(({
                 )}
             />}
         </div>
-    </SeaLink>{!__isElectronDesktop__&&trailerEnabled&&actionPopupHover&&trailerLoaded&&<button type="button" aria-label={muted?"Unmute trailer":"Mute trailer"} title={muted?"Unmute trailer":"Mute trailer"} onClick={e=>{e.preventDefault();e.stopPropagation();toggleSound()}} className="absolute right-2 top-10 z-20 grid size-8 place-items-center rounded-full bg-black/75 text-white">{muted?<LuVolumeX/>:<LuVolume2/>}</button>}</div>
+    </SeaLink>{!__isElectronDesktop__&&trailerEnabled&&actionPopupHover&&trailerReady&&trailerLoaded&&<button type="button" aria-label={muted?"Unmute trailer":"Mute trailer"} title={muted?"Unmute trailer":"Mute trailer"} onClick={e=>{e.preventDefault();e.stopPropagation();toggleSound()}} className="absolute right-2 top-10 z-20 grid size-8 place-items-center rounded-full bg-black/75 text-white">{muted?<LuVolumeX/>:<LuVolume2/>}</button>}</div>
 })
