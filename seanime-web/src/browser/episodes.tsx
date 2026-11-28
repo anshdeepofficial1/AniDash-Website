@@ -536,7 +536,7 @@ export function BrowserEpisodes({ entry, watchEpisode }: { entry: Anime_Entry; w
       if (live) setMetadata(prev => ({ ...prev, ...Object.fromEntries(items.map(x => [x.number, x])) }))
     }
     for (const p of ids) {
-      void loadEpisodePage(m.id, m.idMal || 0, p, watchMode, metaRevision > 0).then(merge).catch(() => {
+      void loadEpisodePage(m.id, m.idMal || 0, p, metaRevision === 0, metaRevision > 0).then(merge).catch(() => {
         if (live && !cachedEpisodePage(m.id, p)?.length) setMetaError(true)
       })
     }
