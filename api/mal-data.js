@@ -9,7 +9,7 @@ export default async function handler(req, res) {
     return res.status(403).json({ error: "Cross-origin mutation denied" });
   }
   let auth = String(req.headers.authorization || "");
-  if (!auth) { try { const s=await browserSession(req); if(s?.accounts?.myanimelist?.accessToken) auth="Bearer "+s.accounts.myanimelist.accessToken; } catch (_) { return res.status(503).json({error:"Session unavailable"}); } }
+  if (!auth) { try { const s=await browserSession(req,res); if(s?.accounts?.myanimelist?.accessToken) auth="Bearer "+s.accounts.myanimelist.accessToken; } catch (_) { return res.status(503).json({error:"Session unavailable"}); } }
   if (req.method !== "GET" && !req.headers.authorization && req.headers.origin !== origin) return res.status(403).json({error:"Cross-origin mutation denied"});
   if (!/^Bearer [a-zA-Z0-9._~+\/-]{20,4096}=?$/.test(auth)) {
     return res.status(401).json({ error: "MyAnimeList login required" });
