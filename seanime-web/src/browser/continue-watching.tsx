@@ -1,3 +1,4 @@
+import { cachedEpisodePage, loadEpisodePage } from "./episode-metadata-cache"
 import React from "react"
 import { useQuery } from "@tanstack/react-query"
 import { useRouter } from "@/lib/navigation"
@@ -10,35 +11,8 @@ import { ContextMenuTrigger } from "@/components/ui/context-menu"
 import { hideFromContinueWatching } from "./card-actions"
 import { toast } from "sonner"
 
-type EpisodeArtwork = { number: number; title?: string; image?: string | null }
-const metadataPrefix = "anidash.episodes.v2:"
 const time = (s: number) => Math.floor(s / 60) + ":" + String(Math.floor(s % 60)).padStart(2, "0")
 const secureImage = (value: unknown): value is string => typeof value === "string" && /^https:\/\//i.test(value)
-function cachedPage(id: number, page: number): EpisodeArtwork[] | undefined {
-  try {
-    const cached = JSON.parse(localStorage.getItem(metadataPrefix + id + ":" + page) || "null")
-    if (cached && Date.now() - cached.at < 7 * 86400000 && Array.isArray(cached.episodes)) return cached.episodes
-  } catch {}
-}
-async function fetchEpisodePage(id: number, mal: number, page: number, signal: AbortSignal): Promise<EpisodeArtwork[]> {
-  const response = await fetch("/api/episode-metadata?anilist=" + id + "&id=" + mal + "&page=" + page + "&fast=1", { signal })
-  if (!response.ok) throw Error("Episode artwork unavailable")
-  const data = await response.json()
-  if (!Array.isArray(data.episodes)) throw Error("Invalid episode metadata")
-  const rows = data.episodes as EpisodeArtwork[]
-  const merged = new Map((cachedPage(id, page) || []).map(item => [item.number, item]))
-  for (const row of rows) {
-    const prior = merged.get(row.number)
-    merged.set(row.number, { ...prior, ...row, title: row.title || prior?.title, image: row.image || prior?.image })
-  }
-  const episodes = [...merged.values()]
-  if (episodes.length) try {
-    localStorage.setItem(metadataPrefix + id + ":" + page, JSON.stringify({ at: Date.now(), episodes }))
-    const keys = Object.keys(localStorage).filter(key => key.startsWith(metadataPrefix))
-    while (keys.length > 50) localStorage.removeItem(keys.shift()!)
-  } catch {}
-  return episodes
-}
 
 function ContinueWatchingCard({ resume, onRemove }: { resume: any, onRemove: () => void }) {
   const router = useRouter()
@@ -48,11 +22,11 @@ function ContinueWatchingCard({ resume, onRemove }: { resume: any, onRemove: () 
   const title = m.title?.english || m.title?.userPreferred || m.title?.romaji || "Anime"
   const q = useQuery({
     queryKey: ["anidash-episode-artwork", m.id, page],
-    queryFn: ({ signal }) => fetchEpisodePage(m.id, m.idMal || 0, page, signal),
+    queryFn: () => loadEpisodePage(m.id, m.idMal || 0, page),
     enabled: Number.isSafeInteger(episode) && page >= 1 && page <= 30,
-    initialData: () => cachedPage(m.id, page),
+    initialData: () => cachedEpisodePage(m.id, page),
     initialDataUpdatedAt: () => {
-      const rows = cachedPage(m.id, page)
+      const rows = cachedEpisodePage(m.id, page)
       return rows?.some(item => item.number === episode && secureImage(item.image)) ? Date.now() : 0
     },
     staleTime: 30 * 60 * 1000,
