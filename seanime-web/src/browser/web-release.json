@@ -1,8 +1,20 @@
 {
-  "version": "2.1.0",
+  "version": "2.2.0",
   "channel": "stable",
   "date": "2026-11-28",
   "releases": [
+    {
+      "version": "2.2.0",
+      "date": "2026-11-28",
+      "title": "Settings tabs, smarter discovery and playback handoff",
+      "changes": [
+        "Separate settings tabs, contextual two-second notices and expandable paired device details.",
+        "Automatic web update notices outside active playback, and a dedicated developer and sponsorship section.",
+        "Continue Watching episode links across anime cards, shared episode metadata prefetch and clearer view icons.",
+        "Expandable trending and daily release rankings, same-day deduplication, and selected cartoon franchise filters.",
+        "Larger trailer previews with sound controls and browser-local custom lists."
+      ]
+    },
     {
       "version": "2.1.0",
       "date": "2026-11-28",
