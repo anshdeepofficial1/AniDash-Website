@@ -100,13 +100,13 @@ function Devices(){
   <div className="flex flex-wrap items-center justify-between gap-2"><div><h3 className="text-lg font-semibold">Devices</h3><p className="text-sm text-[--muted]">Review active browser sessions and remove access when needed.</p></div><button type="button" className="rounded-lg border px-3 py-2 text-sm font-medium hover:bg-[--subtle]" disabled={loading} onClick={()=>void load()}>{loading?"Refreshing…":"Refresh"}</button></div>
   {error&&<p role="alert" className="text-sm text-red-400">{error}</p>}
   {devices?.length===0&&<p className="text-sm text-[--muted]">No active paired devices.</p>}
-  {devices?.map(d=><article key={d.id} className="rounded-lg border p-3 space-y-2">
-   <div className="flex flex-wrap items-center gap-2"><strong className="break-words">{d.name}</strong>{d.current&&<span className="rounded-full border px-2 py-0.5 text-xs">Current device</span>}</div>
+  {devices?.map(d=><details key={d.id} className="group rounded-lg border overflow-hidden">
+   <summary className="flex cursor-pointer list-none items-center gap-2 p-3 [&::-webkit-details-marker]:hidden"><strong className="flex-1 break-words">{d.name||[d.browser,d.os].filter(Boolean).join(" on ")}</strong>{d.current&&<span className="rounded-full border border-emerald-500/30 px-2 py-0.5 text-xs text-emerald-500">Current device</span>}<span aria-hidden="true" className="shrink-0 transition-transform group-open:rotate-180">⌄</span></summary><div className="border-t p-3 space-y-3">
    <p className="text-sm text-[--muted]">{d.browser} · {d.os}{d.location?" · "+d.location:""}</p>
    {d.approvedBy&&<p className="rounded-lg bg-[--subtle] px-3 py-2 text-sm">Connected from <strong>{d.approvedBy.name||"AniDash Android"}</strong>{d.approvedBy.androidVersion?" · Android "+d.approvedBy.androidVersion:""}{d.approvedBy.appVersion?" · AniDash "+d.approvedBy.appVersion:""}</p>}
    <dl className="grid gap-2 text-sm sm:grid-cols-2"><div><dt className="text-[--muted]">Connected</dt><dd>{new Date(d.pairedAt).toLocaleString()}</dd></div><div><dt className="text-[--muted]">Last active · {friendlyTime(d.lastActiveAt,now)}</dt><dd>{new Date(d.lastActiveAt).toLocaleString()}</dd></div><div><dt className="text-[--muted]">Session {Date.parse(d.sessionExpiresAt)<=now?"expired":"expires"}</dt><dd>{new Date(d.sessionExpiresAt).toLocaleString()}</dd></div></dl>
    <button type="button" disabled={pending!==null} className="rounded-lg border border-red-500/40 px-3 py-2 text-sm text-red-400 hover:bg-red-500/10" onClick={()=>setConfirm(d)}>{pending===d.id?"Revoking…":"Revoke"}</button>
-  </article>)}
+  </div></details>)}
   {confirm&&<div role="alertdialog" aria-label="Confirm device revocation" className="rounded-lg border p-3 space-y-3"><p>Revoke {confirm.name}? {confirm.current?"You will be signed out of this browser.":"This browser will lose access immediately."}</p><div className="flex flex-wrap gap-2"><button type="button" className="rounded-lg border px-3 py-2" onClick={()=>setConfirm(null)}>Cancel</button><button type="button" className="rounded-lg border border-red-500/40 px-3 py-2 text-red-400" onClick={()=>void revoke(confirm)}>Confirm revoke</button></div></div>}
  </section>
 }
