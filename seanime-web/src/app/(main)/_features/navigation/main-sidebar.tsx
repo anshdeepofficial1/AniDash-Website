@@ -1,3 +1,4 @@
+import { LuSearch } from "react-icons/lu"
 import { ModeSwitcher } from "@/browser/web-header"
 import { useRefreshAnimeCollection } from "@/api/hooks/anilist.hooks"
 import { useLogout } from "@/api/hooks/auth.hooks"
@@ -214,7 +215,7 @@ function SidebarNavigation({ isCollapsed, containerRef }: { isCollapsed: boolean
                 intent="alert-solid"
             >{missingEpisodeCount}</Badge> : undefined,
         },
-        ...serverStatus?.settings?.library?.enableManga ? [{
+        ...serverStatus?.settings?.library?.enableManga && serverStatus?.os!=="browser" ? [{
             id: "manga",
             iconType: LuBookOpen,
             name: "Manga",
@@ -414,7 +415,7 @@ function SidebarNavigation({ isCollapsed, containerRef }: { isCollapsed: boolean
                 itemChevronClass="hidden"
                 itemIconClass="transition-transform group-data-[state=open]/verticalMenu_parentItem:rotate-90"
                 items={[
-                    ...(serverStatus?.os==="browser"&&pathname.startsWith("/manga")?[{id:"manga-home",iconType:IoHomeOutline,name:"Manga Home",href:"/manga",isCurrent:pathname==="/manga"},{id:"manga-list",iconType:LuBookOpen,name:"My Manga",href:"/manga?view=library",isCurrent:false}]:displayedPinnedItems),
+                    ...(serverStatus?.os==="browser"&&pathname.startsWith("/manga")?[{id:"manga-home",iconType:IoHomeOutline,name:"Manga Home",href:"/manga",isCurrent:pathname==="/manga"},{id:"manga-discover",iconType:LuCompass,name:"Explore Manga",href:"/manga?view=discover",isCurrent:false},{id:"manga-search",iconType:LuSearch,name:"Search Manga",href:"/manga?view=search",isCurrent:false},{id:"manga-list",iconType:LuBookOpen,name:"My Manga",href:"/manga?view=library",isCurrent:false}]:displayedPinnedItems),
                     ...displayedPluginItems,
                     ...unpinnedMenuItems,
                     {
