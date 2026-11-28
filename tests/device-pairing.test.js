@@ -9,7 +9,7 @@ const origin="https://anidashgo.vercel.app";
 const token="server-only-"+randomBytes(30).toString("hex");
 function fakeResponse(){return {headers:{},statusCode:0,setHeader(k,v){this.headers[k]=v},status(n){this.statusCode=n;return this},json(x){this.data=x;return this}}}
 async function call(action,{method="GET",code,body,cookie="",ip="198.51.100.1",ua="Mozilla/5.0 (Windows NT 10.0) Chrome/142.0",authorization,deviceId,requestOrigin=origin}={}){const res=fakeResponse();await endpoint(action)({method,query:{code,deviceId},body,headers:{host:"anidashgo.vercel.app",...(requestOrigin?{origin:requestOrigin}:{}),...(authorization?{authorization}:{}),cookie,"x-vercel-forwarded-for":ip,"user-agent":ua}},res);return res}
-const approval=code=>({code,accounts:{anilist:{accessToken:token,userId:"123",username:"Example"}},sync:{schemaVersion:1,preferences:{nativeSource:"hianime",player:{preferredAudioLanguage:"dub"},downloads:{preferredQuality:"1080p"}}},client:{platform:"android"}});
+const approval=code=>({code,accounts:{anilist:{accessToken:token,userId:"123",username:"Example"}},sync:{schemaVersion:1,preferences:{nativeSource:"hianime",player:{preferredAudioLanguage:"dub"},downloads:{preferredQuality:"1080p"}}},client:{platform:"android",manufacturer:"Samsung",model:"Galaxy M36 5G",androidVersion:"16",sdkInt:36,appVersion:"3.3.10",buildNumber:"3031000"}});
 for (const [urlKey,tokenKey] of [["UPSTASH_REDIS_REST_URL","UPSTASH_REDIS_REST_TOKEN"],["KV_REST_API_URL","KV_REST_API_TOKEN"]]) test("five minute pairing, atomic redemption, server-only credentials, denial and rate limit ("+urlKey+")",async()=>{
  process.env.DEVICE_PAIR_ENCRYPTION_KEY=randomBytes(32).toString("base64");
  for(const k of ["UPSTASH_REDIS_REST_URL","UPSTASH_REDIS_REST_TOKEN","KV_REST_API_URL","KV_REST_API_TOKEN"])delete process.env[k];
@@ -100,6 +100,8 @@ test("paired device management: isolated identities, active time, revocation, to
   const list=await native("devices",a.management.token);
   assert.equal(list.statusCode,200);assert.equal(list.data.devices.length,2);
   assert.ok(list.data.devices.every(d=>!d.current&&/^[0-9a-f-]{36}$/.test(d.id)));
+  assert.equal(list.data.devices[0].approvedBy.name,"Samsung Galaxy M36 5G");
+  assert.equal(list.data.devices[0].approvedBy.appVersion,"3.3.10");
   assert.doesNotMatch(JSON.stringify(list.data),/server-only|accessToken|refreshToken|sessionHash|owner|198\.51\.100|deviceManagement/);
   const browser=await call("devices",{cookie:a.cookie});
   assert.equal(browser.statusCode,200);assert.equal(browser.data.devices.filter(d=>d.current).length,1);
@@ -121,6 +123,10 @@ test("paired device management: isolated identities, active time, revocation, to
   assert.equal(revoked.headers["X-AniDash-Paired-Session"],"ended");assert.match(revoked.headers["Set-Cookie"],/Max-Age=0/);
   assert.equal((await native("devices",a.management.token)).data.devices.length,1);
   assert.equal((await native("devices","f".repeat(64))).statusCode,401);
+  const claimed=await call("management",{method:"POST",requestOrigin:null,body:{accounts:{anilist:{accessToken:token,userId:"123"}},client:approval("unused").client}});
+  assert.equal(claimed.statusCode,200);
+  assert.match(claimed.data.deviceManagement.token,/^[0-9a-f]{64}$/);
+  assert.equal((await native("devices",claimed.data.deviceManagement.token)).statusCode,200);
   const rotated=await native("management",a.management.token,{method:"POST"});assert.equal(rotated.statusCode,200);
   assert.equal((await native("devices",a.management.token)).statusCode,401);
   assert.equal((await native("devices",rotated.data.deviceManagement.token)).statusCode,200);

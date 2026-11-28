@@ -21,6 +21,11 @@ export function deviceStore(redis, encryptionKey) {
     const token=randomBytes(32).toString("hex"), expiresAt=Date.now()+MANAGEMENT_TTL*1000;
     return {token,expiresAt:iso(expiresAt),key:managementKey(token),value:JSON.stringify({owner,expiresAt})};
   };
+  const issueManagement = async owner => {
+    const fresh=management(owner);
+    await redis("SET",fresh.key,fresh.value,"EX",MANAGEMENT_TTL);
+    return {token:fresh.token,expiresAt:fresh.expiresAt};
+  };
   const readManagement = async token => {
     if(typeof token!=="string"||!/^[0-9a-f]{64}$/.test(token))return null;
     const raw=await redis("GET",managementKey(token));
@@ -37,7 +42,8 @@ export function deviceStore(redis, encryptionKey) {
   const makeRecord = (owner,sessionKey,info,pairedAt,expiresAt) => ({
     id:randomUUID(),owner,sessionHash:sessionKey.split(":").pop(),
     name:info.name,browser:info.browser,os:info.os,pairedAt,lastActiveAt:Date.now(),
-    sessionExpiresAt:expiresAt,revokedAt:null
+    sessionExpiresAt:expiresAt,revokedAt:null,
+    ...(info.approvedBy?{approvedBy:info.approvedBy}:{})
   });
   const consume = async ({pairKey,sessionKey,binding,encrypted,owner,info,ttl}) => {
     const now=Date.now(), d=makeRecord(owner,sessionKey,info,now,now+ttl*1000);
@@ -54,11 +60,13 @@ export function deviceStore(redis, encryptionKey) {
     const raw=await redis("EVAL",LIST,1,index(owner),ns+"record:",Date.now(),owner);
     return (raw||[]).map(JSON.parse).map(d=>({
       id:d.id,name:d.name,browser:d.browser,os:d.os,pairedAt:iso(d.pairedAt),lastActiveAt:iso(d.lastActiveAt),
-      sessionExpiresAt:iso(d.sessionExpiresAt),current:d.id===currentId
+       sessionExpiresAt:iso(d.sessionExpiresAt),current:d.id===currentId,
+       ...(d.approvedBy?{approvedBy:d.approvedBy}:{})
     }));
   };
+  const attachApprover = (owner,approvedBy) => redis("EVAL",ATTACH_APPROVER,1,index(owner),ns+"record:",owner,JSON.stringify(approvedBy),Date.now());
   const revoke = (owner,id) => redis("EVAL",REVOKE,2,record(id),index(owner),owner,Date.now(),"anidash:session:",ns+"session:",RETENTION);
-  return {identity,management,readManagement,rotateManagement,revokeManagement,consume,active,list,revoke};
+  return {identity,management,issueManagement,readManagement,rotateManagement,revokeManagement,consume,active,list,attachApprover,revoke};
 }
 const CONSUME = [
   "local raw=redis.call('GET',KEYS[1]); if not raw then return 0 end",
@@ -80,6 +88,10 @@ const ACTIVE = [
 const LIST = [
   "redis.call('ZREMRANGEBYSCORE',KEYS[1],'-inf',ARGV[2]); local ids=redis.call('ZREVRANGE',KEYS[1],0,199); local out={}",
   "for _,id in ipairs(ids) do local raw=redis.call('GET',ARGV[1]..id); if raw then local d=cjson.decode(raw); if d.owner==ARGV[3] and d.revokedAt==cjson.null and d.sessionExpiresAt>tonumber(ARGV[2]) and redis.call('EXISTS','anidash:session:'..d.sessionHash)==1 then table.insert(out,raw) end else redis.call('ZREM',KEYS[1],id) end end; return out"
+].join('\n');
+const ATTACH_APPROVER = [
+  "local ids=redis.call('ZRANGE',KEYS[1],0,-1); local count=0",
+  "for _,id in ipairs(ids) do local key=ARGV[1]..id; local raw=redis.call('GET',key); if raw then local d=cjson.decode(raw); if d.owner==ARGV[2] and d.revokedAt==cjson.null and d.sessionExpiresAt>tonumber(ARGV[4]) then d.approvedBy=cjson.decode(ARGV[3]); redis.call('SET',key,cjson.encode(d),'KEEPTTL'); count=count+1 end end end; return count"
 ].join('\n');
 const REVOKE = [
   "local raw=redis.call('GET',KEYS[1]); if not raw then return 0 end; local d=cjson.decode(raw); if d.owner~=ARGV[1] then return 0 end",

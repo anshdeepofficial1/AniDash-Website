@@ -9,7 +9,7 @@ export function DevicePairing(){
   setBusy(true);setMessage("");setPair(null)
   try{
    const r=await fetch("/api/device-pair/create",{method:"POST",cache:"no-store"})
-   const p=await r.json();if(!r.ok)throw Error(p.error||"Unable to create pairing")
+   const p=await r.json() as Pair&{error?:string};if(!r.ok)throw Error(p.error||"Unable to create pairing")
    setPair(p);setLeft(300)
   }catch(e){setMessage((e as Error).message)}finally{setBusy(false)}
  }
@@ -28,7 +28,7 @@ export function DevicePairing(){
      setPair(null);setMessage("Device connected.")
      const account=await fetch("/api/device-pair/account",{cache:"no-store"})
      if(!account.ok){setMessage("Connection established, but account settings could not be loaded. Reload to continue.");return}
-     const a=await account.json(),p=a.sync?.preferences||{},player=p.player||{}
+     const a=await account.json() as {sync?:{preferences?:Record<string,any>}},p=a.sync?.preferences||{},player=p.player||{}
      if(["sub","dub","hindi"].includes(player.preferredAudioLanguage))setBrowserPreference("preferredAudio",player.preferredAudioLanguage)
      if(typeof player.autoEnableSubtitles==="boolean")setBrowserPreference("playerSubtitles",player.autoEnableSubtitles)
      if(player.defaultQuality)setBrowserPreference("pairedQuality",player.defaultQuality)
@@ -64,7 +64,8 @@ export function DevicePairing(){
  </div>
 }
 
-type PairedDevice = {id:string;name:string;browser:string;os:string;location?:string;pairedAt:string;lastActiveAt:string;sessionExpiresAt:string;current:boolean}
+type ApprovingDevice = {name?:string;manufacturer?:string;model?:string;androidVersion?:string;sdkInt?:number;appVersion?:string;buildNumber?:string}
+type PairedDevice = {id:string;name:string;browser:string;os:string;location?:string;pairedAt:string;lastActiveAt:string;sessionExpiresAt:string;current:boolean;approvedBy?:ApprovingDevice}
 function friendlyTime(iso:string,now:number){
  const minutes=Math.max(0,Math.floor((now-Date.parse(iso))/60000))
  return minutes<1?"Just now":minutes<60?minutes+" min ago":minutes<1440?Math.floor(minutes/60)+" hr ago":Math.floor(minutes/1440)+" days ago"
@@ -78,7 +79,7 @@ function Devices(){
    const r=await fetch("/api/device-pair/devices",{cache:"no-store"})
    if(r.status===401){setDevices(null);if(r.headers.get("X-AniDash-Paired-Session")==="ended")location.replace("/settings?tab=profile");return}
    if(!r.ok)throw Error("Unable to load connected devices. Try again.")
-   const body=await r.json();setDevices(Array.isArray(body.devices)?body.devices:[]);setNow(Date.now())
+   const body=await r.json() as {devices?:PairedDevice[]};setDevices(Array.isArray(body.devices)?body.devices:[]);setNow(Date.now())
   }catch(e){setError((e as Error).message)}finally{setLoading(false)}
  },[])
  React.useEffect(()=>{void load();const clock=window.setInterval(()=>setNow(Date.now()),60000);const refresh=window.setInterval(()=>{if(document.visibilityState==="visible")void load()},300000);return()=>{clearInterval(clock);clearInterval(refresh)}},[load])
@@ -99,6 +100,7 @@ function Devices(){
   {devices?.map(d=><article key={d.id} className="rounded-lg border p-3 space-y-2">
    <div className="flex flex-wrap items-center gap-2"><strong className="break-words">{d.name}</strong>{d.current&&<span className="rounded-full border px-2 py-0.5 text-xs">Current device</span>}</div>
    <p className="text-sm text-[--muted]">{d.browser} · {d.os}{d.location?" · "+d.location:""}</p>
+   {d.approvedBy&&<p className="rounded-lg bg-[--subtle] px-3 py-2 text-sm">Connected from <strong>{d.approvedBy.name||"AniDash Android"}</strong>{d.approvedBy.androidVersion?" · Android "+d.approvedBy.androidVersion:""}{d.approvedBy.appVersion?" · AniDash "+d.approvedBy.appVersion:""}</p>}
    <dl className="grid gap-2 text-sm sm:grid-cols-2"><div><dt className="text-[--muted]">Connected</dt><dd>{new Date(d.pairedAt).toLocaleString()}</dd></div><div><dt className="text-[--muted]">Last active · {friendlyTime(d.lastActiveAt,now)}</dt><dd>{new Date(d.lastActiveAt).toLocaleString()}</dd></div><div><dt className="text-[--muted]">Session {Date.parse(d.sessionExpiresAt)<=now?"expired":"expires"}</dt><dd>{new Date(d.sessionExpiresAt).toLocaleString()}</dd></div></dl>
    <button type="button" disabled={pending!==null} className="rounded-lg border border-red-500/40 px-3 py-2 text-sm text-red-400 hover:bg-red-500/10" onClick={()=>setConfirm(d)}>{pending===d.id?"Revoking…":"Revoke"}</button>
   </article>)}
